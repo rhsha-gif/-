@@ -1,0 +1,39 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.aorch/hooks/user-prompt-submit.mjs\"",
+            "timeout": 3,
+            "statusMessage": "Classifying adaptive orchestration policy"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.aorch/hooks/session-review.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Checking post-run reflection"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.aorch/hooks/session-review.mjs\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

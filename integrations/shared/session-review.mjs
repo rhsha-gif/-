@@ -1,0 +1,101 @@
+#!/usr/bin/env node
+import { readFile } from 'node:fs/promises';
+import { appendJournalRecord } from './journal.mjs';
+import path from 'node:path';
+
+if (process.env.AORCH_WORKER === '1' || process.env.AORCH_VERIFIER === '1') process.exit(0);
+
+async function readInput() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString('utf8').trim();
+  return raw ? JSON.parse(raw) : {};
+}
+
+async function readActiveRun(cwd) {
+  let stateRoot = path.resolve(cwd, '.aorch');
+  try {
+    const config = JSON.parse(await readFile(path.join(cwd, '.aorch/config.json'), 'utf8'));
+    if (typeof config.paths?.stateDir === 'string' && config.paths.stateDir.trim()) {
+      stateRoot = path.resolve(cwd, config.paths.stateDir);
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+
+  try {
+    const pointer = JSON.parse(await readFile(path.join(stateRoot, 'active-run.json'), 'utf8'));
+    if (typeof pointer.runPath !== 'string' || pointer.runPath.trim() === '') {
+      throw new Error('Active run pointer is invalid');
+    }
+    const runPath = path.resolve(pointer.runPath);
+    const relative = path.relative(stateRoot, runPath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('Active run pointer resolves outside the state root');
+    }
+    const run = JSON.parse(await readFile(runPath, 'utf8'));
+    return { ...run, path: runPath, stateRoot };
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+let input;
+try {
+  input = await readInput();
+} catch (error) {
+  process.stderr.write(`adaptive-orchestrator lifecycle hook input error: ${error.message}\n`);
+  process.exit(1);
+}
+
+const cwd = path.resolve(input.cwd ?? process.cwd());
+let run;
+try {
+  run = await readActiveRun(cwd);
+} catch (error) {
+  if (input.hook_event_name === 'Stop' && input.stop_hook_active !== true) {
+    process.stdout.write(JSON.stringify({
+      decision: 'block',
+      reason: `Adaptive-orchestrator state could not be verified: ${error.message}. Repair or explicitly close the run state before stopping.`
+    }));
+  } else {
+    process.stderr.write(`adaptive-orchestrator lifecycle state error: ${error.message}\n`);
+  }
+  process.exit(0);
+}
+
+if (!run) process.exit(0);
+
+if (input.hook_event_name === 'SessionEnd') {
+  if (run.reviewStatus !== 'complete') {
+    const logPath = path.join(run.stateRoot, 'learning/unreviewed-sessions.jsonl');
+    await appendJournalRecord(logPath, {
+      runId: run.id,
+      runPath: run.path,
+      status: run.status ?? null,
+      reviewStatus: run.reviewStatus ?? null,
+      sessionId: input.session_id ?? null,
+      reason: input.reason ?? 'unknown',
+      recordedAt: new Date().toISOString()
+    });
+  }
+  process.exit(0);
+}
+
+if (input.hook_event_name !== 'Stop' || input.stop_hook_active === true) process.exit(0);
+
+if (run.status === 'running') {
+  process.stdout.write(JSON.stringify({
+    decision: 'block',
+    reason: `Orchestration run ${run.id} is still running. Resume its remaining tasks, or explicitly finish it as completed, partial, blocked, failed, or cancelled before stopping.`
+  }));
+  process.exit(0);
+}
+
+if (run.reviewStatus === 'pending') {
+  process.stdout.write(JSON.stringify({
+    decision: 'block',
+    reason: `Invoke the post-run-reflection skill for orchestration run ${run.id}. Record verified errors, inefficiencies, and technical debt with aorch run --action reflect. Any harness, prompt, hook, skill, plugin, dependency, or unrelated debt change must remain a pending proposal until explicit user approval; do not apply it automatically.`
+  }));
+}

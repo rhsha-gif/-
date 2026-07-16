@@ -1,0 +1,57 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { runCommand, terminateWithEscalation } from '../src/executor.js';
+
+test('runs an argv-safe command and captures evidence', async () => {
+  const result = await runCommand({
+    command: process.execPath,
+    args: ['-e', 'process.stdout.write(process.env.AORCH_WORKER + ":ok")'],
+    env: { AORCH_WORKER: '1' },
+    stdin: null
+  });
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, '1:ok');
+  assert.equal(result.status, 'complete');
+});
+
+test('non-zero exits are reported as failed rather than hidden', async () => {
+  const result = await runCommand({
+    command: process.execPath,
+    args: ['-e', 'process.stderr.write("bad"); process.exit(7)'],
+    env: {},
+    stdin: null
+  });
+  assert.equal(result.exitCode, 7);
+  assert.equal(result.stderr, 'bad');
+  assert.equal(result.status, 'failed');
+});
+
+test('termination escalation sends SIGTERM and then SIGKILL after the grace period', () => {
+  const signals = [];
+  let scheduledDelay = null;
+  terminateWithEscalation(
+    { kill: (signal) => signals.push(signal) },
+    30,
+    (callback, delay) => {
+      scheduledDelay = delay;
+      callback();
+      return Symbol('timer');
+    }
+  );
+
+  assert.equal(scheduledDelay, 30);
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+});
+
+test('marks a timed-out worker failed and terminates it promptly', async () => {
+  const result = await runCommand({
+    command: process.execPath,
+    args: ['-e', 'process.on("SIGTERM", () => {}); setTimeout(() => process.exit(0), 600)'],
+    env: {},
+    stdin: null
+  }, { timeoutMs: 100, killGraceMs: 30 });
+  assert.equal(result.timedOut, true);
+  assert.equal(result.status, 'failed');
+  assert.ok(['SIGTERM', 'SIGKILL'].includes(result.signal));
+  assert.ok(result.durationMs < 500, `worker lived for ${result.durationMs}ms`);
+});

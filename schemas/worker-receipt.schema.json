@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "status": { "type": "string", "enum": ["complete", "partial", "blocked"] },
+    "summary": { "type": "string" },
+    "filesInspected": { "type": "array", "items": { "type": "string" } },
+    "filesChanged": { "type": "array", "items": { "type": "string" } },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" },
+          "exitCode": { "type": ["integer", "null"] },
+          "outcome": { "type": "string" }
+        },
+        "required": ["command", "exitCode", "outcome"],
+        "additionalProperties": false
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "criterion": { "type": "string" },
+          "status": { "type": "string", "enum": ["pass", "fail", "not-run"] },
+          "evidence": { "type": "string" }
+        },
+        "required": ["criterion", "status", "evidence"],
+        "additionalProperties": false
+      }
+    },
+    "unresolvedRisks": { "type": "array", "items": { "type": "string" } },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "required": ["status", "summary", "filesInspected", "filesChanged", "commands", "criteria", "unresolvedRisks", "confidence"],
+  "additionalProperties": false
+}

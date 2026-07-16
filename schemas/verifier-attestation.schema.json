@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schemaVersion", "verificationId", "taskId", "status", "issuedAt",
+    "isolation", "taskHash", "claimHash", "changeEvidence", "checks", "evidenceDigest"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "verificationId": { "type": "string" },
+    "taskId": { "type": "string" },
+    "runId": { "type": ["string", "null"] },
+    "status": { "enum": ["pass", "fail"] },
+    "issuedAt": { "type": "string" },
+    "isolation": { "type": "string" },
+    "taskHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "claimHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "changeEvidence": { "type": "object" },
+    "checks": { "type": "array", "items": { "type": "object" } },
+    "failure": { "type": "string" },
+    "evidenceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

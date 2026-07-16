@@ -1,0 +1,12 @@
+{
+  "runId": "example-run",
+  "outcome": "completed",
+  "summary": "The requested change was implemented and independently verified.",
+  "whatWorked": [
+    "The task boundary kept implementation and review independently verifiable."
+  ],
+  "errors": [],
+  "inefficiencies": [],
+  "technicalDebt": [],
+  "proposals": []
+}

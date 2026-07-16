@@ -1,0 +1,29 @@
+{
+  "name": "adaptive-orchestrator",
+  "version": "0.3.0",
+  "description": "Adaptive task decomposition and capability routing for Claude Code and Codex CLI",
+  "type": "module",
+  "bin": {
+    "aorch": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node scripts/check-syntax.mjs && node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "files": [
+    "src",
+    "scripts",
+    "config",
+    "schemas",
+    "integrations",
+    "examples",
+    "docs/DESIGN.md",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ]
+}

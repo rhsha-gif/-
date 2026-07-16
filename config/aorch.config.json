@@ -1,0 +1,523 @@
+{
+  "version": 1,
+  "routing": {
+    "qualityTolerance": 0.01,
+    "tokenTolerance": 0.08,
+    "observationHalfLifeDays": 30,
+    "priorWeight": 3,
+    "uncertaintyPenalty": 0.02,
+    "criticalMinimumSamples": 3,
+    "selectionPolicy": "task-specific-priority-order",
+    "latencyTolerance": 0.08,
+    "defaultPriorities": [
+      "quality",
+      "tokens",
+      "latency"
+    ]
+  },
+  "providers": [
+    {
+      "id": "anthropic",
+      "adapter": "claude",
+      "enabled": true,
+      "executable": "claude",
+      "trustTier": "trusted",
+      "adapterMaturity": "stable"
+    },
+    {
+      "id": "openai",
+      "adapter": "codex",
+      "enabled": true,
+      "executable": "codex",
+      "trustTier": "trusted",
+      "adapterMaturity": "stable"
+    }
+  ],
+  "models": [
+    {
+      "id": "claude-haiku-scout",
+      "provider": "anthropic",
+      "model": "haiku",
+      "enabled": true,
+      "roles": [
+        "executor",
+        "reviewer"
+      ],
+      "taskKinds": [
+        "exploration",
+        "research",
+        "log-analysis",
+        "documentation"
+      ],
+      "quality": {
+        "default": 0.76,
+        "exploration": 0.82,
+        "research": 0.78,
+        "log-analysis": 0.8,
+        "documentation": 0.78
+      },
+      "tokenIndex": 0.35,
+      "latencyIndex": 0.35,
+      "maturity": "stable",
+      "efforts": [
+        {
+          "name": "low",
+          "qualityDelta": 0,
+          "tokenMultiplier": 0.75,
+          "latencyMultiplier": 0.75,
+          "complexities": [
+            "low"
+          ]
+        },
+        {
+          "name": "medium",
+          "qualityDelta": 0.02,
+          "tokenMultiplier": 1,
+          "latencyMultiplier": 1,
+          "complexities": [
+            "low",
+            "standard"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "claude-sonnet-general",
+      "provider": "anthropic",
+      "model": "sonnet",
+      "enabled": true,
+      "roles": [
+        "planner",
+        "executor",
+        "reviewer"
+      ],
+      "taskKinds": [
+        "planning",
+        "implementation",
+        "debugging",
+        "testing",
+        "review",
+        "research",
+        "qa",
+        "documentation"
+      ],
+      "quality": {
+        "default": 0.88,
+        "planning": 0.9,
+        "implementation": 0.89,
+        "debugging": 0.88,
+        "testing": 0.89,
+        "review": 0.88,
+        "qa": 0.87
+      },
+      "tokenIndex": 1,
+      "latencyIndex": 1,
+      "maturity": "stable",
+      "efforts": [
+        {
+          "name": "medium",
+          "qualityDelta": 0,
+          "tokenMultiplier": 1,
+          "latencyMultiplier": 1,
+          "complexities": [
+            "low",
+            "standard"
+          ]
+        },
+        {
+          "name": "high",
+          "qualityDelta": 0.025,
+          "tokenMultiplier": 1.35,
+          "latencyMultiplier": 1.35,
+          "complexities": [
+            "standard",
+            "high"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "claude-opus-deep",
+      "provider": "anthropic",
+      "model": "opus",
+      "enabled": true,
+      "roles": [
+        "planner",
+        "executor",
+        "reviewer"
+      ],
+      "taskKinds": [
+        "architecture",
+        "planning",
+        "debugging",
+        "review",
+        "implementation",
+        "security",
+        "risk-analysis"
+      ],
+      "quality": {
+        "default": 0.93,
+        "architecture": 0.97,
+        "planning": 0.96,
+        "debugging": 0.94,
+        "review": 0.96,
+        "implementation": 0.93,
+        "security": 0.96,
+        "risk-analysis": 0.97
+      },
+      "tokenIndex": 2.2,
+      "latencyIndex": 1.8,
+      "maturity": "stable",
+      "efforts": [
+        {
+          "name": "high",
+          "qualityDelta": 0,
+          "tokenMultiplier": 1,
+          "latencyMultiplier": 1,
+          "complexities": [
+            "high"
+          ]
+        },
+        {
+          "name": "xhigh",
+          "qualityDelta": 0.02,
+          "tokenMultiplier": 1.35,
+          "latencyMultiplier": 1.45,
+          "complexities": [
+            "high",
+            "critical"
+          ]
+        },
+        {
+          "name": "max",
+          "qualityDelta": 0.03,
+          "tokenMultiplier": 1.7,
+          "latencyMultiplier": 1.8,
+          "complexities": [
+            "critical"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "codex-luna-repeatable",
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "enabled": true,
+      "roles": [
+        "executor",
+        "reviewer"
+      ],
+      "taskKinds": [
+        "implementation",
+        "testing",
+        "log-analysis",
+        "documentation"
+      ],
+      "quality": {
+        "default": 0.82,
+        "implementation": 0.85,
+        "testing": 0.86,
+        "log-analysis": 0.84,
+        "documentation": 0.84
+      },
+      "tokenIndex": 0.55,
+      "latencyIndex": 0.5,
+      "maturity": "stable",
+      "efforts": [
+        {
+          "name": "low",
+          "qualityDelta": 0,
+          "tokenMultiplier": 0.8,
+          "latencyMultiplier": 0.8,
+          "complexities": [
+            "low"
+          ]
+        },
+        {
+          "name": "medium",
+          "qualityDelta": 0.02,
+          "tokenMultiplier": 1,
+          "latencyMultiplier": 1,
+          "complexities": [
+            "low",
+            "standard"
+          ]
+        },
+        {
+          "name": "high",
+          "qualityDelta": 0.03,
+          "tokenMultiplier": 1.25,
+          "latencyMultiplier": 1.3,
+          "complexities": [
+            "standard"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "codex-terra-general",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "enabled": true,
+      "roles": [
+        "planner",
+        "executor",
+        "reviewer"
+      ],
+      "taskKinds": [
+        "exploration",
+        "planning",
+        "implementation",
+        "debugging",
+        "testing",
+        "review",
+        "research",
+        "qa",
+        "documentation"
+      ],
+      "quality": {
+        "default": 0.89,
+        "exploration": 0.9,
+        "planning": 0.89,
+        "implementation": 0.91,
+        "debugging": 0.91,
+        "testing": 0.91,
+        "review": 0.9,
+        "research": 0.89,
+        "qa": 0.9
+      },
+      "tokenIndex": 1,
+      "latencyIndex": 0.9,
+      "maturity": "stable",
+      "efforts": [
+        {
+          "name": "medium",
+          "qualityDelta": 0,
+          "tokenMultiplier": 1,
+          "latencyMultiplier": 1,
+          "complexities": [
+            "standard"
+          ]
+        },
+        {
+          "name": "high",
+          "qualityDelta": 0.025,
+          "tokenMultiplier": 1.25,
+          "latencyMultiplier": 1.3,
+          "complexities": [
+            "standard",
+            "high"
+          ]
+        },
+        {
+          "name": "xhigh",
+          "qualityDelta": 0.04,
+          "tokenMultiplier": 1.55,
+          "latencyMultiplier": 1.65,
+          "complexities": [
+            "high",
+            "critical"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "codex-sol-deep",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "enabled": true,
+      "roles": [
+        "planner",
+        "executor",
+        "reviewer"
+      ],
+      "taskKinds": [
+        "architecture",
+        "planning",
+        "implementation",
+        "debugging",
+        "testing",
+        "review",
+        "research",
+        "security",
+        "qa",
+        "risk-analysis"
+      ],
+      "quality": {
+        "default": 0.94,
+        "architecture": 0.97,
+        "planning": 0.96,
+        "implementation": 0.95,
+        "debugging": 0.95,
+        "testing": 0.94,
+        "review": 0.96,
+        "research": 0.94,
+        "security": 0.97,
+        "qa": 0.94,
+        "risk-analysis": 0.97
+      },
+      "tokenIndex": 1.8,
+      "latencyIndex": 1.4,
+      "maturity": "stable",
+      "efforts": [
+        {
+          "name": "medium",
+          "qualityDelta": 0,
+          "tokenMultiplier": 0.85,
+          "latencyMultiplier": 0.85,
+          "complexities": [
+            "high"
+          ]
+        },
+        {
+          "name": "high",
+          "qualityDelta": 0.025,
+          "tokenMultiplier": 1,
+          "latencyMultiplier": 1,
+          "complexities": [
+            "high",
+            "critical"
+          ]
+        },
+        {
+          "name": "xhigh",
+          "qualityDelta": 0.04,
+          "tokenMultiplier": 1.35,
+          "latencyMultiplier": 1.45,
+          "complexities": [
+            "critical"
+          ]
+        }
+      ]
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "adaptive-orchestrate",
+      "type": "skill",
+      "providers": [
+        "anthropic",
+        "openai"
+      ],
+      "enabled": true,
+      "description": "Root task decomposition and routing workflow installed by aorch.",
+      "trustTier": "trusted"
+    },
+    {
+      "id": "test-driven-development",
+      "type": "skill",
+      "providers": [
+        "anthropic",
+        "openai"
+      ],
+      "enabled": false,
+      "trustTier": "trusted"
+    },
+    {
+      "id": "systematic-debugging",
+      "type": "skill",
+      "providers": [
+        "anthropic",
+        "openai"
+      ],
+      "enabled": false,
+      "trustTier": "trusted"
+    },
+    {
+      "id": "verification-before-completion",
+      "type": "skill",
+      "providers": [
+        "anthropic",
+        "openai"
+      ],
+      "enabled": false,
+      "trustTier": "trusted"
+    },
+    {
+      "id": "browser-qa",
+      "type": "plugin",
+      "providers": [
+        "anthropic",
+        "openai"
+      ],
+      "enabled": false,
+      "trustTier": "reviewed"
+    },
+    {
+      "id": "official-docs",
+      "type": "plugin",
+      "providers": [
+        "anthropic",
+        "openai"
+      ],
+      "enabled": false,
+      "trustTier": "reviewed"
+    },
+    {
+      "id": "quality-gate",
+      "type": "hook",
+      "providers": [
+        "*"
+      ],
+      "enabled": false,
+      "phase": "post",
+      "trustTier": "trusted"
+    }
+  ],
+  "progress": {
+    "intervalMinutes": 30
+  },
+  "paths": {
+    "stateDir": ".aorch",
+    "observationsFile": ".aorch/observations.jsonl"
+  },
+  "verification": {
+    "commandTimeoutMs": 900000,
+    "isolationByRisk": {
+      "low": "same-workspace",
+      "standard": "git-worktree",
+      "high": "git-worktree",
+      "critical": "git-worktree"
+    }
+  },
+  "controlPlane": {
+    "providerTrustByRisk": {
+      "low": [
+        "trusted",
+        "reviewed",
+        "untrusted"
+      ],
+      "standard": [
+        "trusted",
+        "reviewed"
+      ],
+      "high": [
+        "trusted",
+        "reviewed"
+      ],
+      "critical": [
+        "trusted"
+      ]
+    },
+    "capabilityTrustByRisk": {
+      "low": [
+        "trusted",
+        "reviewed",
+        "untrusted"
+      ],
+      "standard": [
+        "trusted",
+        "reviewed"
+      ],
+      "high": [
+        "trusted",
+        "reviewed"
+      ],
+      "critical": [
+        "trusted"
+      ]
+    },
+    "experimentalAdapterMaxRisk": "standard"
+  }
+}

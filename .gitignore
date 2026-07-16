@@ -1,0 +1,4 @@
+node_modules/
+.aorch/
+*.log
+.DS_Store

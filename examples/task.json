@@ -1,0 +1,34 @@
+{
+  "id": "T-parser",
+  "title": "Implement parser",
+  "objective": "Implement the parser behavior and its regression tests.",
+  "kind": "implementation",
+  "role": "executor",
+  "risk": "standard",
+  "complexity": "standard",
+  "write": true,
+  "weight": 3,
+  "tags": [
+    "backend"
+  ],
+  "capabilityIds": [],
+  "allowedScope": [
+    "src/parser/**",
+    "test/parser/**"
+  ],
+  "forbiddenScope": [
+    "deployment/**"
+  ],
+  "acceptanceCriteria": [
+    "Valid input is parsed into the documented structure.",
+    "Malformed input returns the documented error.",
+    "All focused and project validation commands pass."
+  ],
+  "verificationCommands": [
+    "npm test"
+  ],
+  "verifierCommands": [
+    "npm run check"
+  ],
+  "verificationIsolation": "git-worktree"
+}
