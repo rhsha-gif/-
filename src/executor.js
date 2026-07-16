@@ -52,6 +52,12 @@ export function runCommand(spec, {
       clearTimers();
       reject(error);
     });
+    child.stdin.on('error', (error) => {
+      if (error.code !== 'EPIPE' && error.code !== 'ERR_STREAM_DESTROYED') {
+        clearTimers();
+        reject(error);
+      }
+    });
     child.on('close', (code, closeSignal) => {
       clearTimers();
       const endedAt = new Date();

@@ -21,7 +21,9 @@ test('installs both CLI integrations idempotently without editing root instructi
   const codexPromptCommand = codexHooks.hooks.UserPromptSubmit[0].hooks[0].command;
   assert.match(codexPromptCommand, /git rev-parse.*\|\| pwd/);
   if (process.platform !== 'win32') {
-    const hookResult = spawnSync('/bin/sh', ['-lc', codexPromptCommand], {
+    // Use a non-login shell: hosts execute hook commands with `sh -c`, and a
+    // login shell would source user profiles that may pollute stdout.
+    const hookResult = spawnSync('/bin/sh', ['-c', codexPromptCommand], {
       cwd: projectRoot,
       input: JSON.stringify({ prompt: 'Explain this project.', cwd: projectRoot }),
       encoding: 'utf8'

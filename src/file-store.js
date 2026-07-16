@@ -35,9 +35,11 @@ function processIsAlive(pid) {
 
 async function inspectLockFile(lockPath, staleMs) {
   const info = await stat(lockPath);
+  let raw = null;
   let owner = null;
   try {
-    owner = JSON.parse(await readFile(lockPath, 'utf8'));
+    raw = await readFile(lockPath, 'utf8');
+    owner = JSON.parse(raw);
   } catch {
     owner = null;
   }
@@ -46,11 +48,33 @@ async function inspectLockFile(lockPath, staleMs) {
   const ageMs = Math.max(0, Date.now() - info.mtimeMs);
   return {
     info,
+    raw,
     ownerPid,
     ownerAlive,
     ageMs,
     stale: ageMs > staleMs && !ownerAlive
   };
+}
+
+// Reclaim a stale lock without the unlink TOCTOU: unlinking by path could
+// delete a fresh lock created by a concurrent reclaimer. Atomically rename the
+// entry aside, verify it is still the stale lock we inspected, and only then
+// discard it; otherwise restore it.
+async function reclaimStaleLock(lockPath, inspected) {
+  const reclaimPath = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
+  try {
+    await rename(lockPath, reclaimPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+  let raw = null;
+  try { raw = await readFile(reclaimPath, 'utf8'); } catch { raw = null; }
+  if (raw === inspected.raw) {
+    await unlink(reclaimPath).catch(() => {});
+    return;
+  }
+  await rename(reclaimPath, lockPath).catch(() => unlink(reclaimPath).catch(() => {}));
 }
 
 function stableValue(value) {
@@ -137,7 +161,7 @@ export async function acquireFileLock(lockPath, {
       try {
         const lock = await inspectLockFile(lockPath, staleMs);
         if (lock.stale) {
-          await unlink(lockPath);
+          await reclaimStaleLock(lockPath, lock);
           continue;
         }
       } catch (statError) {
@@ -209,7 +233,12 @@ export async function readJournal(filePath, { tolerateCorruption = false } = {})
     const first = issues[0];
     throw new Error(`Invalid journal ${filePath} at line ${first.line}: ${first.message}`);
   }
-  return { entries, records: entries.map((entry) => entry.payload), issues };
+  return {
+    entries,
+    records: entries.map((entry) => entry.payload),
+    issues,
+    endsWithNewline: raw.length === 0 || raw.endsWith('\n')
+  };
 }
 
 export async function appendJournalRecord(filePath, payload, { recordedAt = new Date().toISOString() } = {}) {
@@ -225,7 +254,9 @@ export async function appendJournalRecord(filePath, payload, { recordedAt = new 
     await mkdir(path.dirname(filePath), { recursive: true });
     const handle = await open(filePath, 'a', 0o600);
     try {
-      await handle.writeFile(`${JSON.stringify(entry)}\n`, 'utf8');
+      // A torn tail line has no trailing newline; start a fresh line so the
+      // new record is not glued onto the corrupt fragment.
+      await handle.writeFile(`${journal.endsWithNewline ? '' : '\n'}${JSON.stringify(entry)}\n`, 'utf8');
       await handle.sync();
     } finally {
       await handle.close();
@@ -275,7 +306,7 @@ export async function inspectFileStore(root, { repair = false, staleLockMs = 30_
     try { lock = await inspectLockFile(file, staleLockMs); }
     catch (error) { if (error.code === 'ENOENT') continue; throw error; }
     if (lock.stale && repair) {
-      await unlink(file).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+      await reclaimStaleLock(file, lock);
       removedStaleLocks += 1;
     }
     lockReports.push({

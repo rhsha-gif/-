@@ -30,6 +30,25 @@ test('high-risk subject matter stays read-only when no mutation or external acti
   assert.equal(result.durableRunRecommended, false);
 });
 
+test('destructive prompts without a development verb still classify as high-risk', () => {
+  for (const prompt of [
+    'drop the users table in production',
+    'truncate all order data',
+    '운영 데이터베이스에서 주문 데이터를 전부 삭제해'
+  ]) {
+    const result = classifyPrompt(prompt);
+    assert.equal(result.requestClass, 'high-risk', prompt);
+    assert.equal(result.failPolicy, 'closed', prompt);
+  }
+});
+
+test('korean prompts classify without relying on ascii word boundaries', () => {
+  assert.equal(classifyPrompt('결제 재시도 로직을 구현해줘').requestClass, 'high-risk');
+  assert.equal(classifyPrompt('파서 테스트를 고쳐줘').requestClass, 'development');
+  assert.equal(classifyPrompt('데이터베이스 스키마를 설명해줘').requestClass, 'read-only');
+  assert.equal(classifyPrompt('파일을 수정하지 마: 이 모듈 요약해줘').requestClass, 'read-only');
+});
+
 test('thin gate context injects only bounded policy and defers heavy orchestration', () => {
   const context = buildGateContext(classifyPrompt('Implement a new endpoint.'));
   assert.match(context, /adaptive-orchestrate/i);

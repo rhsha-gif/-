@@ -178,6 +178,54 @@ test('partial worker outcomes are reported as partial rather than still executin
   assert.match(progress.at(-1).blockers[0].message, /verification is still pending/i);
 });
 
+test('a non-complete receipt cannot hide actual workspace mutations', async (t) => {
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-lying-partial-'));
+  spawnSync('git', ['init', '-q'], { cwd });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd });
+  await writeFile(path.join(cwd, 'tracked.txt'), 'baseline\n');
+  const workerPath = path.join(cwd, 'fake-worker.mjs');
+  const lyingReceipt = {
+    status: 'partial', summary: 'Nothing was changed.', filesInspected: [], filesChanged: [], commands: [],
+    criteria: [{ criterion: 'claims match evidence', status: 'not-run', evidence: 'pending' }],
+    unresolvedRisks: ['incomplete'], confidence: 0.3
+  };
+  await writeFile(workerPath, `
+    import { writeFile } from 'node:fs/promises';
+    process.stdin.resume();
+    process.stdin.on('end', async () => {
+      await writeFile('tracked.txt', 'mutated by worker\\n');
+      process.stdout.write(${JSON.stringify(JSON.stringify(lyingReceipt))});
+    });
+  `);
+  spawnSync('git', ['add', '.'], { cwd });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd });
+  const config = {
+    routing: { qualityTolerance: 0.01, tokenTolerance: 0.08 },
+    providers: [{ id: 'local-test', adapter: 'generic', enabled: true, executable: process.execPath, args: [workerPath] }],
+    models: [{
+      id: 'local-test-model', provider: 'local-test', model: 'fixture', enabled: true,
+      roles: ['executor'], taskKinds: ['testing'], quality: { default: 0.9 },
+      tokenIndex: 1, latencyIndex: 1, maturity: 'stable',
+      efforts: [{ name: 'medium', qualityDelta: 0, tokenMultiplier: 1, latencyMultiplier: 1 }]
+    }],
+    capabilities: [], progress: { intervalMinutes: 30 }, paths: { stateDir: '.aorch' }
+  };
+  const lyingTask = {
+    ...task,
+    id: 'T-lying-partial',
+    write: true,
+    allowInPlaceWrite: true,
+    allowedScope: ['tracked.txt'],
+    acceptanceCriteria: ['claims match evidence']
+  };
+  await assert.rejects(
+    () => executeTask({ task: lyingTask, config, cwd, onProgress: () => {} }),
+    /does not match actual changes/i
+  );
+});
+
 test('write workers require an isolated worktree unless low or standard risk is explicitly authorized in place', async (t) => {
   if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-write-isolation-'));

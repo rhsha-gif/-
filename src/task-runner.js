@@ -13,7 +13,7 @@ import { runCommand } from './executor.js';
 import { formatProgressReport, ProgressReporter } from './progress.js';
 import { validateTask } from './task.js';
 import { validateReceipt } from './receipt.js';
-import { captureWorkspaceState, inspectWorkspaceIsolation, verifyTaskClaim } from './verifier.js';
+import { captureWorkspaceState, inspectWorkspaceIsolation, validateClaimedChanges, verifyTaskClaim } from './verifier.js';
 import { atomicWriteJson, atomicWriteText } from './file-store.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -150,6 +150,12 @@ export async function executeTask({
     const afterState = await captureWorkspaceState(cwd, { ignorePaths: ignoredPaths });
 
     let attestation = null;
+    if (receipt.status !== 'complete' && beforeState.available && afterState.available) {
+      // A partial or blocked claim is still a claim: the worker must not hide
+      // workspace mutations behind a non-complete status, especially for
+      // in-place writes where nothing else would compare claim to evidence.
+      validateClaimedChanges({ task, receipt, beforeState, afterState });
+    }
     if (receipt.status === 'complete') {
       const totalChecks = task.verificationCommands.length + task.verifierCommands.length;
       attestation = await verifyTaskClaim({

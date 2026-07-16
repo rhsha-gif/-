@@ -140,7 +140,7 @@ export function changedPathsBetween(beforeState, afterState) {
     .sort();
 }
 
-function validateClaimedChanges({ task, receipt, beforeState, afterState }) {
+export function validateClaimedChanges({ task, receipt, beforeState, afterState }) {
   if (task.write === true && (!beforeState?.available || !afterState?.available)) {
     throw new Error('Completed write task requires Git change evidence');
   }
@@ -169,9 +169,12 @@ function buildShellCommand(command) {
       env: { AORCH_WORKER: '1', AORCH_VERIFIER: '1' }
     };
   }
+  // Non-login shell: the child inherits the orchestrator's environment, and a
+  // login shell could source user profiles that print into the captured
+  // stdout/stderr evidence and change PATH between worker and verifier runs.
   return {
     command: '/bin/sh',
-    args: ['-lc', command],
+    args: ['-c', command],
     stdin: null,
     env: { AORCH_WORKER: '1', AORCH_VERIFIER: '1' }
   };

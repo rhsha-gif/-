@@ -48,6 +48,17 @@ test('configured trust metadata cannot be upgraded by discovery', () => {
   assert.equal(merged[0].trustTier, 'untrusted');
 });
 
+test('a catalog template without explicit trust cannot promote an untrusted user-global discovery', () => {
+  const merged = mergeCapabilities(
+    [{ id: 'home-skill', type: 'skill', providers: ['*'], enabled: false }],
+    [{
+      id: 'home-skill', type: 'skill', providers: ['anthropic'], enabled: true,
+      path: '/home/user/.claude/skills/home-skill', trustTier: 'untrusted', sourceScope: 'user'
+    }]
+  );
+  assert.equal(merged[0].trustTier, 'untrusted');
+});
+
 test('inventory treats capability descriptions as bounded metadata and hides untrusted descriptions', () => {
   const inventory = getInventory({
     providers: [],

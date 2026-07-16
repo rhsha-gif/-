@@ -49,6 +49,26 @@ test('journal repair removes a partial tail while preserving valid records', asy
   assert.deepEqual(after.records, [{ event: 'valid' }]);
 });
 
+test('hook journal appends survive a torn tail line and stay sequence-valid after repair', async () => {
+  const { appendJournalRecord: hookAppend } = await import('../integrations/shared/journal.mjs');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-journal-torn-'));
+  const file = path.join(root, 'events.jsonl');
+  await appendJournalRecord(file, { event: 'valid' });
+  await appendFile(file, '{"journalVersion":1,"sequence":2', 'utf8');
+
+  const appended = await hookAppend(file, { event: 'after-torn-tail' });
+  assert.equal(appended.sequence, 2);
+
+  const tolerant = await readJournal(file, { tolerateCorruption: true });
+  assert.deepEqual(tolerant.records, [{ event: 'valid' }, { event: 'after-torn-tail' }]);
+  assert.equal(tolerant.issues.length, 1);
+
+  await repairJournal(file);
+  const after = await readJournal(file);
+  assert.equal(after.issues.length, 0);
+  assert.deepEqual(after.records, [{ event: 'valid' }, { event: 'after-torn-tail' }]);
+});
+
 test('stale locks are reclaimed and state inspection reports repairable damage', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-lock-repair-'));
   const journal = path.join(root, 'events.jsonl');

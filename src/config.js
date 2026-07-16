@@ -238,10 +238,15 @@ export function validateConfig(input) {
       throw new Error(`Unsupported capability type for ${capability.id}: ${capability.type}`);
     }
     assertNonEmptyStrings(capability.providers ?? ['*'], `capability ${capability.id}.providers`);
+    // Do not inject a default trustTier: only an explicit config tier may
+    // override discovery-scope trust when the capability is found on disk.
+    // Consumers already treat a missing tier as 'reviewed'.
     return {
       ...capability,
       providers: [...(capability.providers ?? ['*'])],
-      trustTier: trustTier(capability.trustTier, `capability ${capability.id}.trustTier`, 'reviewed')
+      ...(capability.trustTier === undefined
+        ? {}
+        : { trustTier: trustTier(capability.trustTier, `capability ${capability.id}.trustTier`) })
     };
   });
   const routing = validateRouting(input.routing ?? {});

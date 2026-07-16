@@ -1,14 +1,17 @@
+// Korean patterns must not use \b: JavaScript word boundaries are based on
+// [A-Za-z0-9_], so \b never matches adjacent to Hangul and would make these
+// alternations dead code. Substring matching fits Korean agglutination.
 const HIGH_RISK_PATTERNS = [
   /\b(production|prod|deploy|release|publish|push|merge|tag)\b/i,
   /\b(database|schema|migration|migrate|drop|truncate|delete data)\b/i,
   /\b(auth|authentication|authorization|permission|credential|secret|security)\b/i,
   /\b(payment|billing|financial|trading|trade|order|position|risk limit|kill switch)\b/i,
-  /\b(운영|배포|릴리스|마이그레이션|스키마|인증|권한|보안|결제|금융|주문|포지션|리스크|실거래|삭제)\b/i
+  /(운영|배포|릴리스|마이그레이션|스키마|인증|권한|보안|결제|금융|주문|포지션|리스크|실거래|삭제)/
 ];
 
 const DEVELOPMENT_PATTERNS = [
   /\b(implement|build|create|add|change|modify|edit|fix|debug|refactor|test|upgrade|install|configure|review code)\b/i,
-  /\b(구현|만들|추가|변경|수정|고쳐|디버그|리팩터링|테스트|업그레이드|설치|설정|코드 리뷰)\b/i
+  /(구현|만들|추가|변경|수정|고쳐|디버그|리팩터링|테스트|업그레이드|설치|설정|코드 리뷰)/
 ];
 
 const EXPLICIT_READ_ONLY_PATTERNS = [
@@ -19,7 +22,7 @@ const EXPLICIT_READ_ONLY_PATTERNS = [
 
 const READ_ONLY_PATTERNS = [
   /\b(explain|describe|summarize|compare|analyze|inspect|find|show|what|why|how)\b/i,
-  /\b(설명|요약|비교|분석|찾아|보여|무엇|왜|어떻게|알려)\b/i
+  /(설명|요약|비교|분석|찾아|보여|무엇|왜|어떻게|알려)/
 ];
 
 function matchesAny(prompt, patterns) {
@@ -42,7 +45,7 @@ export function classifyPrompt(prompt) {
       durableRunRecommended: false
     };
   }
-  if (highRisk && development) {
+  if (highRisk && (development || !readOnly)) {
     return {
       requestClass: 'high-risk',
       riskHint: 'critical',
