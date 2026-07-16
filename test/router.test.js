@@ -351,3 +351,15 @@ test('untrusted providers require explicit low-risk read-only opt-in', () => {
     observations: []
   }), /No eligible route/i);
 });
+
+test('models of a disabled provider are never routed', () => {
+  assert.throws(() => selectRoute({
+    task,
+    catalog: {
+      routing: baseRouting,
+      providers: [{ id: 'anthropic', enabled: false, trustTier: 'trusted', adapterMaturity: 'stable' }],
+      models: [model({ id: 'orphaned' })]
+    },
+    observations: []
+  }), /no eligible route/i);
+});

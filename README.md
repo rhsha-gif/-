@@ -363,6 +363,8 @@ aorch verify \
   --isolation git-worktree
 ```
 
+수동 `aorch verify`는 검증 명령을 재실행해 read-only claim을 attestation으로 남깁니다. write task의 변경 증거(before/after workspace snapshot)는 `aorch exec` 실행 중에만 캡처되므로, write claim의 attestation은 `aorch exec` 흐름에서 발급됩니다. 수동 verify에 write task를 넘기면 fail closed로 거절됩니다.
+
 verifier는 별도 attestation artifact를 저장합니다. 검증 실패도 attestation으로 남겨 worker의 허위 완료 주장을 추적할 수 있습니다. 완료된 write claim은 Git 변경 증거가 없으면 거절되며, bounded worker가 commit·reset 등으로 `HEAD`를 바꾸는 것도 차단됩니다. 실제 worker 실행도 linked worktree 여부를 확인합니다. low/standard 작업만 명시적 사용자 승인과 `allowInPlaceWrite: true`가 있을 때 현재 checkout에서 실행할 수 있고, high/critical write는 항상 linked worktree를 요구합니다.
 
 ## 동적으로 변하는 모델 성능

@@ -98,3 +98,10 @@ test('verifier-only commands are validated but remain separate from worker verif
   assert.deepEqual(task.verifierCommands, ['npm run hidden-check']);
   assert.throws(() => validateTask({ ...base, verifierCommands: [''] }), /verifierCommands/i);
 });
+
+test('task.write must be a strict boolean', async () => {
+  const { validateTask } = await import('../src/task.js');
+  assert.throws(() => validateTask({
+    id: 'T-write-type', kind: 'implementation', role: 'executor', risk: 'standard', write: 'yes'
+  }), /write must be boolean/i);
+});

@@ -33,7 +33,9 @@ function processIsAlive(pid) {
   }
 }
 
-async function inspectLockFile(lockPath, staleMs) {
+const HARD_STALE_LOCK_MS = 60 * 60 * 1000;
+
+async function inspectLockFile(lockPath, staleMs, hardStaleMs = HARD_STALE_LOCK_MS) {
   const info = await stat(lockPath);
   let raw = null;
   let owner = null;
@@ -52,7 +54,11 @@ async function inspectLockFile(lockPath, staleMs) {
     ownerPid,
     ownerAlive,
     ageMs,
-    stale: ageMs > staleMs && !ownerAlive
+    // The liveness probe can lie: after PID reuse or across reboots the pid
+    // may belong to an unrelated process (EPERM reads as alive). Locks here
+    // guard millisecond-scale writes, so a very old lock is reclaimable even
+    // when its recorded pid still appears alive.
+    stale: (ageMs > staleMs && !ownerAlive) || ageMs > hardStaleMs
   };
 }
 
@@ -135,6 +141,7 @@ export async function atomicWriteJson(filePath, value, options = {}) {
 
 export async function acquireFileLock(lockPath, {
   staleMs = 30_000,
+  hardStaleMs = HARD_STALE_LOCK_MS,
   retryMs = 20,
   timeoutMs = 5_000
 } = {}) {
@@ -150,16 +157,22 @@ export async function acquireFileLock(lockPath, {
       let released = false;
       return async () => {
         if (released) return;
-        released = true;
-        await unlink(lockPath).catch((error) => {
+        // Mark released only after the unlink outcome is known so a transient
+        // failure (EBUSY/EPERM on some filesystems) can be retried instead of
+        // leaking a lock that never goes stale while this process lives.
+        try {
+          await unlink(lockPath);
+          released = true;
+        } catch (error) {
           if (error.code !== 'ENOENT') throw error;
-        });
+          released = true;
+        }
       };
     } catch (error) {
       await handle?.close().catch(() => {});
       if (error.code !== 'EEXIST') throw error;
       try {
-        const lock = await inspectLockFile(lockPath, staleMs);
+        const lock = await inspectLockFile(lockPath, staleMs, hardStaleMs);
         if (lock.stale) {
           await reclaimStaleLock(lockPath, lock);
           continue;
@@ -215,7 +228,9 @@ export async function readJournal(filePath, { tolerateCorruption = false } = {})
   let raw;
   try { raw = await readFile(filePath, 'utf8'); }
   catch (error) {
-    if (error.code === 'ENOENT') return { entries: [], records: [], issues: [] };
+    if (error.code === 'ENOENT') {
+      return { entries: [], records: [], issues: [], endsWithNewline: true, missing: true };
+    }
     throw error;
   }
 
@@ -237,7 +252,8 @@ export async function readJournal(filePath, { tolerateCorruption = false } = {})
     entries,
     records: entries.map((entry) => entry.payload),
     issues,
-    endsWithNewline: raw.length === 0 || raw.endsWith('\n')
+    endsWithNewline: raw.length === 0 || raw.endsWith('\n'),
+    missing: false
   };
 }
 
@@ -248,7 +264,10 @@ export async function appendJournalRecord(filePath, payload, { recordedAt = new 
       journalVersion: JOURNAL_VERSION,
       sequence: journal.entries.length + 1,
       recordedAt,
-      payload
+      // Checksum verification hashes the payload as parsed back from disk, so
+      // hash the JSON round-trip of the payload: a value with toJSON (Date)
+      // would otherwise produce a permanently checksum-invalid record.
+      payload: payload === undefined ? null : JSON.parse(JSON.stringify(payload))
     };
     entry.checksum = journalChecksum(entry);
     await mkdir(path.dirname(filePath), { recursive: true });
@@ -261,6 +280,9 @@ export async function appendJournalRecord(filePath, payload, { recordedAt = new 
     } finally {
       await handle.close();
     }
+    // The record is durable, but a newly created journal's directory entry is
+    // not until the directory itself is synced.
+    if (journal.missing) await syncDirectory(path.dirname(filePath));
     return entry;
   });
 }
@@ -269,6 +291,21 @@ export async function repairJournal(filePath) {
   return withFileLock(`${filePath}.lock`, async () => {
     const journal = await readJournal(filePath, { tolerateCorruption: true });
     if (journal.issues.length === 0) return { filePath, repaired: false, removedLines: 0, records: journal.records.length };
+    // A sequence issue means a valid, checksummed record follows damage
+    // earlier in the file. Rewriting would silently delete those records, so
+    // only torn-tail damage (invalid-json/checksum with no cascade) is
+    // repairable automatically.
+    if (journal.issues.some((issue) => issue.type === 'sequence')) {
+      return {
+        filePath,
+        repaired: false,
+        removedLines: 0,
+        records: journal.records.length,
+        issues: journal.issues,
+        requiresManualIntervention: true,
+        reason: 'mid-journal damage precedes valid records; automatic repair would delete them'
+      };
+    }
     const content = journal.entries.length > 0
       ? `${journal.entries.map((entry) => entry.rawLine).join('\n')}\n`
       : '';

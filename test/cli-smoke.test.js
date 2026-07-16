@@ -148,3 +148,27 @@ test('verify command creates an independent attestation from a task and worker c
   assert.equal(output.attestation.status, 'pass');
   assert.ok(output.attestationPath.endsWith('attestation.json'));
 });
+
+test('unknown options and boolean flags with junk values fail instead of being silently ignored', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-cli-flags-'));
+  const taskPath = path.join(dir, 'task.json');
+  await writeFile(taskPath, JSON.stringify({
+    id: 'T1', kind: 'implementation', role: 'executor', risk: 'standard'
+  }));
+
+  const typo = spawnSync(process.execPath, [cli, 'route', '--config', defaultConfig, '--taks', taskPath], { encoding: 'utf8' });
+  assert.equal(typo.status, 1);
+  assert.match(typo.stderr, /unknown option.*--taks/i);
+
+  const junkBool = spawnSync(process.execPath, [cli, 'lessons', '--config', defaultConfig, '--cwd', dir, '--lint=yes'], { encoding: 'utf8' });
+  assert.equal(junkBool.status, 1);
+  assert.match(junkBool.stderr, /boolean flag/i);
+
+  const boolWithValue = spawnSync(process.execPath, [cli, 'lessons', '--config', defaultConfig, '--cwd', dir, '--lint', 'true'], { encoding: 'utf8' });
+  assert.equal(boolWithValue.status, 0, boolWithValue.stderr);
+  assert.equal(JSON.parse(boolWithValue.stdout).status, 'pass');
+
+  const badTimeout = spawnSync(process.execPath, [cli, 'exec', '--config', defaultConfig, '--task', taskPath, '--timeout-ms', '30s'], { encoding: 'utf8' });
+  assert.equal(badTimeout.status, 1);
+  assert.match(badTimeout.stderr, /--timeout-ms must be/i);
+});

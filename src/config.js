@@ -225,7 +225,8 @@ export function validateConfig(input) {
       positiveNumber(effort.latencyMultiplier, `model ${model.id} effort ${effort.name}.latencyMultiplier`, 1);
       if (effort.complexities !== undefined) {
         assertNonEmptyStrings(effort.complexities, `model ${model.id} effort ${effort.name}.complexities`);
-        if (new Set(effort.complexities).size !== effort.complexities.length
+        if (effort.complexities.length === 0
+          || new Set(effort.complexities).size !== effort.complexities.length
           || effort.complexities.some((value) => !TASK_COMPLEXITIES.includes(value))) {
           throw new TypeError(`model ${model.id} effort ${effort.name}.complexities must be unique values from low, standard, high, critical`);
         }

@@ -1,7 +1,12 @@
 #!/usr/bin/env node
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { appendJournalRecord } from './journal.mjs';
 import path from 'node:path';
+
+async function resolveReal(candidate) {
+  try { return await realpath(candidate); }
+  catch { return path.resolve(candidate); }
+}
 
 if (process.env.AORCH_WORKER === '1' || process.env.AORCH_VERIFIER === '1') process.exit(0);
 
@@ -23,20 +28,33 @@ async function readActiveRun(cwd) {
     if (error.code !== 'ENOENT') throw error;
   }
 
+  let pointerRaw;
   try {
-    const pointer = JSON.parse(await readFile(path.join(stateRoot, 'active-run.json'), 'utf8'));
-    if (typeof pointer.runPath !== 'string' || pointer.runPath.trim() === '') {
-      throw new Error('Active run pointer is invalid');
-    }
-    const runPath = path.resolve(pointer.runPath);
-    const relative = path.relative(stateRoot, runPath);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
-      throw new Error('Active run pointer resolves outside the state root');
-    }
+    pointerRaw = await readFile(path.join(stateRoot, 'active-run.json'), 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  const pointer = JSON.parse(pointerRaw);
+  if (typeof pointer.runPath !== 'string' || pointer.runPath.trim() === '') {
+    throw new Error('Active run pointer is invalid');
+  }
+  const runPath = path.resolve(pointer.runPath);
+  // Compare realpaths so a symlinked project alias does not misclassify a
+  // legitimate pointer as escaping the state root.
+  const relative = path.relative(await resolveReal(stateRoot), await resolveReal(runPath));
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Active run pointer resolves outside the state root');
+  }
+  // A pointer whose target run is missing is corrupt state, not "no active
+  // run": swallowing it would silently disable the Stop reflection gate.
+  try {
     const run = JSON.parse(await readFile(runPath, 'utf8'));
     return { ...run, path: runPath, stateRoot };
   } catch (error) {
-    if (error.code === 'ENOENT') return null;
+    if (error.code === 'ENOENT') {
+      throw new Error(`Active run pointer targets a missing run state: ${runPath}. Run aorch doctor --repair.`);
+    }
     throw error;
   }
 }

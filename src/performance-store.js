@@ -82,6 +82,7 @@ export function estimateRouteQuality({
   }
 
   const nowMs = new Date(now).getTime();
+  if (!Number.isFinite(nowMs)) throw new TypeError('now must be a valid date');
   const matched = observations
     .map(normalizeObservation)
     .filter((observation) => sameRoute(observation, route, task));

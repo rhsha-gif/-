@@ -69,6 +69,9 @@ export function validateTask(input, { forExecution = false } = {}) {
   task.allowedProviders = ensureStringArray(task.allowedProviders, 'allowedProviders');
   task.forbiddenProviders = ensureStringArray(task.forbiddenProviders, 'forbiddenProviders');
   task.forbiddenProfileIds = ensureStringArray(task.forbiddenProfileIds, 'forbiddenProfileIds');
+  if (task.write !== undefined && typeof task.write !== 'boolean') {
+    throw new TypeError('task.write must be boolean');
+  }
   if (task.allowUntrustedCapabilities !== undefined && typeof task.allowUntrustedCapabilities !== 'boolean') {
     throw new TypeError('task.allowUntrustedCapabilities must be boolean');
   }

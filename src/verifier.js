@@ -142,7 +142,8 @@ export function changedPathsBetween(beforeState, afterState) {
 
 export function validateClaimedChanges({ task, receipt, beforeState, afterState }) {
   if (task.write === true && (!beforeState?.available || !afterState?.available)) {
-    throw new Error('Completed write task requires Git change evidence');
+    throw new Error('Write-task claims require before/after workspace snapshots; '
+      + 'only the aorch exec flow captures them, so manual aorch verify cannot attest a write claim');
   }
   if (beforeState?.available && afterState?.available && beforeState.head !== afterState.head) {
     throw new Error('Bounded worker changed Git HEAD; commits are not allowed during task execution');
@@ -346,12 +347,16 @@ export async function verifyTaskClaim({
     ];
     const results = await runChecks({ checks, cwd: workspace.cwd, evidenceDir, timeoutMs, onStep });
     const failed = results.find((entry) => entry.exitCode !== 0 || entry.timedOut);
+    // With zero replayed checks and no verified change evidence there is
+    // nothing independent behind this attestation; 'pass' would launder an
+    // unverified claim into apparent evidence.
+    const inconclusive = !failed && results.length === 0 && changeEvidence.status !== 'verified';
     const attestation = {
       schemaVersion: 1,
       verificationId,
       taskId: task.id,
       runId: task.runId ?? null,
-      status: failed ? 'fail' : 'pass',
+      status: failed ? 'fail' : inconclusive ? 'inconclusive' : 'pass',
       issuedAt: new Date().toISOString(),
       isolation: workspace.isolation,
       taskHash: sha256(task),

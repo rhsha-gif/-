@@ -34,7 +34,7 @@ Operational memory may record verified prevention rules automatically, but it ca
 
 ## Persist the retrospective
 
-Create a JSON file matching `schemas/session-retrospective.schema.json`, then run:
+Create a JSON file matching `.aorch/schemas/session-retrospective.schema.json`, then run:
 
 ```bash
 aorch run --action reflect --run active --input <retrospective.json>

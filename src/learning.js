@@ -177,7 +177,13 @@ async function updateLessons({ root, runId, errors, now }) {
       const id = lessonFingerprint(error.prevention);
       const current = lessons.get(id);
       const sourceRunIds = uniqueStrings([...(current?.sourceRunIds ?? []), runId]);
-      const baseConfidence = Math.max(Number(current?.confidence ?? 0), error.confidence);
+      // Track the raw evidence confidence separately so the occurrence bonus
+      // is derived idempotently: compounding it into the stored confidence
+      // inflated lessons quadratically and on every retrospective revision.
+      const evidenceConfidence = Math.max(
+        Number(current?.evidenceConfidence ?? 0),
+        error.confidence
+      );
       lessons.set(id, {
         id,
         type: 'negative',
@@ -186,7 +192,8 @@ async function updateLessons({ root, runId, errors, now }) {
         prevention: error.prevention,
         scopeTags: uniqueStrings([...(current?.scopeTags ?? current?.tags ?? []), ...error.tags]),
         evidence: uniqueStrings([...(current?.evidence ?? []), ...error.evidence]),
-        confidence: Math.min(0.99, baseConfidence + Math.max(0, sourceRunIds.length - 1) * 0.02),
+        evidenceConfidence,
+        confidence: Math.min(0.99, evidenceConfidence + Math.max(0, sourceRunIds.length - 1) * 0.02),
         occurrences: sourceRunIds.length,
         sourceRunIds,
         counterexamples: Array.isArray(current?.counterexamples) ? current.counterexamples : [],
@@ -255,7 +262,8 @@ export async function loadLessons({ root, query = '', limit = 10, now = new Date
   const filePath = lessonIndexPath(root);
   if (!(await exists(filePath))) return [];
   const index = JSON.parse(await readFile(filePath, 'utf8'));
-  const normalizedLimit = Math.max(0, Math.min(50, Number(limit) || 10));
+  const requestedLimit = Number(limit);
+  const normalizedLimit = Number.isFinite(requestedLimit) ? Math.max(0, Math.min(50, requestedLimit)) : 10;
   const queryTokens = new Set(tokenize(query));
 
   return (index.lessons ?? [])

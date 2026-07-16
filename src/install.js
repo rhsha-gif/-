@@ -11,19 +11,27 @@ async function exists(filePath) {
 
 async function readJson(filePath, fallback = {}) {
   if (!(await exists(filePath))) return structuredClone(fallback);
-  return JSON.parse(await readFile(filePath, 'utf8'));
+  try {
+    return JSON.parse(await readFile(filePath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Cannot parse existing JSON at ${filePath}: ${error.message}`);
+  }
 }
 
 async function writeJson(filePath, value) {
   await atomicWriteJson(filePath, value);
 }
 
-function mergeHook(target, fragment) {
+function mergeHook(target, fragment, targetPath) {
   target.hooks ??= {};
   for (const [event, groups] of Object.entries(fragment.hooks ?? {})) {
     target.hooks[event] ??= [];
+    if (!Array.isArray(target.hooks[event])) {
+      throw new Error(`${targetPath} hooks.${event} must be an array to merge into`);
+    }
     for (const group of groups) {
       const command = group.hooks?.[0]?.command;
+      if (!command) continue;
       const duplicate = target.hooks[event].some((existing) => existing.hooks?.some((hook) => hook.command === command));
       if (!duplicate) target.hooks[event].push(group);
     }
@@ -44,6 +52,21 @@ async function copyTree(source, destination) {
 
 export async function installProject({ projectRoot = process.cwd(), target = 'both', forceConfig = false } = {}) {
   if (!['both', 'claude', 'codex'].includes(target)) throw new Error(`Unknown installation target: ${target}`);
+  const wantsClaude = target === 'both' || target === 'claude';
+  const wantsCodex = target === 'both' || target === 'codex';
+
+  // Parse every JSON file this install will merge into BEFORE mutating
+  // anything, so a malformed existing file cannot abort a half-written
+  // install with a context-free error.
+  const settingsPath = path.join(projectRoot, '.claude/settings.json');
+  const hooksPath = path.join(projectRoot, '.codex/hooks.json');
+  const settings = wantsClaude ? await readJson(settingsPath, {}) : null;
+  const claudeFragment = wantsClaude ? await readJson(path.join(PACKAGE_ROOT, 'integrations/claude/settings.fragment.json')) : null;
+  const codexHooks = wantsCodex ? await readJson(hooksPath, {}) : null;
+  const codexFragment = wantsCodex ? await readJson(path.join(PACKAGE_ROOT, 'integrations/codex/hooks.json')) : null;
+  const mergedSettings = wantsClaude ? mergeHook(settings, claudeFragment, settingsPath) : null;
+  const mergedCodexHooks = wantsCodex ? mergeHook(codexHooks, codexFragment, hooksPath) : null;
+
   const installed = [];
   const aorchDir = path.join(projectRoot, '.aorch');
   await mkdir(path.join(aorchDir, 'hooks'), { recursive: true });
@@ -61,23 +84,22 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
     installed.push('.aorch/config.json');
   }
 
-  if (target === 'both' || target === 'claude') {
+  // Installed skills reference these schemas; without them the reflection
+  // instructions point at files that do not exist in the target project.
+  await copyTree(path.join(PACKAGE_ROOT, 'schemas'), path.join(aorchDir, 'schemas'));
+  installed.push('.aorch/schemas');
+
+  if (wantsClaude) {
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/skills'), path.join(projectRoot, '.claude/skills'));
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/agents'), path.join(projectRoot, '.claude/agents'));
-    const settingsPath = path.join(projectRoot, '.claude/settings.json');
-    const settings = await readJson(settingsPath, {});
-    const fragment = await readJson(path.join(PACKAGE_ROOT, 'integrations/claude/settings.fragment.json'));
-    await writeJson(settingsPath, mergeHook(settings, fragment));
+    await writeJson(settingsPath, mergedSettings);
     installed.push('.claude/skills/adaptive-orchestrate', '.claude/skills/post-run-reflection', '.claude/agents', '.claude/settings.json');
   }
 
-  if (target === 'both' || target === 'codex') {
+  if (wantsCodex) {
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/codex/skills'), path.join(projectRoot, '.agents/skills'));
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/codex/agents'), path.join(projectRoot, '.codex/agents'));
-    const hooksPath = path.join(projectRoot, '.codex/hooks.json');
-    const hooks = await readJson(hooksPath, {});
-    const fragment = await readJson(path.join(PACKAGE_ROOT, 'integrations/codex/hooks.json'));
-    await writeJson(hooksPath, mergeHook(hooks, fragment));
+    await writeJson(hooksPath, mergedCodexHooks);
     installed.push('.agents/skills/adaptive-orchestrate', '.agents/skills/post-run-reflection', '.codex/agents', '.codex/hooks.json');
   }
 

@@ -57,7 +57,9 @@ export async function executeTask({
   cwd = process.cwd(),
   stateRoot = path.resolve(cwd, config.paths?.stateDir ?? '.aorch'),
   onProgress = (entry) => process.stderr.write(`${formatProgressReport(entry)}\n`),
-  timeoutMs = 0,
+  // A hung worker must not hang the orchestrator forever; pass 0 explicitly
+  // to disable the watchdog.
+  timeoutMs = 60 * 60 * 1000,
   verificationTimeoutMs,
   dryRun = false
 }) {

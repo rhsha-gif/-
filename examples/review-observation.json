@@ -2,7 +2,7 @@
   "provider": "openai",
   "profileId": "codex-terra-general",
   "model": "gpt-5.6-terra",
-  "effort": "xhigh",
+  "effort": "high",
   "taskKind": "implementation",
   "role": "executor",
   "risk": "standard",

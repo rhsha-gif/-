@@ -45,6 +45,9 @@ function providerSupportsCapabilities(provider, requestedIds, inventory, task, p
 }
 
 function providerMetadata(catalog, providerId) {
+  // Raw catalogs may omit provider metadata entirely (direct API use); the
+  // CLI path cannot reach this fallback because validateConfig rejects models
+  // that reference undeclared providers.
   return (catalog.providers ?? []).find((entry) => entry.id === providerId)
     ?? { id: providerId, trustTier: 'trusted', adapterMaturity: 'stable' };
 }
@@ -67,6 +70,7 @@ function providerAllowedForTask(provider, task, policy) {
 function supportsTask(profile, task, catalog) {
   const provider = providerMetadata(catalog, profile.provider);
   return profile.enabled !== false
+    && provider.enabled !== false
     && providerAllowedForTask(provider, task, catalog.controlPlane ?? {})
     && (profile.roles?.includes(task.role) ?? true)
     && (profile.taskKinds?.includes(task.kind) ?? true)
@@ -101,7 +105,11 @@ function expandCandidates(task, catalog, complexity) {
 }
 
 function byStableIdentity(left, right) {
-  return `${left.profileId}:${left.effort}`.localeCompare(`${right.profileId}:${right.effort}`);
+  // Codepoint order, not localeCompare: ICU collation varies by host locale
+  // and would make the final tie-break nondeterministic across machines.
+  const a = `${left.profileId}:${left.effort}`;
+  const b = `${right.profileId}:${right.effort}`;
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 function effectivePriorities(task, policy) {

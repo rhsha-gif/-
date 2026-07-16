@@ -15,6 +15,8 @@ function processIsAlive(pid) {
   }
 }
 
+const HARD_STALE_LOCK_MS = 60 * 60 * 1000;
+
 async function inspectLock(lockPath, staleMs) {
   const info = await stat(lockPath);
   let raw = null;
@@ -23,7 +25,10 @@ async function inspectLock(lockPath, staleMs) {
     raw = await readFile(lockPath, 'utf8');
     owner = JSON.parse(raw);
   } catch { owner = null; }
-  return { raw, abandoned: Date.now() - info.mtimeMs > staleMs && !processIsAlive(owner?.pid) };
+  const ageMs = Date.now() - info.mtimeMs;
+  // PID reuse or EPERM can make a dead owner look alive forever; locks guard
+  // millisecond-scale appends, so a very old lock is reclaimable regardless.
+  return { raw, abandoned: (ageMs > staleMs && !processIsAlive(owner?.pid)) || ageMs > HARD_STALE_LOCK_MS };
 }
 
 // Rename-based reclaim: unlinking by path could delete a fresh lock created by
@@ -103,10 +108,22 @@ async function readJournalState(filePath) {
       if (!line.trim()) continue;
       try { JSON.parse(line); count += 1; } catch { /* torn tail; repaired by doctor */ }
     }
-    return { count, endsWithNewline: raw.length === 0 || raw.endsWith('\n') };
+    return { count, endsWithNewline: raw.length === 0 || raw.endsWith('\n'), missing: false };
   } catch (error) {
-    if (error.code === 'ENOENT') return { count: 0, endsWithNewline: true };
+    if (error.code === 'ENOENT') return { count: 0, endsWithNewline: true, missing: true };
     throw error;
+  }
+}
+
+async function syncDirectory(directory) {
+  let handle;
+  try {
+    handle = await open(directory, 'r');
+    await handle.sync();
+  } catch (error) {
+    if (!['EINVAL', 'ENOTSUP', 'EISDIR', 'EPERM'].includes(error.code)) throw error;
+  } finally {
+    await handle?.close();
   }
 }
 
@@ -118,7 +135,9 @@ export async function appendJournalRecord(filePath, payload) {
       journalVersion: 1,
       sequence: journal.count + 1,
       recordedAt: new Date().toISOString(),
-      payload
+      // Hash what verification will parse back from disk: values with toJSON
+      // (Date) would otherwise produce permanently checksum-invalid records.
+      payload: payload === undefined ? null : JSON.parse(JSON.stringify(payload))
     };
     entry.checksum = checksum(entry);
     await mkdir(path.dirname(filePath), { recursive: true });
@@ -128,6 +147,7 @@ export async function appendJournalRecord(filePath, payload) {
       await handle.sync();
     }
     finally { await handle.close(); }
+    if (journal.missing) await syncDirectory(path.dirname(filePath));
     return entry;
   } finally {
     await release();

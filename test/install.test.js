@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,18 +19,23 @@ test('installs both CLI integrations idempotently without editing root instructi
   assert.equal(codexHooks.hooks.UserPromptSubmit.length, 1);
   assert.equal(codexHooks.hooks.Stop.length, 1);
   const codexPromptCommand = codexHooks.hooks.UserPromptSubmit[0].hooks[0].command;
-  assert.match(codexPromptCommand, /git rev-parse.*\|\| pwd/);
+  assert.match(codexPromptCommand, /\.aorch\/hooks\/user-prompt-submit\.mjs/);
   if (process.platform !== 'win32') {
     // Use a non-login shell: hosts execute hook commands with `sh -c`, and a
-    // login shell would source user profiles that may pollute stdout.
+    // login shell would source user profiles that may pollute stdout. Run from
+    // a nested directory to prove the hook locates the install upward
+    // (monorepo package installs must not depend on the git toplevel).
+    const nested = path.join(projectRoot, 'packages/app');
+    await mkdir(nested, { recursive: true });
     const hookResult = spawnSync('/bin/sh', ['-c', codexPromptCommand], {
-      cwd: projectRoot,
-      input: JSON.stringify({ prompt: 'Explain this project.', cwd: projectRoot }),
+      cwd: nested,
+      input: JSON.stringify({ prompt: 'Explain this project.', cwd: nested }),
       encoding: 'utf8'
     });
     assert.equal(hookResult.status, 0, hookResult.stderr);
     assert.match(JSON.parse(hookResult.stdout).hookSpecificOutput.additionalContext, /orchestrator must run first/i);
   }
+  assert.match(await readFile(path.join(projectRoot, '.aorch/schemas/session-retrospective.schema.json'), 'utf8'), /Retrospective/);
   assert.match(await readFile(path.join(projectRoot, '.aorch/hooks/gate.mjs'), 'utf8'), /classifyPrompt/);
   assert.match(await readFile(path.join(projectRoot, '.aorch/hooks/journal.mjs'), 'utf8'), /appendJournalRecord/);
   const claudeSkill = await readFile(path.join(projectRoot, '.claude/skills/adaptive-orchestrate/SKILL.md'), 'utf8');

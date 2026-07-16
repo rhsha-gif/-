@@ -1,4 +1,4 @@
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { atomicWriteJson, withFileLock } from './file-store.js';
@@ -15,9 +15,16 @@ async function exists(filePath) {
   try { await access(filePath); return true; } catch { return false; }
 }
 
-function assertInsideRoot(root, candidate) {
-  const resolvedRoot = path.resolve(root);
-  const resolved = path.resolve(candidate);
+async function resolveReal(candidate) {
+  try { return await realpath(candidate); }
+  catch { return path.resolve(candidate); }
+}
+
+// Compare realpaths so a pointer written via a symlinked project alias is not
+// misjudged as escaping the state root when inspected via the physical path.
+async function assertInsideRoot(root, candidate) {
+  const resolvedRoot = await resolveReal(root);
+  const resolved = await resolveReal(candidate);
   const relative = path.relative(resolvedRoot, resolved);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(`Run path is outside state root: ${resolved}`);
@@ -139,13 +146,21 @@ export async function resolveActiveRun(root) {
   if (typeof pointer.runPath !== 'string' || pointer.runPath.trim() === '') {
     throw new Error('Active run pointer is invalid');
   }
-  const runPath = assertInsideRoot(root, pointer.runPath);
+  const runPath = await assertInsideRoot(root, pointer.runPath);
   const state = await loadRun(runPath);
   return { ...state, path: runPath, dir: path.dirname(runPath) };
 }
 
+const PATCHABLE_TASK_FIELDS = new Set([
+  'status', 'fraction', 'note', 'blocker', 'evidence', 'evidenceCount', 'lastEvidenceAt', 'progressConfidence'
+]);
+
 export async function updateTaskState(runPath, taskId, patch) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new TypeError('task patch must be an object');
+  const unknown = Object.keys(patch).filter((field) => !PATCHABLE_TASK_FIELDS.has(field));
+  if (unknown.length > 0) {
+    throw new TypeError(`task patch cannot modify: ${unknown.join(', ')}`);
+  }
   return mutateRun(runPath, (state) => {
     if (state.status !== 'running') throw new Error(`Cannot update tasks in terminal run ${state.id}`);
     const index = state.tasks.findIndex((task) => task.id === taskId);

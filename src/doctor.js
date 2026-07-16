@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { access, readFile, unlink } from 'node:fs/promises';
+import { access, readFile, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { inspectFileStore } from './file-store.js';
 
@@ -7,9 +7,17 @@ async function exists(filePath) {
   try { await access(filePath); return true; } catch { return false; }
 }
 
-function assertInsideRoot(root, candidate) {
-  const resolvedRoot = path.resolve(root);
-  const resolved = path.resolve(candidate);
+async function resolveReal(candidate) {
+  try { return await realpath(candidate); }
+  catch { return path.resolve(candidate); }
+}
+
+// Compare realpaths: a pointer created through a symlinked project alias must
+// not be judged "outside the state root" (and deleted by --repair) merely
+// because doctor runs from the physical path.
+async function assertInsideRoot(root, candidate) {
+  const resolvedRoot = await resolveReal(root);
+  const resolved = await resolveReal(candidate);
   const relative = path.relative(resolvedRoot, resolved);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(`Active run path is outside state root: ${resolved}`);
@@ -28,7 +36,7 @@ async function inspectActiveRunPointer(root, { repair = false } = {}) {
     if (typeof pointer.runPath !== 'string' || pointer.runPath.trim() === '') {
       throw new Error('Active run pointer requires a non-empty runPath');
     }
-    const runPath = assertInsideRoot(root, pointer.runPath);
+    const runPath = await assertInsideRoot(root, pointer.runPath);
     const run = JSON.parse(await readFile(runPath, 'utf8'));
     if (!run || typeof run !== 'object' || typeof run.id !== 'string' || run.id.trim() === '') {
       throw new Error('Active run target is not a valid run state');

@@ -156,13 +156,20 @@ export function mergeCapabilities(configured = [], discovered = []) {
     const actual = discoveredMap.get(`${entry.type}:${entry.id}`);
     if (!actual) return { ...entry };
     discoveredMap.delete(`${entry.type}:${entry.id}`);
+    // Explicit config trust covers artifacts in the config's own trust domain
+    // (the project). A user-global artifact that merely collides with a
+    // configured ID must not inherit that tier, or dropping a directory into
+    // ~/.claude/skills would escalate it to trusted for critical tasks.
+    const trustTier = actual.sourceScope === 'project'
+      ? (entry.trustTier ?? actual.trustTier)
+      : conservativeTrust(entry.trustTier ?? actual.trustTier, actual.trustTier);
     return {
       ...entry,
       ...actual,
       description: actual.description || entry.description,
       providers: actual.providers,
       enabled: true,
-      trustTier: entry.trustTier ?? actual.trustTier ?? 'reviewed'
+      ...(trustTier === undefined ? {} : { trustTier })
     };
   });
   return combine([...merged, ...discoveredMap.values()]);

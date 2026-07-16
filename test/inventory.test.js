@@ -48,6 +48,26 @@ test('configured trust metadata cannot be upgraded by discovery', () => {
   assert.equal(merged[0].trustTier, 'untrusted');
 });
 
+test('a user-global artifact colliding with a trusted catalog template does not inherit trusted tier', () => {
+  const merged = mergeCapabilities(
+    [{ id: 'browser-qa', type: 'plugin', providers: ['*'], enabled: false, trustTier: 'trusted' }],
+    [{
+      id: 'browser-qa', type: 'plugin', providers: ['anthropic'], enabled: true,
+      path: '/home/user/.claude/plugins/browser-qa', trustTier: 'untrusted', sourceScope: 'user'
+    }]
+  );
+  assert.equal(merged[0].trustTier, 'untrusted');
+
+  const projectScoped = mergeCapabilities(
+    [{ id: 'browser-qa', type: 'plugin', providers: ['*'], enabled: false, trustTier: 'trusted' }],
+    [{
+      id: 'browser-qa', type: 'plugin', providers: ['anthropic'], enabled: true,
+      path: '/proj/.claude/plugins/browser-qa', trustTier: 'reviewed', sourceScope: 'project'
+    }]
+  );
+  assert.equal(projectScoped[0].trustTier, 'trusted');
+});
+
 test('a catalog template without explicit trust cannot promote an untrusted user-global discovery', () => {
   const merged = mergeCapabilities(
     [{ id: 'home-skill', type: 'skill', providers: ['*'], enabled: false }],

@@ -57,6 +57,28 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  --observations <path> Reviewed outcomes JSONL\n` +
   `  --verification-timeout-ms <n> Independent verification timeout per command\n`;
 
+const BOOLEAN_FLAGS = new Set(['dry-run', 'repair', 'force-config', 'lint', 'project-only', 'help', 'h']);
+
+const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
+const COMMAND_FLAGS = Object.freeze({
+  route: [...COMMON_FLAGS, 'task', 'observations'],
+  exec: [...COMMON_FLAGS, 'task', 'observations', 'timeout-ms', 'verification-timeout-ms', 'dry-run'],
+  verify: [...COMMON_FLAGS, 'task', 'receipt', 'run-dir', 'isolation', 'verification-timeout-ms'],
+  record: [...COMMON_FLAGS, 'input', 'observations'],
+  inventory: [...COMMON_FLAGS],
+  lessons: [...COMMON_FLAGS, 'lint', 'query', 'limit'],
+  progress: [...COMMON_FLAGS, 'tasks', 'run'],
+  run: [...COMMON_FLAGS, 'action', 'input', 'run', 'task', 'status', 'fraction', 'note', 'proposal', 'decision', 'comment'],
+  install: ['cwd', 'help', 'h', 'target', 'project', 'force-config'],
+  doctor: [...COMMON_FLAGS, 'repair']
+});
+
+function coerceBoolean(rawKey, value) {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`--${rawKey} is a boolean flag; pass it without a value or as --${rawKey}=true|false`);
+}
+
 function parseArgs(argv) {
   const args = [...argv];
   const command = args[0]?.startsWith('-') ? null : args.shift();
@@ -69,6 +91,14 @@ function parseArgs(argv) {
       continue;
     }
     const [rawKey, inline] = item.slice(2).split('=', 2);
+    if (BOOLEAN_FLAGS.has(rawKey)) {
+      // Never let a boolean flag silently swallow a value: `--dry-run true`
+      // must not degrade to a real execution because 'true' !== true.
+      if (inline !== undefined) flags[rawKey] = coerceBoolean(rawKey, inline);
+      else if (args[0] === 'true' || args[0] === 'false') flags[rawKey] = coerceBoolean(rawKey, args.shift());
+      else flags[rawKey] = true;
+      continue;
+    }
     if (inline !== undefined) flags[rawKey] = inline;
     else if (args[0] && !args[0].startsWith('--')) flags[rawKey] = args.shift();
     else flags[rawKey] = true;
@@ -76,10 +106,35 @@ function parseArgs(argv) {
   return { command, flags, positionals };
 }
 
+function validateCommandArgs(command, flags, positionals) {
+  const allowed = COMMAND_FLAGS[command];
+  if (!allowed) return;
+  if (positionals.length > 0) {
+    throw new Error(`Unexpected argument for ${command}: ${positionals[0]}`);
+  }
+  const allowedSet = new Set(allowed);
+  for (const name of Object.keys(flags)) {
+    if (!allowedSet.has(name)) {
+      throw new Error(`Unknown option for ${command}: --${name}`);
+    }
+  }
+}
+
 function requireFlag(flags, name) {
   const value = flags[name];
   if (!value || value === true) throw new Error(`--${name} is required`);
   return value;
+}
+
+function numericFlag(flags, name) {
+  const value = flags[name];
+  if (value === undefined) return undefined;
+  if (value === true) throw new Error(`--${name} requires a numeric value`);
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) {
+    throw new RangeError(`--${name} must be a non-negative number of milliseconds`);
+  }
+  return number;
 }
 
 async function readJson(filePath, cwd) {
@@ -196,11 +251,12 @@ async function handleRunCommand({ flags, cwd, config }) {
 }
 
 async function main(argv = process.argv.slice(2)) {
-  const { command, flags } = parseArgs(argv);
+  const { command, flags, positionals } = parseArgs(argv);
   if (!command || command === 'help' || flags.help || flags.h) {
     process.stdout.write(HELP);
     return 0;
   }
+  validateCommandArgs(command, flags, positionals);
   const cwd = path.resolve(flags.cwd || process.cwd());
 
   if (command === 'install') {
@@ -228,6 +284,8 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   if (command === 'exec') {
+    const timeoutMs = numericFlag(flags, 'timeout-ms');
+    const verificationTimeoutMs = numericFlag(flags, 'verification-timeout-ms');
     const task = validateTask(await readJson(requireFlag(flags, 'task'), cwd), { forExecution: true });
     const observations = await readObservations(resolveObservationPath(config, flags, cwd));
     const result = await executeTask({
@@ -235,8 +293,8 @@ async function main(argv = process.argv.slice(2)) {
       config,
       observations,
       cwd,
-      timeoutMs: flags['timeout-ms'] ? Number(flags['timeout-ms']) : 0,
-      verificationTimeoutMs: flags['verification-timeout-ms'] ? Number(flags['verification-timeout-ms']) : undefined,
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      verificationTimeoutMs,
       dryRun: flags['dry-run'] === true
     });
     const output = flags['dry-run'] === true
@@ -257,7 +315,7 @@ async function main(argv = process.argv.slice(2)) {
       : (task.verificationIsolation ?? config.verification?.isolationByRisk?.[task.risk] ?? 'same-workspace');
     const attestation = await verifyTaskClaim({
       task, receipt, cwd, runDir, isolationMode,
-      timeoutMs: flags['verification-timeout-ms'] ? Number(flags['verification-timeout-ms']) : config.verification?.commandTimeoutMs
+      timeoutMs: numericFlag(flags, 'verification-timeout-ms') ?? config.verification?.commandTimeoutMs
     });
     process.stdout.write(`${JSON.stringify({ attestation, attestationPath: attestation.path, runDir }, null, 2)}\n`);
     return 0;

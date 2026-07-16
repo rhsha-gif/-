@@ -49,6 +49,32 @@ test('journal repair removes a partial tail while preserving valid records', asy
   assert.deepEqual(after.records, [{ event: 'valid' }]);
 });
 
+test('repair refuses to delete valid records that follow mid-journal damage', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-journal-midfile-'));
+  const file = path.join(root, 'events.jsonl');
+  for (let index = 0; index < 3; index += 1) await appendJournalRecord(file, { index });
+
+  const lines = (await readFile(file, 'utf8')).trim().split('\n');
+  lines[1] = lines[1].slice(0, 20);
+  await writeFile(file, `${lines.join('\n')}\n`);
+
+  const repaired = await repairJournal(file);
+  assert.equal(repaired.repaired, false);
+  assert.equal(repaired.requiresManualIntervention, true);
+  const after = await readJournal(file, { tolerateCorruption: true });
+  assert.equal((await readFile(file, 'utf8')).trim().split('\n').length, 3);
+  assert.ok(after.issues.length > 0);
+});
+
+test('journal payloads with toJSON values round-trip without checksum corruption', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-journal-date-'));
+  const file = path.join(root, 'events.jsonl');
+  await appendJournalRecord(file, { startedAt: new Date('2026-01-01T00:00:00Z'), note: 'x' });
+  const journal = await readJournal(file);
+  assert.equal(journal.issues.length, 0);
+  assert.equal(journal.records[0].startedAt, '2026-01-01T00:00:00.000Z');
+});
+
 test('hook journal appends survive a torn tail line and stay sequence-valid after repair', async () => {
   const { appendJournalRecord: hookAppend } = await import('../integrations/shared/journal.mjs');
   const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-journal-torn-'));

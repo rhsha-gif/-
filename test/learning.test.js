@@ -289,3 +289,36 @@ test('retrospective errors require evidence and relevance tags before becoming m
     })
   }), /evidence.*at least one|tags.*at least one/i);
 });
+
+test('lesson confidence is derived idempotently and revisions add no phantom confidence', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-learning-confidence-'));
+  const errorEntry = {
+    id: 'E-conf',
+    description: 'A verification command used a relative path from the wrong directory.',
+    evidence: ['R1/stderr.log'],
+    prevention: 'Resolve verification paths from the project root before dispatch.',
+    tags: ['verification', 'path'],
+    confidence: 0.5
+  };
+  const run = await createRun({ root, prompt: 'build it', runId: 'RCONF', tasks: [] });
+  await finishRun(run.path, 'completed');
+  const input = reflection('RCONF', {
+    errors: [errorEntry], inefficiencies: [], technicalDebt: [], proposals: []
+  });
+  await saveRetrospective({ root, runPath: run.path, input });
+  for (let revision = 0; revision < 5; revision += 1) {
+    await saveRetrospective({ root, runPath: run.path, input });
+  }
+  const lessons = await loadLessons({ root, query: 'verification path', limit: 5 });
+  assert.equal(lessons.length, 1);
+  assert.equal(lessons[0].occurrences, 1);
+  assert.equal(lessons[0].confidence, 0.5);
+});
+
+test('an explicit lessons limit of zero returns no lessons', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-learning-limit-'));
+  const run = await createRun({ root, prompt: 'build it', runId: 'RL0', tasks: [] });
+  await finishRun(run.path, 'completed');
+  await saveRetrospective({ root, runPath: run.path, input: reflection('RL0') });
+  assert.deepEqual(await loadLessons({ root, limit: 0 }), []);
+});

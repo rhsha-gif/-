@@ -84,7 +84,7 @@ test('write claims fail closed when Git change evidence is unavailable', async (
     beforeState: state,
     afterState: state,
     isolationMode: 'same-workspace'
-  }), /write task.*Git change evidence|Git change evidence.*write task/i);
+  }), /write-task claims require before\/after workspace snapshots/i);
 });
 
 test('bounded workers cannot change Git HEAD to hide committed changes', async (t) => {

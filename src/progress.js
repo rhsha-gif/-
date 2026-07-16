@@ -11,7 +11,9 @@ function completionFraction(task) {
 }
 
 function progressPhase(tasks) {
-  if (tasks.length === 0 || tasks.every((task) => ['complete', 'accepted', 'done', 'cancelled', 'skipped'].includes(task.status))) return 'complete';
+  // No tasks means decomposition has not produced work yet, not completion.
+  if (tasks.length === 0) return 'planning';
+  if (tasks.every((task) => ['complete', 'accepted', 'done', 'cancelled', 'skipped'].includes(task.status))) return 'complete';
   if (tasks.some((task) => task.status === 'blocked')) return 'blocked';
   if (tasks.some((task) => task.status === 'verifying')) return 'verifying';
   if (tasks.some((task) => task.status === 'running')) return 'executing';
@@ -45,7 +47,7 @@ export function calculateProgress(tasks = []) {
     (sum, task) => sum + task.weight * completionFraction(task),
     0
   );
-  const ratio = totalWeight > 0 ? completedWeight / totalWeight : 1;
+  const ratio = totalWeight > 0 ? completedWeight / totalWeight : 0;
   const phase = progressPhase(normalized);
   const blockers = normalized
     .filter((task) => ['blocked', 'failed'].includes(task.status) || task.blocker)

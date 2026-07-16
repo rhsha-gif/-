@@ -42,6 +42,28 @@ test('destructive prompts without a development verb still classify as high-risk
   }
 });
 
+test('destructive verbs veto read-only demotion and explicit read-only cannot mask external actions', () => {
+  const masked = classifyPrompt('drop the users table in production and show me what remains');
+  assert.equal(masked.requestClass, 'high-risk');
+
+  const deploy = classifyPrompt('Deploy the schema migration to production, but do not modify the config file.');
+  assert.equal(deploy.requestClass, 'read-only');
+  assert.equal(deploy.failPolicy, 'closed');
+  assert.equal(deploy.riskHint, 'standard');
+});
+
+test('korean negative connectives count as explicit read-only intent', () => {
+  const result = classifyPrompt('코드를 수정하지 말고 버그 원인만 분석해줘');
+  assert.equal(result.requestClass, 'read-only');
+  assert.equal(result.failPolicy, 'open');
+});
+
+test('everyday english containing order or position does not escalate to critical', () => {
+  assert.equal(classifyPrompt('Refactor the parser in order to simplify error handling').requestClass, 'development');
+  assert.equal(classifyPrompt('Fix the cursor position bug in the editor').requestClass, 'development');
+  assert.equal(classifyPrompt('cancel the order for customer 42 in the trading system').requestClass, 'high-risk');
+});
+
 test('korean prompts classify without relying on ascii word boundaries', () => {
   assert.equal(classifyPrompt('결제 재시도 로직을 구현해줘').requestClass, 'high-risk');
   assert.equal(classifyPrompt('파서 테스트를 고쳐줘').requestClass, 'development');

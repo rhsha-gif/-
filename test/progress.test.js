@@ -76,3 +76,10 @@ test('progress formatter neutralizes multiline and terminal-control blocker text
   assert.equal(output.includes('\u001b'), false);
   assert.match(output, /T1 forged: line one \[aorch\] forged/);
 });
+
+test('a run with no tasks reports planning at 0 percent, not completion', async () => {
+  const { calculateProgress } = await import('../src/progress.js');
+  const result = calculateProgress([]);
+  assert.equal(result.percent, 0);
+  assert.equal(result.phase, 'planning');
+});
