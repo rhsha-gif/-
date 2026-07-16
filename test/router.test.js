@@ -363,3 +363,30 @@ test('models of a disabled provider are never routed', () => {
     observations: []
   }), /no eligible route/i);
 });
+
+test('hard constraints excluding every candidate produce a constraint-specific error', () => {
+  assert.throws(() => selectRoute({
+    task: { ...task, minimumQuality: 0.99 },
+    catalog: { routing: baseRouting, models: [model({ id: 'ordinary' })] },
+    observations: []
+  }), /explicit constraints/i);
+});
+
+test('catalog-level default priorities not starting with quality require a task quality floor', () => {
+  assert.throws(() => selectRoute({
+    task,
+    catalog: {
+      routing: { ...baseRouting, defaultPriorities: ['tokens', 'quality', 'latency'] },
+      models: [model({ id: 'ordinary' })]
+    },
+    observations: []
+  }), /minimumQuality/);
+});
+
+test('a critical task whose catalog matches nothing reports generic ineligibility, not maturity', () => {
+  assert.throws(() => selectRoute({
+    task: { ...task, risk: 'critical', kind: 'nonexistent-kind' },
+    catalog: { routing: baseRouting, models: [model({ id: 'only' })] },
+    observations: []
+  }), /No eligible route/i);
+});

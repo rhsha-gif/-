@@ -51,7 +51,12 @@ test('untrusted capabilities require explicit low-risk read-only opt-in', () => 
   assert.throws(() => selectCapabilities({
     requestedIds: ['untrusted-plugin'], inventory: risky, provider: 'openai',
     task: { risk: 'standard', write: false, allowUntrustedCapabilities: true }
-  }), /trust tier/i);
+  }), /only allowed on low-risk tasks/i);
+
+  assert.throws(() => selectCapabilities({
+    requestedIds: ['untrusted-plugin'], inventory: risky, provider: 'openai',
+    task: { risk: 'low', write: true, allowUntrustedCapabilities: true }
+  }), /not allowed on a write task/i);
 });
 
 test('critical tasks accept only trusted capabilities', () => {

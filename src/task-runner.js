@@ -185,9 +185,11 @@ export async function executeTask({
           ? 'partial'
           : 'failed';
     const confidenceValue = Number(receipt.confidence ?? 0.5);
-    const finalConfidence = finalPhase === 'complete'
-      ? (confidenceValue >= 0.8 ? 'high' : confidenceValue >= 0.5 ? 'medium' : 'low')
-      : 'low';
+    // An inconclusive attestation means nothing independent stands behind the
+    // claim; never report high confidence on the worker's word alone.
+    const finalConfidence = finalPhase !== 'complete' || attestation?.status === 'inconclusive'
+      ? 'low'
+      : (confidenceValue >= 0.8 ? 'high' : confidenceValue >= 0.5 ? 'medium' : 'low');
     const evidenceCount = (receipt.commands?.length ?? 0)
       + (receipt.criteria?.length ?? 0)
       + (attestation?.checks?.length ?? 0);

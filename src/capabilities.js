@@ -48,8 +48,14 @@ export function selectCapabilities({
     }
     if (!isCapabilityAllowedForTask(capability, task, policy)) {
       const trustTier = capability.trustTier ?? 'reviewed';
-      if (trustTier === 'untrusted' && task.allowUntrustedCapabilities !== true) {
-        throw new Error(`Untrusted capability ${id} requires explicit low-risk read-only opt-in`);
+      if (trustTier === 'untrusted') {
+        if (task.allowUntrustedCapabilities !== true) {
+          throw new Error(`Untrusted capability ${id} requires explicit low-risk read-only opt-in`);
+        }
+        if (task.write === true) {
+          throw new Error(`Untrusted capability ${id} is not allowed on a write task`);
+        }
+        throw new Error(`Untrusted capability ${id} is only allowed on low-risk tasks, not ${task.risk ?? 'standard'}`);
       }
       throw new Error(`Capability ${id} trust tier ${trustTier} is not allowed for ${task.risk ?? 'standard'} risk`);
     }

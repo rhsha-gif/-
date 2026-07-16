@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { realpathSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -179,7 +180,13 @@ async function resolveRunReference({ root, cwd, ref = 'active' }) {
   const runPath = candidate.includes('/') || candidate.includes('\\') || candidate.endsWith('.json')
     ? path.resolve(cwd, candidate)
     : path.join(root, 'runs', candidate, 'run.json');
-  const relative = path.relative(path.resolve(root), path.resolve(runPath));
+  // Compare realpaths like state.js/doctor.js so symlinked state roots behave
+  // consistently across every containment check.
+  const resolveReal = async (target) => {
+    try { return await realpath(target); }
+    catch { return path.resolve(target); }
+  };
+  const relative = path.relative(await resolveReal(root), await resolveReal(runPath));
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error('run reference resolves outside the configured state root');
   }

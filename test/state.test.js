@@ -82,3 +82,29 @@ test('concurrent updates to different tasks do not overwrite each other', async 
   assert.equal(loaded.tasks.find((task) => task.id === 'T1').fraction, 0.25);
   assert.equal(loaded.tasks.find((task) => task.id === 'T2').fraction, 0.75);
 });
+
+test('task patches cannot rewrite identity or weight and terminal runs reject updates', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-state-patch-guard-'));
+  const run = await createRun({ root, prompt: 'guard', tasks: [{ id: 'T1', weight: 2 }, { id: 'T2', weight: 1 }] });
+  await assert.rejects(
+    () => updateTaskState(run.path, 'T1', { status: 'running', id: 'T2', weight: -3 }),
+    /cannot modify: id, weight/
+  );
+  await updateTaskState(run.path, 'T1', { status: 'complete' });
+  await updateTaskState(run.path, 'T2', { status: 'complete' });
+  await finishRun(run.path, 'completed');
+  await assert.rejects(
+    () => updateTaskState(run.path, 'T1', { status: 'running' }),
+    /terminal run/i
+  );
+});
+
+test('an active-run pointer escaping the state root is rejected', async () => {
+  const { atomicWriteJson } = await import('../src/file-store.js');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-state-escape-'));
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'aorch-state-outside-'));
+  const foreignRun = path.join(outside, 'run.json');
+  await atomicWriteJson(foreignRun, { version: 1, id: 'EVIL', status: 'running', tasks: [] });
+  await atomicWriteJson(path.join(root, 'active-run.json'), { runPath: foreignRun });
+  await assert.rejects(() => resolveActiveRun(root), /outside state root/i);
+});

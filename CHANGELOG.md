@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.3.1 - Unreleased
+
+### Correctness and crash fixes
+
+- Handle `EPIPE` on worker stdin: a worker CLI that exits without consuming its prompt no longer crashes the whole orchestrator process.
+- Korean gate patterns never matched because JavaScript `\b` has no word boundary next to Hangul; all Korean classification patterns now work.
+- Destructive prompts without a development verb (`drop the users table in production`) and destructive prompts padded with display verbs (`... and show me what remains`) now classify high-risk/fail-closed instead of read-only/fail-open.
+- Explicit read-only phrasing no longer masks external actions (`deploy ..., do not modify any files`), and Korean negative connectives (`수정하지 말고`) are recognized as explicit read-only intent.
+- Bare `order`/`position` no longer escalate everyday prompts (`in order to`, `cursor position`) to critical.
+- `--dry-run true` used to silently run a real execution: boolean flags no longer swallow values, unknown options fail loudly, and non-numeric timeouts are rejected instead of disabling the timeout.
+- Bounded workers now default to a 60-minute watchdog (explicit `--timeout-ms 0` disables) instead of hanging forever.
+
+### Durable-state hardening
+
+- Stale locks are reclaimed by atomic rename with content verification, closing a race where two reclaimers could both acquire the lock.
+- Locks older than a hard ceiling are reclaimable even when the recorded PID appears alive (PID reuse, EPERM); `release()` is retryable after transient unlink failures.
+- `doctor --repair` refuses to rewrite a journal when damage precedes valid records; it previously deleted every record after a mid-file corruption.
+- Journal payload checksums now hash the JSON round-trip, so `Date`-like values no longer produce permanently unreadable records; appends after a torn tail line start on a fresh line and stay sequence-valid; new journal files fsync their directory entry.
+- The hook-side journal counts only parseable records for sequencing, matching `readJournal` semantics.
+- Active-run containment checks compare realpaths, so symlinked project aliases are no longer misjudged (and no longer repair-deleted); a pointer to a missing run file blocks the Stop gate instead of silently disabling reflection.
+- Task patches are field-whitelisted; a patch can no longer rewrite task `id` or `weight`.
+
+### Routing, trust, and verification
+
+- The router respects `provider.enabled`, uses a locale-independent tie-break, and reports generic ineligibility before the critical challenger gate so an empty candidate set is not misattributed to model maturity.
+- `executeTask` reports low confidence when the attestation is inconclusive; capability rejection errors name the actual reason (write vs risk vs opt-in); doctor reports `exit N` when a provider CLI fails silently.
+- Removed the unused `saveRun` export, whose blind load-then-save pattern would clobber concurrent updates; all run writes go through the re-reading `mutateRun` path.
+- A partial or blocked worker receipt is still compared against actual workspace changes; a lying worker cannot hide in-place mutations behind a non-complete status.
+- Attestations report `inconclusive` instead of `pass` when zero checks ran and no change evidence was verified.
+- Verifier checks run in a non-login shell so user profiles cannot pollute hashed stdout/stderr evidence.
+- Config capability entries no longer receive an implicit `reviewed` trust default, and a user-global artifact colliding with a configured template ID merges with conservative trust instead of inheriting `trusted`.
+- Lesson confidence derives idempotently from raw evidence confidence instead of compounding across revisions; an explicit `--limit 0` returns no lessons.
+- Empty-task runs report `planning` at 0% instead of `complete` at 100%.
+
+### Install and integration
+
+- Existing settings/hooks JSON is parsed before any file is written, with the file path in parse errors; non-array hook events are rejected with context.
+- Codex hooks locate `.aorch/hooks` by upward search, so monorepo package installs work regardless of the git toplevel.
+- `schemas/` is installed into `.aorch/schemas/` and skill instructions reference the installed path.
+- The shipped review-observation example now uses an effort that the shipped catalog can actually produce.
+
 ## 0.3.0 - 2026-07-16
 
 ### Control-plane hardening

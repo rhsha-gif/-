@@ -233,10 +233,6 @@ async function prepareVerificationWorkspace({ cwd, state, isolationMode }) {
   }
 }
 
-async function persistJson(filePath, value) {
-  await atomicWriteJson(filePath, value);
-}
-
 async function runChecks({ checks, cwd, evidenceDir, timeoutMs, onStep }) {
   const results = [];
   for (let index = 0; index < checks.length; index += 1) {
@@ -309,8 +305,8 @@ export async function verifyTaskClaim({
     };
     attestation.evidenceDigest = sha256(attestation);
     const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await persistJson(attestationPath, attestation);
-    await persistJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
+    await atomicWriteJson(attestationPath, attestation);
+    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
     throw new VerificationError(`Independent verification failed: ${error.message}`, { ...attestation, path: attestationPath });
   }
 
@@ -335,8 +331,8 @@ export async function verifyTaskClaim({
     };
     attestation.evidenceDigest = sha256(attestation);
     const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await persistJson(attestationPath, attestation);
-    await persistJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
+    await atomicWriteJson(attestationPath, attestation);
+    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
     throw new VerificationError(`Independent verification failed: ${error.message}`, { ...attestation, path: attestationPath });
   }
 
@@ -367,8 +363,8 @@ export async function verifyTaskClaim({
     };
     attestation.evidenceDigest = sha256(attestation);
     const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await persistJson(attestationPath, attestation);
-    await persistJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
+    await atomicWriteJson(attestationPath, attestation);
+    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
     if (failed) {
       throw new VerificationError(`Independent verification failed: verifier check failed: ${failed.command}`, {
         ...attestation,

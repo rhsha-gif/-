@@ -271,3 +271,35 @@ test('write workers require an isolated worktree unless low or standard risk is 
     cwd
   }), /high-risk.*worktree|worktree.*high-risk/i);
 });
+
+test('a complete claim with nothing verifiable yields an inconclusive attestation and low confidence', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-inconclusive-'));
+  const workerPath = path.join(cwd, 'fake-worker.mjs');
+  const unverifiableReceipt = {
+    status: 'complete',
+    summary: 'Claimed complete with no verifiable evidence.',
+    filesInspected: [], filesChanged: [], commands: [],
+    criteria: [{ criterion: 'nothing to verify', status: 'pass', evidence: 'worker assertion only' }],
+    unresolvedRisks: [], confidence: 0.95
+  };
+  await writeFile(workerPath, `process.stdin.resume(); process.stdin.on('end', () => process.stdout.write(${JSON.stringify(JSON.stringify(unverifiableReceipt))}));`);
+  const config = {
+    routing: { qualityTolerance: 0.01, tokenTolerance: 0.08 },
+    providers: [{ id: 'local-test', adapter: 'generic', enabled: true, executable: process.execPath, args: [workerPath] }],
+    models: [{
+      id: 'local-test-model', provider: 'local-test', model: 'fixture', enabled: true,
+      roles: ['executor'], taskKinds: ['testing'], quality: { default: 0.9 },
+      tokenIndex: 1, latencyIndex: 1, maturity: 'stable',
+      efforts: [{ name: 'medium', qualityDelta: 0, tokenMultiplier: 1, latencyMultiplier: 1 }]
+    }],
+    capabilities: [], progress: { intervalMinutes: 30 }, paths: { stateDir: '.aorch' }
+  };
+  const progress = [];
+  const result = await executeTask({
+    task: { ...task, id: 'T-unverifiable', verificationCommands: [], acceptanceCriteria: ['nothing to verify'] },
+    config, cwd,
+    onProgress: (entry) => progress.push(entry)
+  });
+  assert.equal(result.attestation.status, 'inconclusive');
+  assert.equal(progress.at(-1).confidence, 'low');
+});

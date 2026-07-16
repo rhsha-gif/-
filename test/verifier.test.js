@@ -177,3 +177,93 @@ test('workspace isolation inspection distinguishes the primary checkout from a l
     spawnSync('git', ['worktree', 'remove', '--force', linked], { cwd });
   }
 });
+
+test('zero replayed checks with unverified change evidence attest inconclusive, not pass', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-inconclusive-'));
+  const runDir = path.join(cwd, '.aorch/task-runs/R/T-inconclusive');
+  const attestation = await verifyTaskClaim({
+    task: { ...baseTask, verificationCommands: [], verifierCommands: [] },
+    receipt: { ...receipt, commands: [] },
+    cwd, runDir, timeoutMs: 5000, isolationMode: 'same-workspace'
+  });
+  assert.equal(attestation.status, 'inconclusive');
+  assert.equal(attestation.checks.length, 0);
+
+  const before = await captureWorkspaceState(cwd);
+  const verified = await verifyTaskClaim({
+    task: baseTask, receipt, cwd, runDir, beforeState: before, afterState: before,
+    timeoutMs: 5000, isolationMode: 'same-workspace'
+  });
+  assert.equal(verified.status, 'pass');
+});
+
+test('evidenceDigest binds to the attestation content, not just any 64-hex string', async () => {
+  const { sha256 } = await import('../src/verifier.js');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-digest-'));
+  const runDir = path.join(cwd, '.aorch/task-runs/R/T-digest');
+  const before = await captureWorkspaceState(cwd);
+  const attestation = await verifyTaskClaim({
+    task: baseTask, receipt, cwd, runDir, beforeState: before, afterState: before,
+    timeoutMs: 5000, isolationMode: 'same-workspace'
+  });
+  const persisted = JSON.parse(await readFile(attestation.path, 'utf8'));
+  const { evidenceDigest, ...withoutDigest } = persisted;
+  assert.equal(sha256(withoutDigest), evidenceDigest);
+});
+
+test('a verification command exceeding the timeout fails the attestation', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-timeout-'));
+  const runDir = path.join(cwd, '.aorch/task-runs/R/T-timeout');
+  const hangingTask = {
+    ...baseTask,
+    verificationCommands: [`${process.execPath} -e "setTimeout(() => {}, 60000)"`],
+    verifierCommands: []
+  };
+  await assert.rejects(() => verifyTaskClaim({
+    task: hangingTask,
+    receipt: { ...receipt, commands: [{ command: hangingTask.verificationCommands[0], exitCode: 0, outcome: 'claimed' }] },
+    cwd, runDir, timeoutMs: 500, isolationMode: 'same-workspace'
+  }), /verifier check failed/i);
+  const index = JSON.parse(await readFile(path.join(runDir, 'verification-latest.json'), 'utf8'));
+  const failed = JSON.parse(await readFile(index.attestationPath, 'utf8'));
+  assert.equal(failed.status, 'fail');
+  assert.equal(failed.checks[0].timedOut, true);
+});
+
+test('untracked files are replayed into the isolated worktree for verification', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-untracked-'));
+  spawnSync('git', ['init', '-q'], { cwd });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd });
+  await writeFile(path.join(cwd, 'tracked.txt'), 'baseline\n');
+  spawnSync('git', ['add', '.'], { cwd });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd });
+
+  const before = await captureWorkspaceState(cwd);
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(path.join(cwd, 'generated/deep'), { recursive: true });
+  await writeFile(path.join(cwd, 'generated/deep/artifact.txt'), 'from worker\n');
+  const after = await captureWorkspaceState(cwd);
+
+  const attestation = await verifyTaskClaim({
+    task: {
+      ...baseTask,
+      write: true,
+      allowedScope: ['generated/**'],
+      verificationCommands: [`${process.execPath} -e "require('node:fs').accessSync('generated/deep/artifact.txt')"`],
+      verifierCommands: []
+    },
+    receipt: {
+      ...receipt,
+      filesChanged: ['generated/deep/artifact.txt'],
+      commands: [{ command: `${process.execPath} -e "require('node:fs').accessSync('generated/deep/artifact.txt')"`, exitCode: 0, outcome: 'exists' }]
+    },
+    cwd, runDir: path.join(cwd, '.aorch/run'),
+    beforeState: before, afterState: after,
+    timeoutMs: 10000, isolationMode: 'git-worktree'
+  });
+  assert.equal(attestation.status, 'pass');
+  assert.equal(attestation.isolation, 'git-worktree');
+});

@@ -81,7 +81,7 @@ export function checkExecutable(provider) {
     executable,
     status: result.status === 0 ? 'pass' : 'fail',
     version: result.status === 0 ? result.stdout.trim() || result.stderr.trim() : null,
-    reason: result.status === 0 ? null : (result.error?.message ?? result.stderr.trim() ?? `exit ${result.status}`)
+    reason: result.status === 0 ? null : (result.error?.message ?? (result.stderr.trim() || `exit ${result.status}`))
   };
 }
 

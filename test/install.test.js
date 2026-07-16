@@ -51,3 +51,42 @@ test('rejects unknown installation targets', async () => {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-install-target-'));
   await assert.rejects(() => installProject({ projectRoot, target: 'mystery' }), /target/i);
 });
+
+test('install preserves pre-existing user hooks and settings keys and never touches root instruction files', async () => {
+  const { writeFile } = await import('node:fs/promises');
+  const { access } = await import('node:fs/promises');
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-install-merge-'));
+  await mkdir(path.join(projectRoot, '.claude'), { recursive: true });
+  const userHook = {
+    hooks: [{ type: 'command', command: 'node my-own-hook.mjs' }]
+  };
+  await writeFile(path.join(projectRoot, '.claude/settings.json'), JSON.stringify({
+    permissions: { allow: ['Bash(ls:*)'] },
+    hooks: { UserPromptSubmit: [userHook] }
+  }));
+
+  await installProject({ projectRoot, target: 'claude' });
+  await installProject({ projectRoot, target: 'claude' });
+
+  const settings = JSON.parse(await readFile(path.join(projectRoot, '.claude/settings.json'), 'utf8'));
+  assert.deepEqual(settings.permissions, { allow: ['Bash(ls:*)'] });
+  assert.equal(settings.hooks.UserPromptSubmit.length, 2);
+  assert.equal(settings.hooks.UserPromptSubmit[0].hooks[0].command, 'node my-own-hook.mjs');
+
+  for (const rootFile of ['CLAUDE.md', 'AGENTS.md']) {
+    await assert.rejects(() => access(path.join(projectRoot, rootFile)), /ENOENT/, rootFile);
+  }
+});
+
+test('install refuses to run when an existing settings file is malformed, before mutating anything', async () => {
+  const { writeFile, access } = await import('node:fs/promises');
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-install-broken-'));
+  await mkdir(path.join(projectRoot, '.claude'), { recursive: true });
+  await writeFile(path.join(projectRoot, '.claude/settings.json'), '{ broken');
+
+  await assert.rejects(
+    () => installProject({ projectRoot, target: 'claude' }),
+    /Cannot parse existing JSON at .*settings\.json/
+  );
+  await assert.rejects(() => access(path.join(projectRoot, '.aorch')), /ENOENT/);
+});

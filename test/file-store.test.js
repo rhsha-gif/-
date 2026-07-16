@@ -134,3 +134,14 @@ test('an old lock owned by a live process is not reclaimed as stale', async () =
   assert.equal(report.lockReports[0].ownerAlive, true);
   await stat(lockPath);
 });
+
+test('a very old lock is reclaimable even when its recorded pid appears alive', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-lock-hard-stale-'));
+  const lockPath = path.join(root, 'state.json.lock');
+  await writeFile(lockPath, JSON.stringify({ pid: process.pid, createdAt: '2000-01-01T00:00:00Z' }));
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  await utimes(lockPath, twoHoursAgo, twoHoursAgo);
+
+  const release = await acquireFileLock(lockPath, { timeoutMs: 2000 });
+  await release();
+});

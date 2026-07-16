@@ -170,6 +170,12 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
     })
   }));
 
+  // Report generic ineligibility before the critical challenger gate so an
+  // empty candidate set is not misattributed to model maturity.
+  if (candidates.length === 0) {
+    throw new Error(`No eligible route for task ${task.id ?? '<unknown>'}`);
+  }
+
   if (task.risk === 'critical') {
     const minimum = policy.criticalMinimumSamples ?? 3;
     const eligible = candidates.filter((candidate) => {
@@ -180,10 +186,6 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
       throw new Error(`No proven route is eligible for critical task ${task.id ?? '<unknown>'}`);
     }
     candidates = eligible;
-  }
-
-  if (candidates.length === 0) {
-    throw new Error(`No eligible route for task ${task.id ?? '<unknown>'}`);
   }
 
   const beforeConstraints = candidates.length;

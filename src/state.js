@@ -123,12 +123,9 @@ export async function loadRun(runPath) {
   return JSON.parse(await readFile(runPath, 'utf8'));
 }
 
-export async function saveRun(runPath, state) {
-  const next = { ...state, updatedAt: new Date().toISOString() };
-  await withFileLock(`${runPath}.lock`, () => atomicWriteJson(runPath, next));
-  return next;
-}
-
+// Note: there is intentionally no blind load->save API; all writes go through
+// mutateRun, which re-reads under the lock so concurrent updates cannot be
+// clobbered by a stale caller-held snapshot.
 async function mutateRun(runPath, updater) {
   return withFileLock(`${runPath}.lock`, async () => {
     const state = await loadRun(runPath);

@@ -46,12 +46,14 @@ test('termination escalation sends SIGTERM and then SIGKILL after the grace peri
 test('marks a timed-out worker failed and terminates it promptly', async () => {
   const result = await runCommand({
     command: process.execPath,
-    args: ['-e', 'process.on("SIGTERM", () => {}); setTimeout(() => process.exit(0), 600)'],
+    args: ['-e', 'process.on("SIGTERM", () => {}); setTimeout(() => process.exit(0), 5000)'],
     env: {},
     stdin: null
   }, { timeoutMs: 100, killGraceMs: 30 });
   assert.equal(result.timedOut, true);
   assert.equal(result.status, 'failed');
   assert.ok(['SIGTERM', 'SIGKILL'].includes(result.signal));
-  assert.ok(result.durationMs < 500, `worker lived for ${result.durationMs}ms`);
+  // Wide margin below the 5s natural exit: this asserts the kill escalation
+  // fired, not a machine-speed-dependent bound.
+  assert.ok(result.durationMs < 3000, `worker lived for ${result.durationMs}ms`);
 });
