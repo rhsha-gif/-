@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.3.1 - Unreleased
+## 0.4.0 - 2026-07-16
+
+Critical-review hardening release. Every change below fixes a defect confirmed against the running code (most reproduced empirically) during a full-source review of 0.3.0; see `docs/REVIEW-2026-07-16.md` for the report. Test suite grew from 141 (1 failing) to 172, all passing.
 
 ### Correctness and crash fixes
 

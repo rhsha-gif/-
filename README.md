@@ -1,5 +1,7 @@
 # Adaptive Orchestrator
 
+> **v0.4.0** — 0.3.0 전체 소스에 대한 비판적 검토에서 실증된 결함(잠금 회수 경합, 저널 손상 복구, 게이트 오분류, `--dry-run` 안전 강등, 거짓 partial claim 등)을 수정한 하드닝 릴리스입니다. 상세 내역은 [`docs/REVIEW-2026-07-16.md`](docs/REVIEW-2026-07-16.md)와 [`CHANGELOG.md`](CHANGELOG.md)를 참고하세요. 테스트는 141개(1개 실패) → 172개 전부 통과.
+
 Adaptive Orchestrator는 Claude Code 또는 Codex CLI에서 사용자의 실질적인 요청보다 먼저 작동하는 소형 제어 런타임입니다. 요청을 필요 이상으로 쪼개지 않으면서 독립 검증 가능한 작업으로 분해하고, 각 작업에 가장 적합한 조합을 선택합니다.
 
 ```text
