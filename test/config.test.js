@@ -283,3 +283,13 @@ test('prompt profile freshness policy is explicit and bounded', () => {
     assert.throws(() => validateConfig(config), new RegExp(`promptCompilation\\.${field}`, 'i'));
   }
 });
+
+test('validateConfig rejects a non-boolean enabled flag instead of treating it as enabled', () => {
+  const provider = minimalConfig();
+  provider.providers[0].enabled = 'false';
+  assert.throws(() => validateConfig(provider), /provider newco\.enabled must be a boolean/);
+
+  const model = minimalConfig();
+  model.models[0].enabled = 'false';
+  assert.throws(() => validateConfig(model), /model newco-best\.enabled must be a boolean/);
+});

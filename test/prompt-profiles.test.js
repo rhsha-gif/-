@@ -137,3 +137,40 @@ test('prompt profile health reports stale guidance before worker execution', asy
   assert.equal(unhealthy.status, 'fail');
   assert.match(unhealthy.profiles[0].reason, /stale/i);
 });
+
+test('assertPromptProfileFresh rejects a future-dated source even when an older source exists', () => {
+  const now = new Date('2026-07-17T00:00:00Z');
+  assert.throws(
+    () => assertPromptProfileFresh(
+      { id: 'p', verifiedAt: '2026-07-10', officialSources: [{ verifiedAt: '2026-07-10' }, { verifiedAt: '2027-12-31' }] },
+      { now, maxAgeDays: 120, maxFutureSkewDays: 1 }
+    ),
+    /future dated/
+  );
+  // A small, legitimate skew on the newest source is still accepted.
+  assert.ok(assertPromptProfileFresh(
+    { id: 'p', verifiedAt: '2026-07-16', officialSources: [{ verifiedAt: '2026-07-18' }] },
+    { now, maxAgeDays: 120, maxFutureSkewDays: 1 }
+  ).fresh);
+});
+
+test('validatePromptProfile rejects a non-array rules.requiredSections that would crash the linter', () => {
+  const bad = {
+    version: 1, id: 'p', provider: 'anthropic', strategy: 'xml', status: 'active',
+    rules: { requiredSections: 42 }, modelFamilies: ['x'], roles: ['executor'], taskKinds: ['implementation'],
+    verifiedAt: '2026-07-16',
+    officialSources: [{ publisher: 'Anthropic', document: 'd', url: 'https://platform.claude.com/x', verifiedAt: '2026-07-16' }]
+  };
+  assert.throws(() => validatePromptProfile(bad), /requiredSections must be an array/);
+});
+
+test('inspectPromptProfileHealth skips non-active profiles instead of failing on their staleness', async () => {
+  const { inspectPromptProfileHealth } = await import('../src/prompt-profiles.js');
+  const retiredStale = {
+    id: 'old', provider: 'anthropic', status: 'retired', verifiedAt: '2020-01-01',
+    officialSources: [{ verifiedAt: '2020-01-01' }]
+  };
+  const report = inspectPromptProfileHealth([retiredStale], { now: new Date('2026-07-17T00:00:00Z'), policy: { maxProfileAgeDays: 120 } });
+  assert.equal(report.status, 'pass');
+  assert.equal(report.profiles[0].status, 'skipped');
+});

@@ -335,3 +335,36 @@ test('explicit evidence files detect ignored-file changes and replay them in iso
   assert.equal(attestation.status, 'pass');
   assert.deepEqual(attestation.changeEvidence.actualChangedFiles, ['.env']);
 });
+
+function sortValue(value) {
+  if (Array.isArray(value)) return value.map(sortValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortValue(value[key])]));
+  }
+  return value;
+}
+
+test('persisted attestation digest matches its redacted on-disk content even with secret-shaped check output', async () => {
+  const { createHash } = await import('node:crypto');
+  const { readdir } = await import('node:fs/promises');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-digest-'));
+  const runDir = path.join(cwd, '.aorch/task-runs/R/T-verify');
+  const before = await captureWorkspaceState(cwd);
+  // A failing hidden verifier command whose text embeds a token-shaped secret;
+  // the failure message carries the command, which redaction rewrites on disk.
+  const task = {
+    ...baseTask,
+    verifierCommands: [`${process.execPath} -e "console.log('ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'); process.exit(1)"`]
+  };
+  await assert.rejects(() => verifyTaskClaim({
+    task, receipt, cwd, runDir, beforeState: before, afterState: before, timeoutMs: 5000, isolationMode: 'same-workspace'
+  }));
+
+  const dir = path.join(runDir, 'verifier');
+  const sub = (await readdir(dir))[0];
+  const onDisk = JSON.parse(await readFile(path.join(dir, sub, 'attestation.json'), 'utf8'));
+  const { evidenceDigest, ...rest } = onDisk;
+  const recomputed = createHash('sha256').update(Buffer.from(JSON.stringify(sortValue(rest)))).digest('hex');
+  assert.equal(recomputed, evidenceDigest, 'persisted attestation digest must match its redacted on-disk content');
+  assert.doesNotMatch(JSON.stringify(onDisk), /ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ/, 'secret must be redacted on disk');
+});

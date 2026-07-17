@@ -38,3 +38,31 @@ test('prompt manifest schema exposes only delegated bootstrap-only lanes', async
   assert.deepEqual(schema.properties.lane.enum, ['single-worker', 'bundled', 'orchestrated']);
   assert.deepEqual(schema.properties.execution.enum, ['delegated']);
 });
+
+test('packaged integration agents reference a model and reasoning effort the catalog actually supports', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const config = JSON.parse(await readFile(path.join(root, 'config/aorch.config.json'), 'utf8'));
+  const effortsByModel = new Map(config.models.map((model) => [model.model, new Set(model.efforts.map((effort) => effort.name))]));
+
+  const assertSupported = (label, model, effort) => {
+    const efforts = effortsByModel.get(model);
+    assert.ok(efforts, `${label} references model ${model} not present in the catalog`);
+    assert.ok(efforts.has(effort), `${label} pins ${model} at effort '${effort}', which the catalog does not support (${[...efforts].join(', ')})`);
+  };
+
+  const codexDir = path.join(root, 'integrations/codex/agents');
+  for (const file of (await readdir(codexDir)).filter((name) => name.endsWith('.toml'))) {
+    const text = await readFile(path.join(codexDir, file), 'utf8');
+    const model = text.match(/^model\s*=\s*"([^"]+)"/m)?.[1];
+    const effort = text.match(/^model_reasoning_effort\s*=\s*"([^"]+)"/m)?.[1];
+    if (model && effort) assertSupported(`codex agent ${file}`, model, effort);
+  }
+
+  const claudeDir = path.join(root, 'integrations/claude/agents');
+  for (const file of (await readdir(claudeDir)).filter((name) => name.endsWith('.md'))) {
+    const text = await readFile(path.join(claudeDir, file), 'utf8');
+    const model = text.match(/^model:\s*(\S+)/m)?.[1];
+    const effort = text.match(/^effort:\s*(\S+)/m)?.[1];
+    if (model && effort) assertSupported(`claude agent ${file}`, model, effort);
+  }
+});

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   access,
+  link,
   mkdir,
   open,
   readFile,
@@ -65,8 +66,20 @@ async function inspectLockFile(lockPath, staleMs, hardStaleMs = HARD_STALE_LOCK_
 // Reclaim a stale lock without the unlink TOCTOU: unlinking by path could
 // delete a fresh lock created by a concurrent reclaimer. Atomically rename the
 // entry aside, verify it is still the stale lock we inspected, and only then
-// discard it; otherwise restore it.
+// discard it; otherwise restore it without clobbering any newer lock.
 async function reclaimStaleLock(lockPath, inspected) {
+  // The lock judged stale may have been replaced since inspection; renaming a
+  // fresh lock aside breaks its owner's mutual exclusion. Re-check identity
+  // immediately before the rename to shrink that window to near zero.
+  try {
+    const current = await stat(lockPath);
+    if (inspected.info && (current.ino !== inspected.info.ino
+      || current.mtimeMs !== inspected.info.mtimeMs
+      || current.size !== inspected.info.size)) return;
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
   const reclaimPath = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
   try {
     await rename(lockPath, reclaimPath);
@@ -80,7 +93,23 @@ async function reclaimStaleLock(lockPath, inspected) {
     await unlink(reclaimPath).catch(() => {});
     return;
   }
-  await rename(reclaimPath, lockPath).catch(() => unlink(reclaimPath).catch(() => {}));
+  // A different (fresh) lock was vacated. Restore it with a no-clobber link:
+  // a plain rename could overwrite a third lock acquired in the meantime and
+  // leave two processes inside the critical section.
+  try {
+    await link(reclaimPath, lockPath);
+  } catch (error) {
+    if (error.code !== 'EEXIST') {
+      // Filesystems without hard links: fall back to the old best-effort
+      // restore rather than silently dropping the vacated lock.
+      await rename(reclaimPath, lockPath).catch(() => {});
+      return;
+    }
+    // EEXIST: a newer lock now occupies the slot; restoring over it would
+    // break that owner too. Drop the vacated lock instead (its owner's
+    // release() tolerates ENOENT).
+  }
+  await unlink(reclaimPath).catch(() => {});
 }
 
 function stableValue(value) {
@@ -153,9 +182,20 @@ export async function acquireFileLock(lockPath, {
     let handle;
     try {
       handle = await open(lockPath, 'wx', 0o600);
-      await handle.writeFile(`${JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })}\n`);
-      await handle.sync();
-      await handle.close();
+      try {
+        await handle.writeFile(`${JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })}\n`);
+        await handle.sync();
+        await handle.close();
+        handle = null;
+      } catch (writeError) {
+        // The lock file exists now but we could not stamp our identity (e.g.
+        // disk full). Leaving it would block every writer for the full stale
+        // window; remove our own just-created lock before failing.
+        await handle?.close().catch(() => {});
+        handle = null;
+        await unlink(lockPath).catch(() => {});
+        throw writeError;
+      }
       let released = false;
       return async () => {
         if (released) return;

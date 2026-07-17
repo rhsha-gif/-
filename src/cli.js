@@ -30,6 +30,7 @@ import {
   lintLessons,
   loadLessons,
   loadRetrospective,
+  pruneExpiredLessons,
   saveRetrospective
 } from './learning.js';
 import { installProject } from './install.js';
@@ -37,6 +38,7 @@ import { inspectStateHealth, runDoctor } from './doctor.js';
 import { validateTask } from './task.js';
 import { validateReceipt } from './receipt.js';
 import { verifyTaskClaim } from './verifier.js';
+import { redactValue } from './security.js';
 import { configuredProtectedFiles } from './control-plane.js';
 
 const HELP = `Adaptive Orchestrator (aorch)\n\n` +
@@ -71,7 +73,7 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  --host-model <id>             Requested host model\n` +
   `  --host-resolved-model <id>    Effective resolved host model\n` +
   `  --host-effort <level>         Requested host reasoning effort\n` +
-  `  --host-effective-effort <n>   Effective host reasoning effort\n` +
+  `  --host-effective-effort <level> Effective host reasoning effort\n` +
   `  --host-mode preferred|pinned|bootstrap-only\n` +
   `  --shadow off|record-only      Record an alternative route without executing it\n`;
 
@@ -151,10 +153,20 @@ function requireFlag(flags, name) {
 function numericFlag(flags, name) {
   const value = flags[name];
   if (value === undefined) return undefined;
-  if (value === true) throw new Error(`--${name} requires a numeric value`);
+  if (value === true || String(value).trim() === '') throw new Error(`--${name} requires a numeric value`);
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0) {
     throw new RangeError(`--${name} must be a non-negative number of milliseconds`);
+  }
+  return number;
+}
+
+function positiveNumericFlag(flags, name) {
+  const number = numericFlag(flags, name);
+  if (number !== undefined && number <= 0) {
+    // 0 disables the executor watchdog, but a per-check verification timeout of
+    // 0 would let a single hung command run without bound; require positive.
+    throw new RangeError(`--${name} must be a positive number of milliseconds`);
   }
   return number;
 }
@@ -273,6 +285,9 @@ async function handleRunCommand({ flags, cwd, config }) {
   if (action === 'task') {
     const patch = { status: requireFlag(flags, 'status') };
     if (flags.fraction !== undefined && flags.fraction !== true) {
+      // An empty value (--fraction=) coerces to 0 and would silently reset
+      // recorded progress; reject it instead of trusting Number('') === 0.
+      if (String(flags.fraction).trim() === '') throw new RangeError('--fraction requires a value between 0 and 1');
       const fraction = Number(flags.fraction);
       if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1) {
         throw new RangeError('--fraction must be between 0 and 1');
@@ -324,6 +339,11 @@ async function main(argv = process.argv.slice(2)) {
     return 0;
   }
   validateCommandArgs(command, flags, positionals);
+  // A value flag given without a value (e.g. a trailing `--cwd`) parses as the
+  // boolean true; resolve it to a clear error rather than a raw internal crash.
+  for (const name of ['cwd', 'config', 'observations']) {
+    if (flags[name] === true) throw new Error(`--${name} requires a value`);
+  }
   const cwd = path.resolve(flags.cwd || process.cwd());
 
   if (command === 'install') {
@@ -376,8 +396,7 @@ async function main(argv = process.argv.slice(2)) {
           primary: cleanRoute(result.routePlan.primary),
           shadow: result.routePlan.shadow ? cleanRoute(result.routePlan.shadow) : null
         },
-        directExecution: result.directExecution === true,
-        prompt: result.compiledPrompt ?? result.executionContract,
+        prompt: result.compiledPrompt,
         manifest: result.promptManifest,
         commandSpec: result.commandSpec,
         capabilities: result.capabilities
@@ -416,6 +435,12 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === 'trace') {
     const filePath = path.resolve(cwd, requireFlag(flags, 'file'));
+    // A missing trace file otherwise prints an empty "no external calls"
+    // summary and exits 0, which reads as a real (empty) trace.
+    await readFile(filePath, 'utf8').catch((error) => {
+      if (error.code === 'ENOENT') throw new Error(`Trace file not found: ${filePath}`);
+      throw error;
+    });
     const events = await readTrace(filePath);
     const summary = summarizeTrace(events);
     process.stdout.write(`${JSON.stringify({ summary, formatted: formatTraceSummary(summary), events }, null, 2)}\n`);
@@ -424,7 +449,7 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === 'exec') {
     const timeoutMs = numericFlag(flags, 'timeout-ms');
-    const verificationTimeoutMs = numericFlag(flags, 'verification-timeout-ms');
+    const verificationTimeoutMs = positiveNumericFlag(flags, 'verification-timeout-ms');
     const task = validateTask(await readJson(requireFlag(flags, 'task'), cwd), { forExecution: true });
     const observations = await readObservations(resolveObservationPath(config, flags, cwd));
     const result = await executeTask({
@@ -444,8 +469,11 @@ async function main(argv = process.argv.slice(2)) {
       promptManifest: result.promptManifest, tracePath: result.tracePath, runDir: result.runDir
     };
     const output = flags['dry-run'] === true
-      ? { ...common, directExecution: result.directExecution === true, executionContract: result.executionContract, capabilities: result.capabilities, commandSpec: result.commandSpec }
-      : { ...common, receipt: result.receipt, receiptPath: result.receiptPath, attestation: result.attestation, attestationPath: result.attestationPath };
+      ? { ...common, capabilities: result.capabilities, commandSpec: result.commandSpec }
+      // The persisted receipt/attestation are redacted; stdout must be too, or
+      // a secret in worker output leaks to the terminal, scrollback, and any
+      // CI log capturing this command.
+      : { ...common, receipt: redactValue(result.receipt), receiptPath: result.receiptPath, attestation: redactValue(result.attestation), attestationPath: result.attestationPath };
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return 0;
   }
@@ -456,12 +484,18 @@ async function main(argv = process.argv.slice(2)) {
     const runDir = flags['run-dir'] && flags['run-dir'] !== true
       ? path.resolve(cwd, flags['run-dir'])
       : path.join(stateRoot(config, cwd), 'manual-verifications', randomUUID(), task.id);
+    if (flags.isolation !== undefined && (flags.isolation === true || !['same-workspace', 'git-worktree'].includes(flags.isolation))) {
+      // An unrecognized value must fail loudly: silently falling back to
+      // same-workspace would run the verifier with no isolation the operator
+      // explicitly asked for.
+      throw new Error('--isolation must be same-workspace or git-worktree');
+    }
     const isolationMode = flags.isolation && flags.isolation !== true
       ? flags.isolation
       : (task.verificationIsolation ?? config.verification?.isolationByRisk?.[task.risk] ?? 'same-workspace');
     const attestation = await verifyTaskClaim({
       task, receipt, cwd, runDir, isolationMode,
-      timeoutMs: numericFlag(flags, 'verification-timeout-ms') ?? config.verification?.commandTimeoutMs,
+      timeoutMs: positiveNumericFlag(flags, 'verification-timeout-ms') ?? config.verification?.commandTimeoutMs,
       totalTimeoutMs: config.verification?.totalTimeoutMs,
       maxOutputBytes: config.verification?.maxOutputBytes,
       maxChecks: config.verification?.maxChecks
@@ -524,7 +558,9 @@ async function main(argv = process.argv.slice(2)) {
     const root = stateRoot(config, cwd);
     const core = runDoctor(config);
     const state = await inspectStateHealth(root, { repair: flags.repair === true });
+    const prunedLessons = flags.repair === true ? await pruneExpiredLessons({ root }) : null;
     const lessons = await lintLessons({ root });
+    if (prunedLessons) lessons.prunedExpired = prunedLessons.pruned;
     const promptProfiles = inspectPromptProfileHealth(await loadPromptProfiles(), {
       policy: config.promptCompilation ?? {}
     });

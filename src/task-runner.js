@@ -53,8 +53,15 @@ function parseClaudeOutput(stdout) {
 export async function parseWorkerReceipt({ provider, stdout, outputPath, maxBytes = 2 * 1024 * 1024 }) {
   if (provider.adapter === 'codex') {
     const raw = await readBoundedRegularFile(outputPath, { maxBytes });
-    try { return JSON.parse(raw.toString('utf8')); }
-    finally { await unlink(outputPath).catch(() => {}); }
+    let parsed;
+    try { parsed = JSON.parse(raw.toString('utf8')); }
+    catch (error) {
+      // Keep the malformed file: it is the only evidence of what the worker
+      // actually produced.
+      throw new Error(`Worker receipt at ${outputPath} is not valid JSON: ${error.message}`);
+    }
+    await unlink(outputPath).catch(() => {});
+    return parsed;
   }
   if (Buffer.byteLength(stdout ?? '', 'utf8') > maxBytes) throw new Error(`Worker receipt exceeds size limit of ${maxBytes} bytes`);
   if (provider.adapter === 'claude') return parseClaudeOutput(stdout);
@@ -239,6 +246,15 @@ export async function executeTask({
       lane: laneDecision
     });
   } else {
+    // Enforce the documented invariant "delegated prompts are compiled from a
+    // provider-owned official profile" for the official-profile providers. A
+    // claude/codex model configured without promptProfileIds would otherwise
+    // silently fall back to the generic contract and bypass official
+    // compilation while officialSourcesOnly is true. The generic adapter is the
+    // explicit, lower-trust exception and keeps the generic contract.
+    if ((config.promptCompilation?.officialSourcesOnly ?? true) && ['claude', 'codex'].includes(provider.adapter)) {
+      throw new Error(`Model ${route.profileId} on official-source provider ${route.provider} must declare promptProfileIds; refusing to bypass official prompt compilation while promptCompilation.officialSourcesOnly is true`);
+    }
     const prompt = buildTaskPrompt({ task, route, capabilities, receiptPath });
     compiled = {
       prompt,
@@ -314,13 +330,6 @@ export async function executeTask({
 
   await enforceWriteIsolation(task, cwd);
   const ignoredPaths = ignoredRunPath(cwd, runDir);
-  const beforeState = await captureWorkspaceState(cwd, {
-    ignorePaths: ignoredPaths,
-    evidenceFiles: snapshotEvidenceFiles
-  });
-  await mkdir(runDir, { recursive: true });
-  await writePromptManifest(promptManifestPath, compiled.manifest);
-  await appendInitialTrace({ tracePath, host: hostContext, lane: laneDecision, routePlan, manifest: compiled.manifest });
   const intervalMs = (config.progress?.intervalMinutes ?? 30) * 60 * 1000;
   const commandTimeoutMs = verificationTimeoutMs
     ?? config.verification?.commandTimeoutMs
@@ -335,7 +344,18 @@ export async function executeTask({
   let approvalConsumed = false;
 
   try {
+    // Reserve before the workspace snapshot: the reservation rewrites the
+    // retrospective under the state dir, and when that file is visible to git
+    // a post-snapshot mutation would surface as an unclaimed mid-task change
+    // and deterministically fail claim and protected-change checks.
     controlApproval = await reserveControlPlaneApproval({ root: stateRoot, task });
+    const beforeState = await captureWorkspaceState(cwd, {
+      ignorePaths: ignoredPaths,
+      evidenceFiles: snapshotEvidenceFiles
+    });
+    await mkdir(runDir, { recursive: true });
+    await writePromptManifest(promptManifestPath, compiled.manifest);
+    await appendInitialTrace({ tracePath, host: hostContext, lane: laneDecision, routePlan, manifest: compiled.manifest });
     reporter.start(() => [{
       id: task.id, weight: task.weight ?? 1, status: 'running', fraction: progressFraction,
       lane: laneDecision.lane, modelUse: plannedModelUse
@@ -350,8 +370,16 @@ export async function executeTask({
     await atomicWriteText(stderrPath, redactSecrets(result.stderr));
     await atomicWriteJson(path.join(runDir, 'execution.json'), redactValue({ ...result, stdoutSha256: sha256(result.stdout), stderrSha256: sha256(result.stderr) }));
 
-    if (result.exitCode !== 0) {
-      throw new Error(`Worker exited with ${result.exitCode}; evidence: ${stderrPath}`);
+    // exitCode alone is not success: a timed-out, aborted, or output-truncated
+    // worker can still exit 0 after SIGTERM, and its stdout receipt may be
+    // truncated mid-stream yet parse as JSON.
+    if (result.exitCode !== 0 || result.terminationReason) {
+      const cause = result.terminationReason
+        ? `was terminated (${result.terminationReason})`
+        : result.signal
+          ? `was killed by ${result.signal}`
+          : `exited with ${result.exitCode}`;
+      throw new Error(`Worker ${cause}; evidence: ${stderrPath}`);
     }
 
     progressFraction = 0.7;

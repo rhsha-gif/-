@@ -18,6 +18,54 @@ function killTree(child, signal) {
   }
 }
 
+// Workers run detached in their own process group so timeout/abort can reap
+// the whole tree. That same detachment means a worker survives if the
+// orchestrator itself dies, leaving an orphaned, possibly write-capable
+// process. Track live children and reap their groups if we exit for any
+// reason. Handlers are installed only while children exist so an embedding
+// host keeps its own signal semantics when the executor is idle.
+const liveChildren = new Set();
+const FORWARDED_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+let handlersInstalled = false;
+
+function reapAllChildren() {
+  for (const child of liveChildren) {
+    try { signalProcessTree(child, 'SIGKILL'); } catch { /* best effort on shutdown */ }
+  }
+}
+
+function handleFatalSignal(signal) {
+  reapAllChildren();
+  // Re-raise with default disposition so the exit status still reflects the
+  // signal instead of a silent clean exit.
+  process.removeListener(signal, handleFatalSignal);
+  if (process.listenerCount(signal) === 0) {
+    try { process.kill(process.pid, signal); return; } catch { /* fall through */ }
+  }
+  process.exit(process.platform === 'win32' ? 1 : 128 + (signal === 'SIGINT' ? 2 : signal === 'SIGHUP' ? 1 : 15));
+}
+
+function ensureCleanupHandlers() {
+  if (handlersInstalled) return;
+  handlersInstalled = true;
+  process.on('exit', reapAllChildren);
+  for (const signal of FORWARDED_SIGNALS) process.on(signal, handleFatalSignal);
+}
+
+function registerChild(child) {
+  liveChildren.add(child);
+  ensureCleanupHandlers();
+}
+
+function unregisterChild(child) {
+  liveChildren.delete(child);
+  if (liveChildren.size === 0 && handlersInstalled) {
+    handlersInstalled = false;
+    process.removeListener('exit', reapAllChildren);
+    for (const signal of FORWARDED_SIGNALS) process.removeListener(signal, handleFatalSignal);
+  }
+}
+
 function taskkillTree(child, force = false) {
   if (!Number.isInteger(child?.pid) || child.pid <= 0) return killTree(child, force ? 'SIGKILL' : 'SIGTERM');
   const args = ['/PID', String(child.pid), '/T', ...(force ? ['/F'] : [])];
@@ -34,8 +82,13 @@ function signalProcessTree(child, signal) {
 }
 
 export function terminateWithEscalation(child, killGraceMs, schedule = setTimeout) {
-  signalProcessTree(child, 'SIGTERM');
-  return schedule(() => signalProcessTree(child, 'SIGKILL'), killGraceMs);
+  // A kill error (e.g. EPERM) must never propagate: this runs from timers and
+  // event handlers where a throw becomes an uncaught exception that would take
+  // down the whole orchestrator instead of just failing this one task.
+  try { signalProcessTree(child, 'SIGTERM'); } catch { /* best effort */ }
+  return schedule(() => {
+    try { signalProcessTree(child, 'SIGKILL'); } catch { /* best effort */ }
+  }, killGraceMs);
 }
 
 function appendBounded(current, chunk, remainingBytes) {
@@ -83,6 +136,7 @@ export function runCommand(spec, {
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (killTimer) clearTimeout(killTimer);
       signal?.removeEventListener?.('abort', handleAbort);
+      if (child) unregisterChild(child);
     };
     const rejectOnce = (error) => {
       if (settled) return;
@@ -111,6 +165,7 @@ export function runCommand(spec, {
         detached: process.platform !== 'win32',
         windowsHide: true
       });
+      registerChild(child);
     } catch (error) {
       rejectOnce(error);
       return;

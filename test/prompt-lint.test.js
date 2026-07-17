@@ -53,3 +53,53 @@ test('prompt linter enforces a deterministic maximum prompt size', () => {
   const result = lintCompiledPrompt({ ...base, prompt: 'x'.repeat(200), maxChars: 100 });
   assert.ok(result.errors.some((entry) => /maximum prompt size/i.test(entry)));
 });
+
+test('required sections containing regex metacharacters are matched literally', () => {
+  const profile = { id: 'profile', strategy: 'sections', rules: { requiredSections: ['OUTPUT (JSON)'] } };
+  const compliant = lintCompiledPrompt({
+    task: { id: 'T1', verifierCommands: [], capabilityIds: [] },
+    prompt: 'OUTPUT (JSON)\nReturn only JSON matching the receipt schema.\n\nOUTPUT\ncontract',
+    profile,
+    capabilities: {},
+    lane: { lane: 'single-worker' }
+  });
+  assert.equal(compliant.valid, true, compliant.errors.join(' '));
+  const missing = lintCompiledPrompt({
+    task: { id: 'T1', verifierCommands: [], capabilityIds: [] },
+    prompt: 'OUTPUT [JSON]\nReturn only JSON.\n\nOUTPUT\ncontract',
+    profile,
+    capabilities: {},
+    lane: { lane: 'single-worker' }
+  });
+  assert.equal(missing.valid, false);
+  assert.ok(missing.errors.some((error) => error.includes('OUTPUT (JSON)')));
+});
+
+test('nested-delegation lint allows compiled prohibitions but still catches real positive delegation', () => {
+  const t = { id: 'T1', verifierCommands: [], capabilityIds: [] };
+  const lint = (body) => lintCompiledPrompt({ task: t, prompt: `OBJECTIVE\nx\nOUTPUT\n${body}`, profile: null, capabilities: {}, lane: { lane: 'single-worker' } })
+    .errors.some((error) => /nested delegation/.test(error));
+  // Allowed prohibitions (must NOT be flagged):
+  assert.equal(lint('Do not create a nested orchestration loop.'), false);
+  assert.equal(lint('Do not delegate, dispatch, or spawn another agent.'), false);
+  assert.equal(lint('Do not delegate this bounded task to another agent or model.'), false);
+  // Real positive delegation (MUST be flagged):
+  assert.equal(lint('Delegate this task to another model.'), true);
+  assert.equal(lint('Please call another model to review.'), true);
+  assert.equal(lint('Spawn a subagent to handle testing.'), true);
+  // Prohibition and positive instruction sharing one line, separated by ';':
+  assert.equal(lint('Do not stop; delegate to another model.'), true);
+});
+
+test('placeholder lint flags stub markers and templates but not prose mentioning TODO/FIXME', () => {
+  const t = { id: 'T1', verifierCommands: [], capabilityIds: [] };
+  const flags = (body) => lintCompiledPrompt({ task: t, prompt: `OBJECTIVE\n${body}\nOUTPUT\nJSON`, profile: null, capabilities: {}, lane: { lane: 'single-worker' } })
+    .errors.some((error) => /placeholder/.test(error));
+  // Legitimate prose mention must NOT be flagged:
+  assert.equal(flags('Remove the leftover TODO comment in parser.js and add a FIXME-free path.'), false);
+  // Unfilled stub markers and templates MUST be flagged:
+  assert.equal(flags('TODO'), true);
+  assert.equal(flags('FIXME:'), true);
+  assert.equal(flags('Do {{thing}}'), true);
+  assert.equal(flags('[PLACEHOLDER]'), true);
+});

@@ -61,11 +61,25 @@ function matchesAny(prompt, patterns) {
   return patterns.some((pattern) => pattern.test(prompt));
 }
 
+// A read-only negation usually scopes one clause ("...but do not modify the
+// config"), not the whole request. Strip those clauses before testing for
+// development verbs so a partial negation cannot demote the rest of a
+// high-risk write request to read-only.
+const READ_ONLY_NEGATION_CLAUSES = [
+  /\b(?:do not|don't|without)\s+(?:edit|modify|change|write|execute|perform|run|apply|deploy|publish|push|merge|release)\b[^\n.!?,;]*/gi,
+  /[^\n.!?,;]*(?:(?:수정|변경|편집)하지\s*(?:마|말)|(?:건드리지|바꾸지|고치지)\s*(?:마|말))[^\n.!?,;]*/g
+];
+
+function stripReadOnlyNegations(prompt) {
+  return READ_ONLY_NEGATION_CLAUSES.reduce((text, pattern) => text.replace(pattern, ' '), prompt);
+}
+
 export function classifyPrompt(prompt) {
   const normalized = typeof prompt === 'string' ? prompt.trim() : '';
   const highRiskSubject = matchesAny(normalized, HIGH_RISK_SUBJECT_PATTERNS);
   const destructive = matchesAny(normalized, DESTRUCTIVE_PATTERNS);
   const explicitReadOnly = matchesAny(normalized, EXPLICIT_READ_ONLY_PATTERNS);
+  const developmentOutsideNegations = matchesAny(stripReadOnlyNegations(normalized), DEVELOPMENT_PATTERNS);
   const development = !explicitReadOnly && matchesAny(normalized, DEVELOPMENT_PATTERNS);
   const readOnlyVerb = matchesAny(normalized, READ_ONLY_PATTERNS);
   const readOnly = explicitReadOnly || readOnlyVerb;
@@ -82,6 +96,18 @@ export function classifyPrompt(prompt) {
       durableRunRecommended: true,
       externalAction,
       destructive
+    };
+  }
+
+  // "Fix the auth bypass but do not modify the config" is still high-risk
+  // development work; a clause-scoped negation must not fail it open.
+  if (highRiskSubject && explicitReadOnly && developmentOutsideNegations) {
+    return {
+      requestClass: 'high-risk',
+      riskHint: 'critical',
+      failPolicy: 'closed',
+      requiresOrchestration: true,
+      durableRunRecommended: true
     };
   }
 

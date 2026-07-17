@@ -58,12 +58,36 @@ test('Luna prompt is concise and task-shaped while Terra and Sol receive progres
   assert.match(prompts['gpt-5.6-luna'], /\nSUCCESS CRITERIA\n/);
   assert.match(prompts['gpt-5.6-luna'], /Valid input produces the documented structure/);
   assert.match(prompts['gpt-5.6-luna'], /\nVERIFY\n/);
-  assert.doesNotMatch(prompts['gpt-5.6-luna'], /FAILURE MODES/);
+  // Declared safety constraints must survive even on the concise Luna profile;
+  // conciseness comes from omitting boilerplate context/policy sections, not
+  // from silently dropping the task's own invariants and failure modes.
+  assert.match(prompts['gpt-5.6-luna'], /\nINVARIANTS\n[\s\S]*Existing valid inputs keep their behavior/);
+  assert.match(prompts['gpt-5.6-luna'], /\nFAILURE MODES\n[\s\S]*Malformed nested input/);
+  assert.doesNotMatch(prompts['gpt-5.6-luna'], /REPOSITORY CONTEXT/);
+  assert.doesNotMatch(prompts['gpt-5.6-luna'], /FAILURE POLICY/);
   assert.match(prompts['gpt-5.6-terra'], /REPOSITORY CONTEXT/);
   assert.match(prompts['gpt-5.6-terra'], /FAILURE POLICY/);
+  assert.match(prompts['gpt-5.6-terra'], /\nINVARIANTS\n[\s\S]*Existing valid inputs keep their behavior/);
   assert.match(prompts['gpt-5.6-sol'], /INVARIANTS/);
   assert.match(prompts['gpt-5.6-sol'], /FAILURE MODES/);
   assert.ok(prompts['gpt-5.6-luna'].length < prompts['gpt-5.6-terra'].length);
+});
+
+test('a task with no declared invariants or failure modes keeps Luna and Terra free of those sections', async () => {
+  const bare = {
+    ...task, invariants: [], failureModes: []
+  };
+  const luna = compileWorkerPrompt({
+    task: bare, route: { provider: 'openai', profileId: 'openai-codex-luna-v1', model: 'gpt-5.6-luna', modelRevision: 'gpt-5.6-luna', effort: 'medium' },
+    profile: await profile('openai-codex-luna-v1'), capabilities, receiptPath: '/evidence/receipt.json', lane: { lane: 'single-worker' }
+  }).prompt;
+  const terra = compileWorkerPrompt({
+    task: bare, route: { provider: 'openai', profileId: 'openai-codex-terra-v1', model: 'gpt-5.6-terra', modelRevision: 'gpt-5.6-terra', effort: 'high' },
+    profile: await profile('openai-codex-terra-v1'), capabilities, receiptPath: '/evidence/receipt.json', lane: { lane: 'bundled' }
+  }).prompt;
+  assert.doesNotMatch(luna, /\nINVARIANTS\n/);
+  assert.doesNotMatch(luna, /\nFAILURE MODES\n/);
+  assert.doesNotMatch(terra, /\nINVARIANTS\n/);
 });
 
 test('single-worker compilation keeps execution bounded and forbids nested delegation', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "adaptive-orchestrator",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Bootstrap-only adaptive worker routing and official-source prompt compilation for Claude Code and Codex CLI",
   "type": "module",
   "bin": {
@@ -24,6 +24,7 @@
     "examples",
     "docs/DESIGN.md",
     "docs/REVIEW-0.6.1.md",
+    "docs/REVIEW-0.6.2.md",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

@@ -2,6 +2,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
 const RISK_TIERS = new Set(['low', 'standard', 'high', 'critical']);
 const COMPLEXITIES = new Set(['low', 'standard', 'high', 'critical']);
+// Must mirror the task-side default (task.js/router.js): an observation
+// recorded without explicit complexity has to land on the same value the
+// router derives for a task of the same risk, or the evidence never matches.
+const DEFAULT_COMPLEXITY_BY_RISK = Object.freeze({ low: 'low', standard: 'standard', high: 'high', critical: 'high' });
 
 function clamp01(value) {
   return Math.min(1, Math.max(0, value));
@@ -36,7 +40,7 @@ export function normalizeObservation(input) {
   }
   const risk = input.risk ?? 'standard';
   if (!RISK_TIERS.has(risk)) throw new Error('observation.risk must be low, standard, high, or critical');
-  const complexity = input.complexity ?? 'standard';
+  const complexity = input.complexity ?? DEFAULT_COMPLEXITY_BY_RISK[risk];
   if (!COMPLEXITIES.has(complexity)) throw new Error('observation.complexity must be low, standard, high, or critical');
   if (input.metadata !== undefined && (!input.metadata || typeof input.metadata !== 'object' || Array.isArray(input.metadata))) {
     throw new TypeError('observation.metadata must be an object');

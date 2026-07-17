@@ -33,5 +33,17 @@ test('configured protected files include the active project config without escap
     cwd,
     stateRoot: path.join(cwd, '.aorch')
   });
-  assert.deepEqual(files, ['.aorch/config.json', '.claude/settings.json']);
+  assert.deepEqual(files, [
+    '.aorch/config.json',
+    '.aorch/learning/lessons.json',
+    '.aorch/observations.jsonl',
+    '.claude/settings.json'
+  ]);
+});
+
+test('route observations and lesson memory are protected change surfaces by default', () => {
+  const config = { controlPlane: { protectedFiles: [] }, paths: { stateDir: '.aorch', observationsFile: '.aorch/observations.jsonl' } };
+  const files = configuredProtectedFiles({ config, cwd: '/project', stateRoot: '/project/.aorch' });
+  assert.ok(files.includes('.aorch/observations.jsonl'), files.join(','));
+  assert.ok(files.includes('.aorch/learning/lessons.json'), files.join(','));
 });

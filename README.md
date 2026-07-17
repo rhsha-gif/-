@@ -1,6 +1,6 @@
 # Adaptive Orchestrator
 
-> **v0.6.1** — Claude Code와 Codex CLI의 현재 모델을 항상 bootstrap host로 사용하고, 실제 프로젝트 작업은 별도의 bounded worker에 위임하는 dependency-free orchestration runtime입니다.
+> **v0.6.2** — Claude Code와 Codex CLI의 현재 모델을 항상 bootstrap host로 사용하고, 실제 프로젝트 작업은 별도의 bounded worker에 위임하는 dependency-free orchestration runtime입니다.
 
 ```text
 사용자 프롬프트
@@ -239,7 +239,7 @@ Provider 소유 공식 도메인이 아니거나 publisher가 provider와 다르
     "officialSourcesOnly": true,
     "maxProfileAgeDays": 120,
     "maxFutureSkewDays": 1,
-    "maxPromptChars": 40000
+    "maxChars": 40000
   }
 }
 ```
@@ -402,7 +402,7 @@ Control-plane approval은 일회성이며 실제 변경 파일은 proposal의 `a
 - 사용할 provider CLI의 사전 로그인
 
 ```bash
-npm install -g ./adaptive-orchestrator-0.6.1.tgz
+npm install -g ./adaptive-orchestrator-0.6.2.tgz
 ```
 
 프로젝트 통합:

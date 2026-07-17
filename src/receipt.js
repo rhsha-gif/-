@@ -47,8 +47,15 @@ function globToRegExp(pattern) {
   for (let index = 0; index < normalized.length; index += 1) {
     const character = normalized[index];
     if (character === '*' && normalized[index + 1] === '*') {
-      source += '.*';
-      index += 1;
+      if (normalized[index + 2] === '/') {
+        // A leading `**/` matches zero or more path segments, so `**/x` must
+        // also match a top-level `x`; make the following slash optional.
+        source += '(?:.*/)?';
+        index += 2;
+      } else {
+        source += '.*';
+        index += 1;
+      }
     } else if (character === '*') {
       source += '[^/]*';
     } else if (character === '?') {

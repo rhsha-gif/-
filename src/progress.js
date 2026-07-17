@@ -49,6 +49,9 @@ export function calculateProgress(tasks = []) {
   );
   const ratio = totalWeight > 0 ? completedWeight / totalWeight : 0;
   const phase = progressPhase(normalized);
+  // Rounding must not report 100% while any task is still in flight; the
+  // per-task 0.99 cap is meaningless if the weighted total rounds past it.
+  const percent = phase === 'complete' ? Math.round(ratio * 100) : Math.min(99, Math.round(ratio * 100));
   const blockers = normalized
     .filter((task) => ['blocked', 'failed'].includes(task.status) || task.blocker)
     .map((task) => ({ taskId: task.id, message: task.blocker ?? task.note ?? 'Task is blocked.' }));
@@ -57,7 +60,7 @@ export function calculateProgress(tasks = []) {
     .filter((value) => typeof value === 'string' && Number.isFinite(Date.parse(value)))
     .sort();
   return {
-    percent: Math.round(ratio * 100),
+    percent,
     label: 'estimated',
     phase,
     confidence: progressConfidence(normalized, phase),

@@ -40,3 +40,12 @@ test('observation reader accepts legacy JSONL while new writes use checksum enve
   const entries = await readObservations(file);
   assert.equal(entries.length, 2);
 });
+
+test('appendObservation refuses to launder an explicit reviewed:false into route evidence', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-observations-reviewed-'));
+  const file = path.join(root, 'observations.jsonl');
+  await assert.rejects(() => appendObservation(file, {
+    provider: 'openai', profileId: 'p', model: 'm', effort: 'high', taskKind: 'implementation',
+    role: 'executor', quality: 0.9, reviewed: false
+  }), /reviewed:false/);
+});

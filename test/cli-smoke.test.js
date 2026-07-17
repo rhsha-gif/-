@@ -296,7 +296,7 @@ test('prompt compile returns official-source delegated worker prompts for every 
   ], { encoding: 'utf8' });
   assert.equal(single.status, 0, single.stderr);
   const singleOutput = JSON.parse(single.stdout);
-  assert.equal(singleOutput.directExecution, false);
+  assert.equal('directExecution' in singleOutput, false);
   assert.equal(singleOutput.lane.lane, 'single-worker');
   assert.ok(singleOutput.commandSpec?.command);
   assert.match(singleOutput.prompt, /OBJECTIVE|<objective>/i);
@@ -337,4 +337,30 @@ test('lane command denies an explicit weak lane for high-risk work', async () =>
   assert.equal(output.lane, 'orchestrated');
   assert.equal(output.requestedLane, 'single-worker');
   assert.match(output.reason, /denied|downgrade|stronger/i);
+});
+
+test('verify rejects an unrecognized --isolation value instead of silently downgrading', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-cli-iso-'));
+  const taskPath = path.join(dir, 'task.json');
+  const receiptPath = path.join(dir, 'receipt.json');
+  await writeFile(taskPath, JSON.stringify({
+    id: 'T1', objective: 'x', kind: 'implementation', role: 'executor', risk: 'low', complexity: 'low',
+    write: false, acceptanceCriteria: ['works'], verificationCommands: ['node --version']
+  }));
+  await writeFile(receiptPath, JSON.stringify({
+    status: 'complete', summary: 's', filesInspected: [], filesChanged: [],
+    commands: [{ command: 'node --version', exitCode: 0, outcome: 'ok' }],
+    criteria: [{ criterion: 'works', status: 'pass', evidence: 'ok' }], unresolvedRisks: [], confidence: 0.9
+  }));
+  const result = spawnSync(process.execPath, [
+    cli, 'verify', '--config', defaultConfig, '--cwd', dir, '--task', taskPath, '--receipt', receiptPath, '--isolation', 'worktree'
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--isolation must be same-workspace or git-worktree/);
+});
+
+test('a value flag given with no value fails with a clear message rather than a raw crash', () => {
+  const result = spawnSync(process.execPath, [cli, 'inventory', '--config', defaultConfig, '--cwd'], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--cwd requires a value/);
 });

@@ -51,3 +51,11 @@ test('rejects write claims outside the allowed scope and any write claim for rea
 test('rejects unknown fields instead of accepting an ambiguous receipt shape', () => {
   assert.throws(() => validateReceipt({ ...validReceipt(), extraClaim: true }, { task }), /unknown field/i);
 });
+
+test('a **/x scope pattern matches a top-level file as well as nested files', () => {
+  const task = { write: true, allowedScope: ['**/config.js'], forbiddenScope: [] };
+  const base = { status: 'partial', summary: 's', filesInspected: [], commands: [], criteria: [], unresolvedRisks: [], confidence: 0.5 };
+  assert.doesNotThrow(() => validateReceipt({ ...base, filesChanged: ['config.js'] }, { task }));
+  assert.doesNotThrow(() => validateReceipt({ ...base, filesChanged: ['src/nested/config.js'] }, { task }));
+  assert.throws(() => validateReceipt({ ...base, filesChanged: ['config.ts'] }, { task }), /outside the allowed scope/);
+});

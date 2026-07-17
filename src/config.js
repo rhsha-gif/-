@@ -50,6 +50,14 @@ function positiveNumber(value, name, fallback) {
   return resolved;
 }
 
+function assertOptionalBoolean(value, name) {
+  // A string like "false" is truthy everywhere it is read, so an operator who
+  // sets enabled:"false" to disable an entry would silently keep it enabled.
+  if (value !== undefined && typeof value !== 'boolean') {
+    throw new TypeError(`${name} must be a boolean`);
+  }
+}
+
 function nonNegativeNumber(value, name, fallback) {
   const resolved = value ?? fallback;
   if (!Number.isFinite(resolved) || resolved < 0) throw new RangeError(`${name} must be finite and non-negative`);
@@ -307,6 +315,7 @@ export function validateConfig(input) {
     if (!['claude', 'codex', 'generic'].includes(provider.adapter)) {
       throw new Error(`Unsupported adapter for provider ${provider.id}: ${provider.adapter}`);
     }
+    assertOptionalBoolean(provider.enabled, `provider ${provider.id}.enabled`);
     if (provider.adapter === 'generic' && (!provider.executable || !Array.isArray(provider.args))) {
       throw new Error(`Generic provider ${provider.id} requires executable and args`);
     }
@@ -321,6 +330,7 @@ export function validateConfig(input) {
 
   for (const model of normalizedModels) {
     if (!providerIds.has(model.provider)) throw new Error(`Model ${model.id} references unknown provider ${model.provider}`);
+    assertOptionalBoolean(model.enabled, `model ${model.id}.enabled`);
     if (typeof model.model !== 'string' || model.model.trim() === '') throw new Error(`Model ${model.id} requires model`);
     model.revision = model.revision ?? model.model;
     if (typeof model.revision !== 'string' || model.revision.trim() === '') {
@@ -374,6 +384,7 @@ export function validateConfig(input) {
     if (!['skill', 'plugin', 'hook'].includes(capability.type)) {
       throw new Error(`Unsupported capability type for ${capability.id}: ${capability.type}`);
     }
+    assertOptionalBoolean(capability.enabled, `capability ${capability.id}.enabled`);
     assertNonEmptyStrings(capability.providers ?? ['*'], `capability ${capability.id}.providers`);
     // Do not inject a default trustTier: only an explicit config tier may
     // override discovery-scope trust when the capability is found on disk.

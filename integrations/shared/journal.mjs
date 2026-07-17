@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises';
+import { link, mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -28,13 +28,25 @@ async function inspectLock(lockPath, staleMs) {
   const ageMs = Date.now() - info.mtimeMs;
   // PID reuse or EPERM can make a dead owner look alive forever; locks guard
   // millisecond-scale appends, so a very old lock is reclaimable regardless.
-  return { raw, abandoned: (ageMs > staleMs && !processIsAlive(owner?.pid)) || ageMs > HARD_STALE_LOCK_MS };
+  return { info, raw, abandoned: (ageMs > staleMs && !processIsAlive(owner?.pid)) || ageMs > HARD_STALE_LOCK_MS };
 }
 
 // Rename-based reclaim: unlinking by path could delete a fresh lock created by
 // a concurrent reclaimer. Move the entry aside, confirm it is the same stale
-// lock we inspected, and restore it if it is not.
+// lock we inspected, and restore it without clobbering any newer lock.
 async function reclaimAbandonedLock(lockPath, inspected) {
+  // The lock judged stale may have been replaced since inspection; renaming a
+  // fresh lock aside breaks its owner's mutual exclusion. Re-check identity
+  // immediately before the rename to shrink that window to near zero.
+  try {
+    const current = await stat(lockPath);
+    if (inspected.info && (current.ino !== inspected.info.ino
+      || current.mtimeMs !== inspected.info.mtimeMs
+      || current.size !== inspected.info.size)) return;
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
   const reclaimPath = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
   try {
     await rename(lockPath, reclaimPath);
@@ -48,7 +60,18 @@ async function reclaimAbandonedLock(lockPath, inspected) {
     await unlink(reclaimPath).catch(() => {});
     return;
   }
-  await rename(reclaimPath, lockPath).catch(() => unlink(reclaimPath).catch(() => {}));
+  // A different (fresh) lock was vacated. Restore it with a no-clobber link:
+  // a plain rename could overwrite a third lock acquired in the meantime and
+  // leave two processes inside the critical section.
+  try {
+    await link(reclaimPath, lockPath);
+  } catch (error) {
+    if (error.code !== 'EEXIST') {
+      await rename(reclaimPath, lockPath).catch(() => {});
+      return;
+    }
+  }
+  await unlink(reclaimPath).catch(() => {});
 }
 
 function stableValue(value) {

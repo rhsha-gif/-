@@ -622,3 +622,121 @@ test('runtime execution denies an explicit weak lane for high-risk work', async 
   assert.equal(result.lane.lane, 'orchestrated');
   assert.equal(result.lane.requestedLane, 'bundled');
 });
+
+test('a terminated worker cannot be laundered into success by exiting 0', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-timeout-launder-'));
+  const workerPath = path.join(cwd, 'slow-worker.mjs');
+  await writeFile(workerPath, `
+    process.on('SIGTERM', () => process.exit(0));
+    process.stdin.resume();
+    process.stdin.on('end', () => {
+      process.stdout.write(JSON.stringify({
+        status: 'complete', summary: 'claims success', filesInspected: [], filesChanged: [],
+        commands: [{ command: 'node --version', exitCode: 0, outcome: process.version }],
+        criteria: [{ criterion: 'worker returns a schema-valid receipt', status: 'pass', evidence: 'receipt emitted' }],
+        unresolvedRisks: [], confidence: 0.9
+      }));
+      setInterval(() => {}, 1000);
+    });
+  `);
+  const config = {
+    routing: { qualityTolerance: 0.01, tokenTolerance: 0.08 },
+    execution: { killGraceMs: 500, maxOutputBytes: 1024 * 1024, maxReceiptBytes: 1024 * 1024 },
+    providers: [{ id: 'local-test', adapter: 'generic', enabled: true, executable: process.execPath, args: [workerPath] }],
+    models: [{ id: 'local-test-model', provider: 'local-test', model: 'fixture', enabled: true, roles: ['executor'], taskKinds: ['testing'], quality: { default: 0.9 }, tokenIndex: 1, latencyIndex: 1, maturity: 'stable', efforts: [{ name: 'medium', qualityDelta: 0, tokenMultiplier: 1, latencyMultiplier: 1 }] }],
+    capabilities: [], progress: { intervalMinutes: 30 }, paths: { stateDir: '.aorch' }
+  };
+  await assert.rejects(
+    () => executeTask({ task, config, cwd, timeoutMs: 400, onProgress: () => {} }),
+    /terminated \(timeout\)/
+  );
+});
+
+test('a malformed codex receipt file is preserved as evidence instead of being deleted', async () => {
+  const { parseWorkerReceipt } = await import('../src/task-runner.js');
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-receipt-evidence-'));
+  const outputPath = path.join(dir, 'worker-output.json');
+  await writeFile(outputPath, '{"status": "complete", truncated');
+  await assert.rejects(
+    () => parseWorkerReceipt({ provider: { adapter: 'codex' }, stdout: '', outputPath }),
+    (error) => error.message.includes(outputPath) && /not valid JSON/.test(error.message)
+  );
+  await access(outputPath);
+});
+
+test('control-plane approval works even when the state dir is visible to git', async (t) => {
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-visible-state-'));
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+  await writeFile(path.join(root, 'tracked.txt'), 'baseline\n');
+  spawnSync('git', ['add', 'tracked.txt'], { cwd: root });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd: root });
+  const cwd = path.join(root, 'linked');
+  const added = spawnSync('git', ['worktree', 'add', '-q', '-b', 'visible-state', cwd], { cwd: root, encoding: 'utf8' });
+  assert.equal(added.status, 0, added.stderr);
+  await mkdir(path.join(cwd, '.aorch'), { recursive: true });
+  await writeFile(path.join(cwd, '.aorch/config.json'), '{"before":true}\n');
+
+  const stateRoot = path.join(cwd, '.aorch');
+  const sourceRun = await createRun({ root: stateRoot, prompt: 'approve config change', tasks: [] });
+  await finishRun(sourceRun.path, 'completed');
+  await saveRetrospective({ root: stateRoot, runPath: sourceRun.path, input: {
+    runId: sourceRun.id, outcome: 'completed', summary: 'Approve one config change.', whatWorked: [], errors: [], inefficiencies: [], technicalDebt: [],
+    proposals: [{ id: 'P-visible', category: 'routing', title: 'Change config', rationale: 'Needed for routing.', expectedBenefit: 'Correct route.', risks: ['Config regression.'], affectedFiles: ['.aorch/config.json'] }]
+  } });
+  await decideProposal({ root: stateRoot, runId: sourceRun.id, proposalId: 'P-visible', decision: 'approved' });
+
+  const workerPath = path.join(root, 'worker.mjs');
+  await writeFile(workerPath, `
+    import { mkdir, writeFile } from 'node:fs/promises';
+    process.stdin.resume();
+    process.stdin.on('end', async () => {
+      await mkdir('.aorch', { recursive: true });
+      await writeFile('.aorch/config.json', '{"after":true}\\n');
+      process.stdout.write(JSON.stringify({status:'complete',summary:'changed approved config',filesInspected:['.aorch/config.json'],filesChanged:['.aorch/config.json'],commands:[{command:'node --version',exitCode:0,outcome:process.version}],criteria:[{criterion:'approved config changes',status:'pass',evidence:'changed'}],unresolvedRisks:[],confidence:0.9}));
+    });
+  `);
+  const config = {
+    routing: { qualityTolerance: 0.01, tokenTolerance: 0.08 },
+    execution: { workerTimeoutMs: 5000, killGraceMs: 30, maxOutputBytes: 1024 * 1024, maxReceiptBytes: 1024 * 1024 },
+    verification: { commandTimeoutMs: 5000, totalTimeoutMs: 10000, maxOutputBytes: 1024 * 1024, maxChecks: 10, isolationByRisk: { critical: 'git-worktree' } },
+    controlPlane: { protectedFiles: ['.aorch/config.json'], providerTrustByRisk: { critical: ['trusted'] }, capabilityTrustByRisk: { critical: ['trusted'] } },
+    providers: [{ id: 'local-test', adapter: 'generic', enabled: true, executable: process.execPath, args: [workerPath], trustTier: 'trusted', adapterMaturity: 'stable' }],
+    models: [{ id: 'local-test-model', provider: 'local-test', model: 'fixture', enabled: true, roles: ['executor'], taskKinds: ['testing'], quality: { default: 0.99 }, tokenIndex: 1, latencyIndex: 1, maturity: 'stable', efforts: [{ name: 'high', qualityDelta: 0, tokenMultiplier: 1, latencyMultiplier: 1, complexities: ['high', 'critical'] }] }],
+    capabilities: [], progress: { intervalMinutes: 30 }, paths: { stateDir: '.aorch' }
+  };
+  const controlTask = {
+    ...task, id: 'T-visible', risk: 'critical', complexity: 'high', write: true,
+    allowedScope: ['.aorch/config.json'], acceptanceCriteria: ['approved config changes'],
+    verificationCommands: ['node --version'],
+    verifierCommands: [`${process.execPath} -e "process.exit(0)"`],
+    verificationIsolation: 'git-worktree',
+    controlPlaneChange: true, approval: { runId: sourceRun.id, proposalId: 'P-visible' }
+  };
+  const result = await executeTask({ task: controlTask, config, cwd, stateRoot, onProgress: () => {} });
+  assert.equal(result.attestation.status, 'pass');
+  const retrospective = await loadRetrospective({ root: stateRoot, runId: sourceRun.id });
+  assert.equal(retrospective.proposals.find((entry) => entry.id === 'P-visible').applied, true);
+});
+
+test('an official-source provider model without promptProfileIds fails closed instead of bypassing official compilation', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-official-bypass-'));
+  const config = {
+    routing: { qualityTolerance: 0.01, tokenTolerance: 0.08 },
+    promptCompilation: { officialSourcesOnly: true },
+    providers: [{ id: 'anthropic', adapter: 'claude', enabled: true, executable: 'claude', trustTier: 'trusted', adapterMaturity: 'stable' }],
+    models: [{
+      id: 'sonnet-no-profile', provider: 'anthropic', model: 'sonnet', enabled: true,
+      roles: ['executor'], taskKinds: ['testing'], quality: { default: 0.9 },
+      tokenIndex: 1, latencyIndex: 1, maturity: 'stable',
+      efforts: [{ name: 'medium', qualityDelta: 0, tokenMultiplier: 1, latencyMultiplier: 1 }]
+    }],
+    capabilities: [], progress: { intervalMinutes: 30 }, paths: { stateDir: '.aorch' }
+  };
+  await assert.rejects(
+    () => executeTask({ task, config, cwd, dryRun: true, onProgress: () => {} }),
+    /must declare promptProfileIds/
+  );
+});

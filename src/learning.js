@@ -262,6 +262,26 @@ export async function lintLessons({ root, now = new Date() } = {}) {
   };
 }
 
+// Expired lessons are excluded from loadLessons but keep lint (and doctor)
+// permanently failing; pruning under the index lock is the supported
+// remediation instead of hand-editing the JSON.
+export async function pruneExpiredLessons({ root, now = new Date() } = {}) {
+  const filePath = lessonIndexPath(root);
+  if (!(await exists(filePath))) return { pruned: 0, remaining: 0, path: filePath };
+  return withFileLock(`${filePath}.lock`, async () => {
+    const index = JSON.parse(await readFile(filePath, 'utf8'));
+    const lessons = index.lessons ?? [];
+    const kept = lessons.filter((lesson) => {
+      const expiresAt = Date.parse(lesson?.expiresAt);
+      return !Number.isFinite(expiresAt) || expiresAt > new Date(now).getTime();
+    });
+    if (kept.length !== lessons.length) {
+      await atomicWriteJson(filePath, { ...index, updatedAt: new Date(now).toISOString(), lessons: kept });
+    }
+    return { pruned: lessons.length - kept.length, remaining: kept.length, path: filePath };
+  });
+}
+
 export async function loadLessons({ root, query = '', limit = 10, now = new Date() } = {}) {
   const filePath = lessonIndexPath(root);
   if (!(await exists(filePath))) return [];

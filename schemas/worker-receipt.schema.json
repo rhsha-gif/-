@@ -3,7 +3,7 @@
   "type": "object",
   "properties": {
     "status": { "type": "string", "enum": ["complete", "partial", "blocked"] },
-    "summary": { "type": "string" },
+    "summary": { "type": "string", "minLength": 1 },
     "filesInspected": { "type": "array", "items": { "type": "string" } },
     "filesChanged": { "type": "array", "items": { "type": "string" } },
     "commands": {
@@ -11,9 +11,9 @@
       "items": {
         "type": "object",
         "properties": {
-          "command": { "type": "string" },
+          "command": { "type": "string", "minLength": 1 },
           "exitCode": { "type": ["integer", "null"] },
-          "outcome": { "type": "string" }
+          "outcome": { "type": "string", "minLength": 1 }
         },
         "required": ["command", "exitCode", "outcome"],
         "additionalProperties": false
@@ -24,9 +24,9 @@
       "items": {
         "type": "object",
         "properties": {
-          "criterion": { "type": "string" },
+          "criterion": { "type": "string", "minLength": 1 },
           "status": { "type": "string", "enum": ["pass", "fail", "not-run"] },
-          "evidence": { "type": "string" }
+          "evidence": { "type": "string", "minLength": 1 }
         },
         "required": ["criterion", "status", "evidence"],
         "additionalProperties": false

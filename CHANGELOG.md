@@ -1,5 +1,123 @@
 # Changelog
 
+## 0.6.2 - 2026-07-17
+
+Pre-implementation critical-review hardening release. No new subsystems; this
+release closes correctness, safety, and integrity defects found by an
+adversarial multi-lens review of 0.6.1. See `docs/REVIEW-0.6.2.md`.
+
+### Correctness (blocking defects)
+
+- Fixed the nested-delegation lint so it no longer rejects every OpenAI-compiled
+  worker prompt. The compiler's own "do not create a nested orchestration loop"
+  instruction previously tripped the lint, so `aorch exec` threw for all Codex
+  routes. The detector is now clause-scoped: it allows negated prohibitions
+  (including multi-verb lists) and still catches genuine positive delegation,
+  even when a positive clause shares a line with a prohibition.
+- Included task `invariants` and `failureModes` on every OpenAI profile that
+  receives a task declaring them (previously only the deep "Sol" profile did),
+  so safety constraints can no longer be silently dropped from Terra/Luna
+  worker prompts.
+- Generic provider `promptMode: "argument"` now interpolates the compiled prompt
+  through a required `{prompt}` placeholder and fails closed when it is missing,
+  instead of launching the worker with no task at all.
+
+### Crash-safety and process hygiene
+
+- Detached workers are now reaped when the orchestrator exits or receives
+  SIGINT/SIGTERM/SIGHUP, so killing the orchestrator no longer orphans a live,
+  possibly write-capable worker.
+- Termination signalling no longer throws from timers or event handlers, so a
+  kill error (e.g. `EPERM`) can no longer crash the whole orchestrator.
+- Worker success is gated on clean termination, not just `exitCode === 0`: a
+  timed-out, aborted, or output-truncated worker that exits 0 is now failed
+  rather than laundered into a successful, attested run.
+
+### State and integrity
+
+- Attestation `evidenceDigest` is computed over the redacted, persisted content,
+  so an attestation carrying secret-shaped text no longer fails its own
+  tamper-evidence check after redaction rewrites the file.
+- Route observations and lesson memory are now protected control-plane change
+  surfaces; a worker cannot write them without an approved, scoped proposal.
+- Enforced the "delegated prompts are compiled from a provider-owned official
+  profile" invariant: a claude/codex model configured without `promptProfileIds`
+  now fails closed rather than silently using the generic contract while
+  `officialSourcesOnly` is true.
+- `aorch record` rejects an explicit `reviewed: false` instead of silently
+  rewriting it to `true`, so an unreviewed observation cannot be laundered into
+  route evidence.
+- Control-plane approval is reserved before the workspace snapshot, so a
+  control-plane task whose state directory is visible to git no longer fails
+  its own claim and protected-change checks.
+- `finishRun` refuses to re-finish a terminal run, preventing a silent status
+  rewrite and reflection-state regression.
+- Hardened stale-lock reclaim (in both the package and the installed journal
+  hook) to re-check lock identity before reclaiming and to restore a vacated
+  lock without clobbering a newer one; released the lock file if the identity
+  stamp cannot be written.
+- Observation `complexity` now defaults by risk to match the router, so
+  low/high/critical-risk evidence recorded without an explicit complexity is no
+  longer discarded during routing.
+- Estimated progress can no longer round to 100% while a task is still running.
+
+### Prompt and profile governance
+
+- Prompt-profile freshness now applies the future-skew check to the newest
+  source and the staleness check to the oldest, so a single future-dated source
+  can no longer hide behind an older one.
+- `validatePromptProfile` rejects a malformed `rules.requiredSections` that
+  would otherwise crash the linter at execution time.
+- Placeholder lint distinguishes unfilled stub markers/templates from prose that
+  legitimately mentions TODO/TBD/FIXME, so real tasks are no longer hard-failed.
+- Fixed the required-section metacharacter escape so section names containing
+  regex metacharacters are matched literally.
+
+### Security
+
+- `redactSecrets` now covers compound secret key names (`access_token`,
+  `client_secret`, …) and `--flag=value` forms.
+- `redactValue` now redacts the entire value under a sensitive key regardless of
+  shape; previously a secret held in an array or nested object under a sensitive
+  key (e.g. `{ credentials: { data: "…" } }`) leaked because only non-object
+  values were redacted by key.
+- `aorch exec` redacts the receipt and attestation printed to stdout, matching
+  the already-redacted persisted copies, so a worker secret no longer leaks to
+  the terminal and CI logs.
+- The thin gate keeps high-risk development work high-risk when a read-only
+  negation only scopes one clause (e.g. "fix the auth bypass but do not modify
+  config").
+
+### CLI, config, and doctor robustness
+
+- `validateConfig` rejects a non-boolean `enabled`, so `"enabled": "false"` can
+  no longer leave a provider or model fully enabled.
+- `aorch verify --isolation` rejects an unrecognized value instead of silently
+  downgrading to same-workspace verification.
+- `--fraction` and `--verification-timeout-ms` reject empty/zero values that
+  previously reset progress or disabled the verification watchdog; value flags
+  given with no value now report a clear error.
+- `aorch doctor` fails a catalog with no enabled providers or models, prunes
+  expired lessons under `--repair`, unlinks an invalid active-run pointer under
+  the pointer lock, and skips (rather than fails on) non-active prompt profiles.
+- `aorch trace` errors on a missing trace file instead of printing an empty
+  summary.
+
+### Scope glob and schema
+
+- `**/x` scope patterns now match a top-level `x` as well as nested paths, so
+  valid write claims are no longer rejected.
+- The published worker-receipt schema requires non-empty strings, matching
+  `validateReceipt`, so schema-valid receipts no longer fail late validation.
+
+### Documentation and integrations
+
+- Removed the last "direct lane / execution contract" wording from the installed
+  Claude and Codex skills and the `aorch exec`/`prompt` dry-run output.
+- Corrected the Codex scout agent to a catalog-supported reasoning effort and
+  the README `promptCompilation.maxChars` key; added a test that guards
+  integration-agent model/effort against the catalog.
+
 ## 0.6.1 - 2026-07-17
 
 Bootstrap-only contract and prompt-boundary hardening release.

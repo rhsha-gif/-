@@ -51,3 +51,56 @@ test('bounded receipt reads reject oversized, symbolic-linked, and hard-linked f
     t.diagnostic('link checks skipped on Windows');
   }
 });
+
+test('redactSecrets covers compound key names and equals-form flags', () => {
+  assert.equal(
+    redactSecrets('{"access_token": "eyJhbGciOi.secret.value"}'),
+    '{"access_token": "[REDACTED]"}'
+  );
+  assert.equal(
+    redactSecrets('{"client_secret": "abc123def"}'),
+    '{"client_secret": "[REDACTED]"}'
+  );
+  assert.equal(
+    redactSecrets('{"refresh_token": "with \\" escaped quote"}'),
+    '{"refresh_token": "[REDACTED]"}'
+  );
+  assert.equal(
+    redactSecrets('mycli --token=supersecretvalue123 run'),
+    'mycli --token=[REDACTED] run'
+  );
+  assert.equal(
+    redactSecrets('mycli --access-token secretvalue run'),
+    'mycli --access-token [REDACTED] run'
+  );
+});
+
+test('classifyPrompt keeps high-risk development high-risk despite a clause-scoped read-only negation', async () => {
+  const { classifyPrompt } = await import('../integrations/shared/gate.mjs');
+  const demoted = classifyPrompt('Fix the authentication bypass in the login handler, but do not modify the config file.');
+  assert.equal(demoted.requestClass, 'high-risk');
+  assert.equal(demoted.failPolicy, 'closed');
+  const korean = classifyPrompt('결제 검증 로직을 고쳐줘. 단 config 파일은 수정하지 마.');
+  assert.equal(korean.requestClass, 'high-risk');
+  const explanation = classifyPrompt('인증 구조를 설명하되 수정하지 말라');
+  assert.equal(explanation.requestClass, 'read-only');
+  const genuineReadOnly = classifyPrompt('Analyze the auth flow, do not modify anything');
+  assert.equal(genuineReadOnly.requestClass, 'read-only');
+});
+
+test('redactValue redacts a secret held in an array or nested object under a sensitive key', () => {
+  const output = redactValue({
+    credentials: { data: 'PlainSecretValueNoPattern' },
+    sessionToken: ['plain-one', 'plain-two'],
+    apiKey: 'plainkey',
+    summary: { note: 'keep this visible' },
+    count: 7
+  });
+  assert.equal(output.credentials, '[REDACTED]');
+  assert.equal(output.sessionToken, '[REDACTED]');
+  assert.equal(output.apiKey, '[REDACTED]');
+  // Non-sensitive content is preserved.
+  assert.deepEqual(output.summary, { note: 'keep this visible' });
+  assert.equal(output.count, 7);
+  assert.doesNotMatch(JSON.stringify(output), /PlainSecretValueNoPattern|plain-one|plainkey/);
+});

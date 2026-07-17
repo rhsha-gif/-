@@ -99,3 +99,13 @@ test('progress formatter exposes the current lane and actual executor model with
   assert.match(output, /host=unknown/);
   assert.match(output, /shadow=anthropic\/sonnet@high\(record-only\)/);
 });
+
+test('estimated percent stays below 100 while any task is still running', () => {
+  const tasks = [
+    ...Array.from({ length: 199 }, (_, index) => ({ id: `T${index}`, status: 'complete', weight: 1 })),
+    { id: 'T-running', status: 'running', fraction: 0.99, weight: 1 }
+  ];
+  const progress = calculateProgress(tasks);
+  assert.equal(progress.phase, 'executing');
+  assert.ok(progress.percent <= 99, `percent was ${progress.percent}`);
+});

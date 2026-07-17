@@ -187,6 +187,11 @@ export async function finishRun(runPath, status) {
     throw new Error(`Unsupported terminal run status: ${status}`);
   }
   return mutateRun(runPath, (state) => {
+    // Re-finishing a terminal run would rewrite its outcome and silently reset
+    // a completed reviewStatus back to pending, losing the reflection record.
+    if (state.status !== 'running') {
+      throw new Error(`Run ${state.id} is already ${state.status}; a terminal run cannot be finished again`);
+    }
     if (status === 'completed') {
       const unfinished = state.tasks.filter((task) => !SUCCESS_TASK_STATUSES.has(task.status));
       if (unfinished.length > 0) {

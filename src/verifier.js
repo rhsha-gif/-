@@ -273,7 +273,11 @@ async function runChecks({ checks, cwd, evidenceDir, timeoutMs, totalTimeoutMs, 
       results.push({ command: check.command, visibility: check.visibility, exitCode: null, timedOut: true, outputLimitExceeded: false, terminationReason: 'verification-deadline', durationMs: 0, stdoutSha256: sha256(''), stderrSha256: sha256(''), stdoutPath: null, stderrPath: null });
       break;
     }
-    const result = await runCommand(buildShellCommand(check.command), { cwd, timeoutMs: Math.min(timeoutMs, remainingMs), maxOutputBytes });
+    // A per-check timeout of 0 disables the executor watchdog; fall back to the
+    // remaining total deadline so no single verification command can run
+    // unbounded and void the overall verification deadline.
+    const perCheckTimeoutMs = timeoutMs > 0 ? Math.min(timeoutMs, remainingMs) : remainingMs;
+    const result = await runCommand(buildShellCommand(check.command), { cwd, timeoutMs: perCheckTimeoutMs, maxOutputBytes });
     const prefix = `${String(index + 1).padStart(2, '0')}-${check.visibility}`;
     const stdoutPath = path.join(evidenceDir, `${prefix}.stdout.log`);
     const stderrPath = path.join(evidenceDir, `${prefix}.stderr.log`);
@@ -307,6 +311,19 @@ export class VerificationError extends Error {
   }
 }
 
+// Redact first, then digest the redacted attestation, then persist it. The
+// digest must cover exactly the bytes that land on disk; hashing the
+// pre-redaction object made every attestation carrying a secret-shaped string
+// fail its own tamper check once redaction rewrote the persisted copy.
+async function persistAttestation(attestation, { runDir, evidenceDir, verificationId }) {
+  const redacted = redactValue(attestation);
+  redacted.evidenceDigest = sha256(redacted);
+  const attestationPath = path.join(evidenceDir, 'attestation.json');
+  await atomicWriteJson(attestationPath, redacted);
+  await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
+  return { ...redacted, path: attestationPath };
+}
+
 export async function verifyTaskClaim({
   task,
   receipt,
@@ -334,11 +351,8 @@ export async function verifyTaskClaim({
       changeEvidence: { status: 'not-checked', actualChangedFiles: [] }, checks: [],
       failure: `Too many verifier checks: ${declaredChecks}; maximum is ${maxChecks}`
     };
-    attestation.evidenceDigest = sha256(attestation);
-    const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await atomicWriteJson(attestationPath, redactValue(attestation));
-    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
-    throw new VerificationError(`Independent verification failed: ${attestation.failure}`, { ...attestation, path: attestationPath });
+    const persisted = await persistAttestation(attestation, { runDir, evidenceDir, verificationId });
+    throw new VerificationError(`Independent verification failed: ${attestation.failure}`, persisted);
   }
 
   let changeEvidence;
@@ -359,11 +373,8 @@ export async function verifyTaskClaim({
       checks: [],
       failure: error.message
     };
-    attestation.evidenceDigest = sha256(attestation);
-    const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await atomicWriteJson(attestationPath, redactValue(attestation));
-    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
-    throw new VerificationError(`Independent verification failed: ${error.message}`, { ...attestation, path: attestationPath });
+    const persisted = await persistAttestation(attestation, { runDir, evidenceDir, verificationId });
+    throw new VerificationError(`Independent verification failed: ${error.message}`, persisted);
   }
 
   const workspaceState = afterState ?? await captureWorkspaceState(cwd, { evidenceFiles: task.evidenceFiles ?? [] });
@@ -385,11 +396,8 @@ export async function verifyTaskClaim({
       checks: [],
       failure: error.message
     };
-    attestation.evidenceDigest = sha256(attestation);
-    const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await atomicWriteJson(attestationPath, redactValue(attestation));
-    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
-    throw new VerificationError(`Independent verification failed: ${error.message}`, { ...attestation, path: attestationPath });
+    const persisted = await persistAttestation(attestation, { runDir, evidenceDir, verificationId });
+    throw new VerificationError(`Independent verification failed: ${error.message}`, persisted);
   }
 
   try {
@@ -417,17 +425,11 @@ export async function verifyTaskClaim({
       checks: results,
       ...(failed ? { failure: `Verifier check failed: ${failed.command}` } : {})
     };
-    attestation.evidenceDigest = sha256(attestation);
-    const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await atomicWriteJson(attestationPath, redactValue(attestation));
-    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
+    const persisted = await persistAttestation(attestation, { runDir, evidenceDir, verificationId });
     if (failed) {
-      throw new VerificationError(`Independent verification failed: verifier check failed: ${failed.command}`, {
-        ...attestation,
-        path: attestationPath
-      });
+      throw new VerificationError(`Independent verification failed: verifier check failed: ${failed.command}`, persisted);
     }
-    return { ...attestation, path: attestationPath };
+    return persisted;
   } finally {
     await workspace.cleanup();
   }

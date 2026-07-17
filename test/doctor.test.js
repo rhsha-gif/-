@@ -18,9 +18,23 @@ test('doctor fails overall when an enabled provider CLI is unavailable', () => {
 test('doctor passes with an available executable', () => {
   const result = runDoctor({
     providers: [{ id: 'node', adapter: 'generic', executable: process.execPath, enabled: true }],
-    models: [], capabilities: []
+    models: [{ id: 'm', provider: 'node', model: 'fixture', enabled: true }], capabilities: []
   });
   assert.equal(result.status, 'pass');
+});
+
+test('doctor fails a catalog with no enabled providers or models', () => {
+  const noModels = runDoctor({
+    providers: [{ id: 'node', adapter: 'generic', executable: process.execPath, enabled: true }],
+    models: [], capabilities: []
+  });
+  assert.equal(noModels.status, 'fail');
+  assert.equal(noModels.catalog.status, 'fail');
+  assert.ok(noModels.catalog.issues.some((issue) => /no enabled models/.test(issue)));
+
+  const noProviders = runDoctor({ providers: [], models: [], capabilities: [] });
+  assert.equal(noProviders.status, 'fail');
+  assert.ok(noProviders.catalog.issues.some((issue) => /no enabled providers/.test(issue)));
 });
 
 

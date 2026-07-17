@@ -73,6 +73,13 @@ export function validatePromptProfile(input) {
   if (!input.rules || typeof input.rules !== 'object' || Array.isArray(input.rules)) {
     throw new TypeError('prompt profile rules must be an object');
   }
+  if (input.rules.requiredSections !== undefined
+    && (!Array.isArray(input.rules.requiredSections)
+      || input.rules.requiredSections.some((section) => typeof section !== 'string' || section.trim() === ''))) {
+    // A non-array (or non-string entries) validates here but makes the lint's
+    // `for (const section of requiredSections)` crash at execution time.
+    throw new TypeError('prompt profile rules.requiredSections must be an array of non-empty strings');
+  }
   if (!Array.isArray(input.officialSources) || input.officialSources.length === 0) {
     throw new TypeError('prompt profile requires officialSources');
   }
@@ -97,12 +104,17 @@ export function assertPromptProfileFresh(profile, {
   const dates = [profile.verifiedAt, ...(profile.officialSources ?? []).map((source) => source.verifiedAt)]
     .map((value) => new Date(`${value}T00:00:00Z`));
   if (dates.some((value) => Number.isNaN(value.getTime()))) throw new Error(`Prompt profile ${profile.id} contains an invalid verification date`);
-  const oldest = new Date(Math.min(...dates.map((value) => value.getTime())));
-  const deltaMs = now.getTime() - oldest.getTime();
-  if (deltaMs < -maxFutureSkewDays * DAY_MS) {
+  const times = dates.map((value) => value.getTime());
+  const oldest = new Date(Math.min(...times));
+  const newest = new Date(Math.max(...times));
+  // Future-skew must be judged against the NEWEST source: a single
+  // impossibly-future-dated source must not hide behind an older one. Age must
+  // be judged against the OLDEST source: the profile is only as fresh as its
+  // stalest citation.
+  if (now.getTime() - newest.getTime() < -maxFutureSkewDays * DAY_MS) {
     throw new Error(`Prompt profile ${profile.id} is future dated beyond ${maxFutureSkewDays} day(s)`);
   }
-  const ageDays = Math.max(0, Math.floor(deltaMs / DAY_MS));
+  const ageDays = Math.max(0, Math.floor((now.getTime() - oldest.getTime()) / DAY_MS));
   if (ageDays > maxAgeDays) {
     throw new Error(`Prompt profile ${profile.id} is stale at ${ageDays} days; maximum age is ${maxAgeDays}`);
   }
@@ -132,6 +144,12 @@ async function jsonFiles(root) {
 export function inspectPromptProfileHealth(profiles, { now = new Date(), policy = {} } = {}) {
   if (!Array.isArray(profiles)) throw new TypeError('profiles must be an array');
   const entries = profiles.map((profile) => {
+    // Only active profiles can ever be selected at runtime; a stale retired or
+    // candidate profile must not fail doctor for guidance the runtime never
+    // uses. Report them as skipped instead.
+    if (profile.status !== 'active') {
+      return { id: profile.id, provider: profile.provider, status: 'skipped', profileStatus: profile.status };
+    }
     try {
       const freshness = assertPromptProfileFresh(profile, {
         now,
@@ -143,7 +161,7 @@ export function inspectPromptProfileHealth(profiles, { now = new Date(), policy 
       return { id: profile.id, provider: profile.provider, status: 'fail', reason: error.message };
     }
   });
-  return { status: entries.every((entry) => entry.status === 'pass') ? 'pass' : 'fail', profiles: entries };
+  return { status: entries.some((entry) => entry.status === 'fail') ? 'fail' : 'pass', profiles: entries };
 }
 
 export async function loadPromptProfiles(root = DEFAULT_PROMPT_PROFILES_DIR) {

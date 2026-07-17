@@ -1,4 +1,4 @@
-# Adaptive Orchestrator v0.6.1 Design
+# Adaptive Orchestrator v0.6.2 Design
 
 ## 1. 목적
 

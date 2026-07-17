@@ -85,3 +85,26 @@ test('bounds combined worker output and terminates an output flood', async () =>
   assert.equal(result.status, 'failed');
   assert.ok(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) <= 16 * 1024);
 });
+
+test('termination escalation swallows kill errors so a timer callback cannot crash the orchestrator', () => {
+  const throwingChild = { pid: -1, kill: () => { const error = new Error('operation not permitted'); error.code = 'EPERM'; throw error; } };
+  let scheduled = null;
+  assert.doesNotThrow(() => terminateWithEscalation(throwingChild, 30, (callback) => { scheduled = callback; return Symbol('timer'); }));
+  assert.doesNotThrow(() => scheduled());
+});
+
+test('a detached worker is reaped when the orchestrator process exits', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const helper = `
+    import { runCommand } from ${JSON.stringify(new URL('../src/executor.js', import.meta.url).href)};
+    runCommand({ command: process.execPath, args: ['-e', 'setInterval(()=>{},1000); /*AORCH_REAP_TEST*/'] }, { cwd: process.cwd() });
+    setTimeout(() => process.exit(0), 200);
+  `;
+  const runner = spawnSync(process.execPath, ['--input-type=module', '-e', helper], { encoding: 'utf8' });
+  assert.equal(runner.status, 0, runner.stderr);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  const survivors = spawnSync('ps', ['-eo', 'args'], { encoding: 'utf8' }).stdout ?? '';
+  const orphaned = survivors.split('\n').filter((line) => line.includes('AORCH_REAP_TEST') && line.includes('-e'));
+  if (orphaned.length > 0) spawnSync('pkill', ['-9', '-f', 'AORCH_REAP_TEST']);
+  assert.equal(orphaned.length, 0, `expected no orphaned workers, found: ${orphaned.join(' | ')}`);
+});

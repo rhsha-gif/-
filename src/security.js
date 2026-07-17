@@ -23,22 +23,28 @@ export function redactSecrets(value) {
   output = output.replace(/-----BEGIN(?: [A-Z0-9]+)? PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z0-9]+)? PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]');
   output = output.replace(/(Authorization\s*:\s*(?:Bearer|Basic)\s+)[^\s"']+/gi, '$1[REDACTED]');
   output = output.replace(/\b(https?:\/\/)([^\s/@:]+):([^\s/@]+)@/gi, '$1[REDACTED]@');
-  output = output.replace(/((?:--(?:api[-_]?key|token|password|secret)|-(?:p))\s+)(?:"[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]');
+  // Match sensitive words as key substrings (access_token, client_secret) and
+  // both `--flag value` and `--flag=value` forms; missing either leaks the
+  // secret into persisted stdout/stderr evidence.
+  output = output.replace(/((?:--[A-Za-z0-9_-]*(?:api[-_]?key|token|password|secret|credential)[A-Za-z0-9_-]*|-(?:p))(?:=|\s+))(?:"[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]');
   output = output.replace(/\b([A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL))\s*=\s*(?:"[^"]*"|'[^']*'|[^\s]+)/g, '$1=[REDACTED]');
-  output = output.replace(/("(?:api[_-]?key|token|password|secret|credential|authorization)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"');
+  output = output.replace(/("[A-Za-z0-9_.-]*(?:api[_-]?key|token|password|secret|credential|authorization)[A-Za-z0-9_.-]*"\s*:\s*)"(?:[^"\\]|\\.)*"/gi, '$1"[REDACTED]"');
   for (const pattern of TOKEN_PATTERNS.slice(1)) output = output.replace(pattern, '[REDACTED TOKEN]');
   return output;
 }
 
 export function redactValue(value, key = '') {
-  if (typeof value === 'string') return SENSITIVE_KEY.test(key) ? '[REDACTED]' : redactSecrets(value);
+  // A sensitive key redacts its ENTIRE value, whatever the shape. The previous
+  // guard only redacted non-object values, so a secret held in an array
+  // (`{ tokens: [...] }`) or a nested object (`{ credentials: { data: ... } }`)
+  // leaked because recursion redacted children only by their own (non-sensitive)
+  // keys and by pattern, missing plain secret values.
+  if (key && SENSITIVE_KEY.test(key)) return '[REDACTED]';
+  if (typeof value === 'string') return redactSecrets(value);
   if (Buffer.isBuffer(value)) return Buffer.from(redactSecrets(value.toString('utf8')));
   if (Array.isArray(value)) return value.map((entry) => redactValue(entry));
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([field, entry]) => [
-      field,
-      SENSITIVE_KEY.test(field) && typeof entry !== 'object' ? '[REDACTED]' : redactValue(entry, field)
-    ]));
+    return Object.fromEntries(Object.entries(value).map(([field, entry]) => [field, redactValue(entry, field)]));
   }
   return value;
 }

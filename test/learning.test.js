@@ -11,6 +11,7 @@ import {
   loadLessons,
   loadRetrospective,
   markProposalApplied,
+  pruneExpiredLessons,
   releaseProposalReservation,
   reserveProposal,
   saveRetrospective
@@ -362,4 +363,22 @@ test('an approved proposal cannot change its affected-file authority in a retros
   const modified = reflection(run.id);
   modified.proposals[0].affectedFiles = ['src/verifier.js'];
   await assert.rejects(() => saveRetrospective({ root, runPath: run.path, input: modified }), /decided proposal.*cannot be changed|affectedFiles/i);
+});
+
+test('pruneExpiredLessons removes expired lessons so lint can pass again', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-lessons-prune-'));
+  const indexPath = path.join(root, 'learning', 'lessons.json');
+  await mkdir(path.dirname(indexPath), { recursive: true });
+  const lesson = {
+    id: 'l1', type: 'negative', status: 'advisory', description: 'd', prevention: 'p',
+    scopeTags: ['tag'], evidence: ['e'], confidence: 0.8, sourceRunIds: ['r1'],
+    promotedToPolicy: false, expiresAt: new Date(Date.now() - 1000).toISOString()
+  };
+  await writeFile(indexPath, JSON.stringify({ version: 2, lessons: [lesson] }));
+  const before = await lintLessons({ root });
+  assert.equal(before.status, 'fail');
+  const result = await pruneExpiredLessons({ root });
+  assert.equal(result.pruned, 1);
+  const after = await lintLessons({ root });
+  assert.equal(after.status, 'pass');
 });

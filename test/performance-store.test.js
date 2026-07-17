@@ -122,3 +122,21 @@ test('signature-tagged evidence applies only to compatible task signatures', () 
   assert.equal(estimate.rawSamples, 0);
   assert.equal(estimate.diagnostics.signatureMismatch, 1);
 });
+
+test('observation complexity defaults by risk so low-risk evidence matches low-risk routing', () => {
+  const route = { provider: 'openai', profileId: 'p', model: 'm', modelRevision: 'm', effort: 'high' };
+  const task = { kind: 'implementation', role: 'executor', risk: 'low', complexity: 'low', signature: {} };
+  const estimate = estimateRouteQuality({
+    route,
+    task,
+    priorQuality: 0.5,
+    observations: [{
+      provider: 'openai', profileId: 'p', model: 'm', effort: 'high',
+      taskKind: 'implementation', role: 'executor', risk: 'low',
+      quality: 1, recordedAt: new Date().toISOString()
+    }],
+    now: new Date()
+  });
+  assert.equal(estimate.rawSamples, 1);
+  assert.ok(estimate.mean > 0.5);
+});
