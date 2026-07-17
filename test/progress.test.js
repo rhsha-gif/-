@@ -83,3 +83,29 @@ test('a run with no tasks reports planning at 0 percent, not completion', async 
   assert.equal(result.percent, 0);
   assert.equal(result.phase, 'planning');
 });
+
+test('progress formatter exposes the current lane and actual executor model without inventing host identity', () => {
+  const output = formatProgressReport({
+    percent: 55, phase: 'executing', confidence: 'medium', evidenceCount: 2,
+    lane: 'bundled',
+    modelUse: {
+      host: { provider: null, resolvedModel: null, effectiveEffort: null },
+      executor: { provider: 'openai', model: 'gpt-5.6-terra', effort: 'high' },
+      shadow: { provider: 'anthropic', model: 'sonnet', effort: 'high', execute: false }
+    }
+  });
+  assert.match(output, /lane=bundled/);
+  assert.match(output, /executor=openai\/gpt-5.6-terra@high/);
+  assert.match(output, /host=unknown/);
+  assert.match(output, /shadow=anthropic\/sonnet@high\(record-only\)/);
+});
+
+test('estimated percent stays below 100 while any task is still running', () => {
+  const tasks = [
+    ...Array.from({ length: 199 }, (_, index) => ({ id: `T${index}`, status: 'complete', weight: 1 })),
+    { id: 'T-running', status: 'running', fraction: 0.99, weight: 1 }
+  ];
+  const progress = calculateProgress(tasks);
+  assert.equal(progress.phase, 'executing');
+  assert.ok(progress.percent <= 99, `percent was ${progress.percent}`);
+});

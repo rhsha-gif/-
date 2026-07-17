@@ -108,3 +108,23 @@ test('an active-run pointer escaping the state root is rejected', async () => {
   await atomicWriteJson(path.join(root, 'active-run.json'), { runPath: foreignRun });
   await assert.rejects(() => resolveActiveRun(root), /outside state root/i);
 });
+
+test('run creation enforces a bounded task budget', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-state-task-budget-'));
+  const tasks = Array.from({ length: 3 }, (_, index) => ({ id: `T${index + 1}` }));
+  await assert.rejects(
+    () => createRun({ root, prompt: 'too many tasks', tasks, maxTasks: 2 }),
+    /task budget|maximum.*2|too many tasks/i
+  );
+  const run = await createRun({ root, prompt: 'within budget', tasks: tasks.slice(0, 2), maxTasks: 2 });
+  assert.equal(run.tasks.length, 2);
+});
+
+test('finishRun refuses to re-finish a terminal run', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-state-refinish-'));
+  const run = await createRun({ root, prompt: 'Refinish guard', tasks: [{ id: 'T1' }] });
+  await updateTaskState(run.path, 'T1', { status: 'complete' });
+  await finishRun(run.path, 'completed');
+  await assert.rejects(finishRun(run.path, 'cancelled'), /already completed/);
+  await assert.rejects(finishRun(run.path, 'completed'), /already completed/);
+});

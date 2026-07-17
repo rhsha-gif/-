@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "id": "anthropic-claude-opus-v1",
+  "provider": "anthropic",
+  "modelFamilies": [
+    "opus"
+  ],
+  "roles": [
+    "planner",
+    "executor",
+    "reviewer"
+  ],
+  "taskKinds": [
+    "architecture",
+    "planning",
+    "implementation",
+    "debugging",
+    "review",
+    "security",
+    "risk-analysis"
+  ],
+  "strategy": "xml",
+  "status": "active",
+  "verifiedAt": "2026-07-17",
+  "officialSources": [
+    {
+      "publisher": "Anthropic",
+      "document": "Claude prompting best practices",
+      "url": "https://platform.claude.com/docs/ko/build-with-claude/prompt-engineering/claude-prompting-best-practices",
+      "verifiedAt": "2026-07-17"
+    },
+    {
+      "publisher": "Anthropic",
+      "document": "Claude Code subagents",
+      "url": "https://code.claude.com/docs/en/subagents",
+      "verifiedAt": "2026-07-17"
+    }
+  ],
+  "rules": {
+    "detail": "deep",
+    "requiredSections": [
+      "role",
+      "objective",
+      "context",
+      "invariants",
+      "failure_modes",
+      "scope",
+      "acceptance_criteria",
+      "verification",
+      "output"
+    ],
+    "includeMotivation": true,
+    "preserveImplementationFreedom": true,
+    "inspectBeforeClaiming": true,
+    "avoidTestSpecificSolutions": true,
+    "avoidOverengineering": true,
+    "structuredOutput": true
+  }
+}

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   access,
+  link,
   mkdir,
   open,
   readFile,
@@ -11,7 +12,7 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 
-const JOURNAL_VERSION = 1;
+const JOURNAL_VERSION = 2;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -65,8 +66,20 @@ async function inspectLockFile(lockPath, staleMs, hardStaleMs = HARD_STALE_LOCK_
 // Reclaim a stale lock without the unlink TOCTOU: unlinking by path could
 // delete a fresh lock created by a concurrent reclaimer. Atomically rename the
 // entry aside, verify it is still the stale lock we inspected, and only then
-// discard it; otherwise restore it.
+// discard it; otherwise restore it without clobbering any newer lock.
 async function reclaimStaleLock(lockPath, inspected) {
+  // The lock judged stale may have been replaced since inspection; renaming a
+  // fresh lock aside breaks its owner's mutual exclusion. Re-check identity
+  // immediately before the rename to shrink that window to near zero.
+  try {
+    const current = await stat(lockPath);
+    if (inspected.info && (current.ino !== inspected.info.ino
+      || current.mtimeMs !== inspected.info.mtimeMs
+      || current.size !== inspected.info.size)) return;
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
   const reclaimPath = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
   try {
     await rename(lockPath, reclaimPath);
@@ -80,7 +93,23 @@ async function reclaimStaleLock(lockPath, inspected) {
     await unlink(reclaimPath).catch(() => {});
     return;
   }
-  await rename(reclaimPath, lockPath).catch(() => unlink(reclaimPath).catch(() => {}));
+  // A different (fresh) lock was vacated. Restore it with a no-clobber link:
+  // a plain rename could overwrite a third lock acquired in the meantime and
+  // leave two processes inside the critical section.
+  try {
+    await link(reclaimPath, lockPath);
+  } catch (error) {
+    if (error.code !== 'EEXIST') {
+      // Filesystems without hard links: fall back to the old best-effort
+      // restore rather than silently dropping the vacated lock.
+      await rename(reclaimPath, lockPath).catch(() => {});
+      return;
+    }
+    // EEXIST: a newer lock now occupies the slot; restoring over it would
+    // break that owner too. Drop the vacated lock instead (its owner's
+    // release() tolerates ENOENT).
+  }
+  await unlink(reclaimPath).catch(() => {});
 }
 
 function stableValue(value) {
@@ -96,12 +125,14 @@ function stableJson(value) {
 }
 
 function journalChecksum(entry) {
-  return createHash('sha256').update(stableJson({
+  const protectedFields = {
     journalVersion: entry.journalVersion,
     sequence: entry.sequence,
     recordedAt: entry.recordedAt,
     payload: entry.payload
-  })).digest('hex');
+  };
+  if (entry.journalVersion >= 2) protectedFields.previousChecksum = entry.previousChecksum ?? null;
+  return createHash('sha256').update(stableJson(protectedFields)).digest('hex');
 }
 
 async function syncDirectory(directory) {
@@ -151,9 +182,20 @@ export async function acquireFileLock(lockPath, {
     let handle;
     try {
       handle = await open(lockPath, 'wx', 0o600);
-      await handle.writeFile(`${JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })}\n`);
-      await handle.sync();
-      await handle.close();
+      try {
+        await handle.writeFile(`${JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })}\n`);
+        await handle.sync();
+        await handle.close();
+        handle = null;
+      } catch (writeError) {
+        // The lock file exists now but we could not stamp our identity (e.g.
+        // disk full). Leaving it would block every writer for the full stale
+        // window; remove our own just-created lock before failing.
+        await handle?.close().catch(() => {});
+        handle = null;
+        await unlink(lockPath).catch(() => {});
+        throw writeError;
+      }
       let released = false;
       return async () => {
         if (released) return;
@@ -193,14 +235,14 @@ export async function withFileLock(lockPath, callback, options = {}) {
   finally { await release(); }
 }
 
-function parseJournalLine(line, lineNumber, expectedSequence) {
+function parseJournalLine(line, lineNumber, expectedSequence, expectedPreviousChecksum) {
   let parsed;
   try { parsed = JSON.parse(line); }
   catch (error) {
     return { issue: { line: lineNumber, type: 'invalid-json', message: error.message } };
   }
 
-  if (parsed?.journalVersion !== JOURNAL_VERSION || !Object.hasOwn(parsed, 'payload')) {
+  if (![1, 2].includes(parsed?.journalVersion) || !Object.hasOwn(parsed, 'payload')) {
     return {
       entry: {
         journalVersion: 0,
@@ -216,6 +258,9 @@ function parseJournalLine(line, lineNumber, expectedSequence) {
 
   if (!Number.isInteger(parsed.sequence) || parsed.sequence !== expectedSequence) {
     return { issue: { line: lineNumber, type: 'sequence', message: `Expected sequence ${expectedSequence}, received ${parsed.sequence}` } };
+  }
+  if (parsed.journalVersion >= 2 && (parsed.previousChecksum ?? null) !== (expectedPreviousChecksum ?? null)) {
+    return { issue: { line: lineNumber, type: 'chain', message: 'Journal previous checksum mismatch' } };
   }
   const expectedChecksum = journalChecksum(parsed);
   if (typeof parsed.checksum !== 'string' || parsed.checksum !== expectedChecksum) {
@@ -236,13 +281,17 @@ export async function readJournal(filePath, { tolerateCorruption = false } = {})
 
   const entries = [];
   const issues = [];
+  let previousChecksum = null;
   const lines = raw.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (!line.trim()) continue;
-    const result = parseJournalLine(line, index + 1, entries.length + 1);
+    const result = parseJournalLine(line, index + 1, entries.length + 1, previousChecksum);
     if (result.issue) issues.push(result.issue);
-    else entries.push(result.entry);
+    else {
+      entries.push(result.entry);
+      previousChecksum = result.entry.checksum ?? null;
+    }
   }
   if (issues.length > 0 && !tolerateCorruption) {
     const first = issues[0];
@@ -264,6 +313,7 @@ export async function appendJournalRecord(filePath, payload, { recordedAt = new 
       journalVersion: JOURNAL_VERSION,
       sequence: journal.entries.length + 1,
       recordedAt,
+      previousChecksum: journal.entries.at(-1)?.checksum ?? null,
       // Checksum verification hashes the payload as parsed back from disk, so
       // hash the JSON round-trip of the payload: a value with toJSON (Date)
       // would otherwise produce a permanently checksum-invalid record.
@@ -295,7 +345,7 @@ export async function repairJournal(filePath) {
     // earlier in the file. Rewriting would silently delete those records, so
     // only torn-tail damage (invalid-json/checksum with no cascade) is
     // repairable automatically.
-    if (journal.issues.some((issue) => issue.type === 'sequence')) {
+    if (journal.issues.some((issue) => ['sequence', 'chain'].includes(issue.type))) {
       return {
         filePath,
         repaired: false,

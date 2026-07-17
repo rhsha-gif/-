@@ -3,6 +3,17 @@ const COMPLEXITIES = new Set(['low', 'standard', 'high', 'critical']);
 const DEFAULT_COMPLEXITY_BY_RISK = Object.freeze({ low: 'low', standard: 'standard', high: 'high', critical: 'high' });
 const ROUTE_METRICS = new Set(['quality', 'tokens', 'latency']);
 const VERIFICATION_ISOLATIONS = new Set(['same-workspace', 'git-worktree']);
+const EXECUTION_LANES = new Set(['single-worker', 'bundled', 'orchestrated']);
+const SIGNATURE_ENUMS = Object.freeze({
+  ambiguity: new Set(['low', 'medium', 'high']),
+  repositoryBreadth: new Set(['local', 'module', 'wide']),
+  editBreadth: new Set(['none', 'one-file', 'few-files', 'many-files']),
+  contextVolume: new Set(['small', 'medium', 'large']),
+  toolIntensity: new Set(['low', 'medium', 'high']),
+  stateComplexity: new Set(['none', 'simple', 'complex']),
+  testCoverage: new Set(['good', 'partial', 'poor', 'unknown']),
+  externalIntegration: new Set(['none', 'read-only', 'mutating'])
+});
 
 function requireString(task, field) {
   if (typeof task[field] !== 'string' || task[field].trim() === '') throw new TypeError(`task.${field} is required`);
@@ -38,6 +49,45 @@ function ensureStringArray(value, field) {
   return value;
 }
 
+function exactProjectFiles(value, field) {
+  const entries = ensureStringArray(value, field);
+  const normalized = entries.map((entry) => {
+    const raw = entry.trim().replaceAll('\\', '/');
+    if (!raw || raw.includes('\0') || raw.endsWith('/') || raw.startsWith('/') || /^[A-Za-z]:\//.test(raw)
+      || /[*?[]/.test(raw)) {
+      throw new Error(`task.${field} must contain exact project-relative files`);
+    }
+    const withoutPrefix = raw.replace(/^\.\//, '');
+    const parts = withoutPrefix.split('/');
+    if (parts.length === 0 || parts.some((part) => !part || part === '.' || part === '..')) {
+      throw new Error(`task.${field} must contain exact project-relative files`);
+    }
+    return parts.join('/');
+  });
+  if (new Set(normalized).size !== normalized.length) throw new Error(`task.${field} must not contain duplicates`);
+  return normalized;
+}
+
+function validateSignature(value) {
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('task.signature must be an object');
+  const result = {};
+  for (const [field, allowed] of Object.entries(SIGNATURE_ENUMS)) {
+    if (value[field] === undefined) continue;
+    if (!allowed.has(value[field])) throw new Error(`task.signature.${field} is invalid`);
+    result[field] = value[field];
+  }
+  for (const field of ['language', 'framework']) {
+    if (value[field] === undefined) continue;
+    if (typeof value[field] !== 'string' || value[field].trim() === '') throw new TypeError(`task.signature.${field} must be a non-empty string`);
+    result[field] = value[field].trim();
+  }
+  const known = new Set([...Object.keys(SIGNATURE_ENUMS), 'language', 'framework']);
+  const unknown = Object.keys(value).filter((field) => !known.has(field));
+  if (unknown.length) throw new Error(`task.signature contains unsupported fields: ${unknown.join(', ')}`);
+  return result;
+}
+
 export function validateTask(input, { forExecution = false } = {}) {
   if (!input || typeof input !== 'object') throw new TypeError('task must be an object');
   const task = structuredClone(input);
@@ -63,6 +113,26 @@ export function validateTask(input, { forExecution = false } = {}) {
   task.acceptanceCriteria = ensureStringArray(task.acceptanceCriteria, 'acceptanceCriteria');
   task.verificationCommands = ensureStringArray(task.verificationCommands, 'verificationCommands');
   task.verifierCommands = ensureStringArray(task.verifierCommands, 'verifierCommands');
+  task.requirements = ensureStringArray(task.requirements, 'requirements');
+  task.invariants = ensureStringArray(task.invariants, 'invariants');
+  task.failureModes = ensureStringArray(task.failureModes, 'failureModes');
+  task.contextFiles = ensureStringArray(task.contextFiles, 'contextFiles');
+  task.evidenceFiles = exactProjectFiles(task.evidenceFiles, 'evidenceFiles');
+  if (task.context !== undefined && (typeof task.context !== 'string' || task.context.trim() === '')) {
+    throw new TypeError('task.context must be a non-empty string');
+  }
+  if (typeof task.context === 'string') task.context = task.context.trim();
+  task.escalationSignals = ensureStringArray(task.escalationSignals, 'escalationSignals');
+  task.signature = validateSignature(task.signature);
+  if (task.executionLane !== undefined && !EXECUTION_LANES.has(task.executionLane)) {
+    if (task.executionLane === 'direct') {
+      throw new Error('task.executionLane direct was removed; use single-worker so the bootstrap host delegates to one bounded worker');
+    }
+    throw new Error('task.executionLane must be single-worker, bundled, or orchestrated');
+  }
+  if (task.laneReason !== undefined && (typeof task.laneReason !== 'string' || task.laneReason.trim() === '')) {
+    throw new TypeError('task.laneReason must be a non-empty string');
+  }
   if (task.verificationIsolation !== undefined && !VERIFICATION_ISOLATIONS.has(task.verificationIsolation)) {
     throw new Error('task.verificationIsolation must be same-workspace or git-worktree');
   }
@@ -84,6 +154,30 @@ export function validateTask(input, { forExecution = false } = {}) {
     throw new TypeError('task.allowInPlaceWrite must be boolean');
   }
   task.allowInPlaceWrite = task.allowInPlaceWrite === true;
+  if (task.controlPlaneChange !== undefined && typeof task.controlPlaneChange !== 'boolean') {
+    throw new TypeError('task.controlPlaneChange must be boolean');
+  }
+  task.controlPlaneChange = task.controlPlaneChange === true;
+  if (task.approval !== undefined) {
+    if (!task.approval || typeof task.approval !== 'object' || Array.isArray(task.approval)) {
+      throw new TypeError('task.approval must be an object');
+    }
+    for (const field of ['runId', 'proposalId']) {
+      if (typeof task.approval[field] !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(task.approval[field])) {
+        throw new Error(`task.approval.${field} must be a path-safe identifier`);
+      }
+    }
+    task.approval = { runId: task.approval.runId, proposalId: task.approval.proposalId };
+  }
+  if (task.controlPlaneChange) {
+    if (task.write !== true || task.risk !== 'critical' || task.verificationIsolation !== 'git-worktree') {
+      throw new Error('Control-plane changes require write=true, risk=critical, and verificationIsolation=git-worktree');
+    }
+    if (!task.approval) throw new Error('Control-plane changes require an approved proposal reference');
+    if (task.verifierCommands.length === 0) throw new Error('Control-plane changes require a hidden verifier command');
+  } else if (task.approval !== undefined) {
+    throw new Error('task.approval is only valid when task.controlPlaneChange is true');
+  }
   task.routingPriorities = routingPriorities(task.routingPriorities);
   task.minimumQuality = optionalNumber(task.minimumQuality, 'minimumQuality', { minimum: 0, maximum: 1 });
   task.maxTokenIndex = optionalNumber(task.maxTokenIndex, 'maxTokenIndex', { minimum: 0, exclusiveMinimum: true });

@@ -73,3 +73,28 @@ test('provider executables can be replaced without changing adapter code', () =>
   assert.equal(claude.command, '/opt/claude');
   assert.equal(codex.command, '/opt/codex');
 });
+
+test('generic provider argument mode injects the prompt through the {prompt} placeholder', () => {
+  const spec = buildGenericCommand({
+    prompt: 'do the work', route: { model: 'm1', effort: 'low' }, write: false,
+    provider: { executable: 'argcli', promptMode: 'argument', args: ['run', '--model', '{model}', '--prompt', '{prompt}'] }
+  });
+  assert.deepEqual(spec.args, ['run', '--model', 'm1', '--prompt', 'do the work']);
+  assert.equal(spec.stdin, null);
+});
+
+test('generic provider argument mode without a {prompt} placeholder fails closed instead of dropping the prompt', () => {
+  assert.throws(() => buildGenericCommand({
+    prompt: 'lost work', route: { model: 'm1', effort: 'low' }, write: false,
+    provider: { id: 'argcli', executable: 'argcli', promptMode: 'argument', args: ['run', '--model', '{model}'] }
+  }), /\{prompt\} placeholder/);
+});
+
+test('generic provider stdin mode does not interpolate {prompt} into arguments', () => {
+  const spec = buildGenericCommand({
+    prompt: 'stdin work', route: { model: 'm1', effort: 'low' }, write: false,
+    provider: { executable: 'stdcli', args: ['run', '--prompt', '{prompt}'] }
+  });
+  assert.deepEqual(spec.args, ['run', '--prompt', '']);
+  assert.equal(spec.stdin, 'stdin work');
+});

@@ -96,8 +96,7 @@ function normalizeDebt(entry) {
 function normalizeProposal(entry, existing) {
   if (!PROPOSAL_CATEGORIES.has(entry.category)) throw new Error(`Unsupported proposal category: ${entry.category}`);
   if (entry.applied === true) throw new Error('A retrospective cannot mark a proposal applied automatically');
-  const status = existing?.status ?? 'pending';
-  return {
+  const candidate = {
     id: nonEmptyString(entry.id, 'proposal.id'),
     category: entry.category,
     title: nonEmptyString(entry.title, 'proposal.title'),
@@ -105,12 +104,17 @@ function normalizeProposal(entry, existing) {
     expectedBenefit: nonEmptyString(entry.expectedBenefit, 'proposal.expectedBenefit'),
     risks: stringArray(entry.risks, 'proposal.risks'),
     affectedFiles: stringArray(entry.affectedFiles, 'proposal.affectedFiles'),
-    requiresUserApproval: true,
-    status,
-    applied: false,
-    ...(existing?.decidedAt ? { decidedAt: existing.decidedAt } : {}),
-    ...(existing?.decisionComment ? { decisionComment: existing.decisionComment } : {})
+    requiresUserApproval: true
   };
+  if (existing && existing.status !== 'pending') {
+    for (const field of ['category', 'title', 'rationale', 'expectedBenefit', 'risks', 'affectedFiles']) {
+      if (JSON.stringify(candidate[field]) !== JSON.stringify(existing[field])) {
+        throw new Error(`Decided proposal ${candidate.id} cannot be changed; ${field} is immutable after decision`);
+      }
+    }
+    return { ...existing };
+  }
+  return { ...candidate, status: existing?.status ?? 'pending', applied: false };
 }
 
 function mergeById(previousEntries, inputEntries, normalize, name) {
@@ -258,6 +262,26 @@ export async function lintLessons({ root, now = new Date() } = {}) {
   };
 }
 
+// Expired lessons are excluded from loadLessons but keep lint (and doctor)
+// permanently failing; pruning under the index lock is the supported
+// remediation instead of hand-editing the JSON.
+export async function pruneExpiredLessons({ root, now = new Date() } = {}) {
+  const filePath = lessonIndexPath(root);
+  if (!(await exists(filePath))) return { pruned: 0, remaining: 0, path: filePath };
+  return withFileLock(`${filePath}.lock`, async () => {
+    const index = JSON.parse(await readFile(filePath, 'utf8'));
+    const lessons = index.lessons ?? [];
+    const kept = lessons.filter((lesson) => {
+      const expiresAt = Date.parse(lesson?.expiresAt);
+      return !Number.isFinite(expiresAt) || expiresAt > new Date(now).getTime();
+    });
+    if (kept.length !== lessons.length) {
+      await atomicWriteJson(filePath, { ...index, updatedAt: new Date(now).toISOString(), lessons: kept });
+    }
+    return { pruned: lessons.length - kept.length, remaining: kept.length, path: filePath };
+  });
+}
+
 export async function loadLessons({ root, query = '', limit = 10, now = new Date() } = {}) {
   const filePath = lessonIndexPath(root);
   if (!(await exists(filePath))) return [];
@@ -353,6 +377,53 @@ export async function appendUserFeedback({ root, runId, feedback }) {
   return { ...value, path: filePath };
 }
 
+async function mutateProposal({ root, runId, proposalId, callback }) {
+  const filePath = retrospectivePath(root, runId);
+  return withFileLock(`${filePath}.lock`, async () => {
+    const current = JSON.parse(await readFile(filePath, 'utf8'));
+    const index = current.proposals.findIndex((entry) => entry.id === proposalId);
+    if (index < 0) throw new Error(`Unknown proposal: ${proposalId}`);
+    current.proposals[index] = callback({ ...current.proposals[index] });
+    current.updatedAt = new Date().toISOString();
+    await atomicWriteJson(filePath, current);
+    return { ...current.proposals[index] };
+  });
+}
+
+export async function reserveProposal({ root, runId, proposalId, taskId }) {
+  nonEmptyString(taskId, 'taskId');
+  return mutateProposal({ root, runId, proposalId, callback: (proposal) => {
+    if (proposal.status !== 'approved') throw new Error(`Proposal ${proposalId} is not approved`);
+    if (proposal.applied === true) throw new Error(`Proposal ${proposalId} was already applied and consumed`);
+    if (proposal.reservedBy && proposal.reservedBy !== taskId) throw new Error(`Proposal ${proposalId} is reserved by ${proposal.reservedBy}`);
+    return { ...proposal, reservedBy: taskId, reservedAt: proposal.reservedAt ?? new Date().toISOString() };
+  } });
+}
+
+export async function releaseProposalReservation({ root, runId, proposalId, taskId }) {
+  return mutateProposal({ root, runId, proposalId, callback: (proposal) => {
+    if (proposal.reservedBy && proposal.reservedBy !== taskId) throw new Error(`Proposal ${proposalId} is reserved by another task`);
+    const { reservedBy, reservedAt, ...rest } = proposal;
+    return rest;
+  } });
+}
+
+export async function markProposalApplied({ root, runId, proposalId, taskId, evidence = [] }) {
+  return mutateProposal({ root, runId, proposalId, callback: (proposal) => {
+    if (proposal.applied === true) throw new Error(`Proposal ${proposalId} was already applied`);
+    if (proposal.status !== 'approved' || proposal.reservedBy !== taskId) {
+      throw new Error(`Proposal ${proposalId} must be approved and reserved by ${taskId}`);
+    }
+    return {
+      ...proposal,
+      applied: true,
+      appliedAt: new Date().toISOString(),
+      appliedByTask: taskId,
+      applicationEvidence: uniqueStrings(evidence)
+    };
+  } });
+}
+
 export async function decideProposal({ root, runId, proposalId, decision, comment = '' }) {
   if (!PROPOSAL_DECISIONS.has(decision)) throw new Error(`Unsupported proposal decision: ${decision}`);
   const filePath = retrospectivePath(root, runId);
@@ -360,6 +431,8 @@ export async function decideProposal({ root, runId, proposalId, decision, commen
     const current = JSON.parse(await readFile(filePath, 'utf8'));
     const index = current.proposals.findIndex((entry) => entry.id === proposalId);
     if (index < 0) throw new Error(`Unknown proposal: ${proposalId}`);
+    if (current.proposals[index].applied === true) throw new Error(`Applied proposal ${proposalId} cannot be changed`);
+    if (current.proposals[index].reservedBy) throw new Error(`Reserved proposal ${proposalId} cannot be changed`);
     current.proposals[index] = {
       ...current.proposals[index],
       status: decision,

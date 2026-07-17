@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runCommand } from './executor.js';
 import { atomicWriteJson, atomicWriteText } from './file-store.js';
+import { redactSecrets, redactValue } from './security.js';
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -103,7 +104,7 @@ export async function inspectWorkspaceIsolation(cwd = process.cwd()) {
   }
 }
 
-export async function captureWorkspaceState(cwd, { ignorePaths = [] } = {}) {
+export async function captureWorkspaceState(cwd, { ignorePaths = [], evidenceFiles = [] } = {}) {
   const normalizedIgnore = ignorePaths.map(normalizePath).filter(Boolean);
   try {
     const probe = await gitCommand(['rev-parse', '--is-inside-work-tree'], { cwd });
@@ -124,7 +125,15 @@ export async function captureWorkspaceState(cwd, { ignorePaths = [] } = {}) {
         fingerprint: await fileFingerprint(path.join(cwd, entry.path))
       };
     }
-    return { available: true, kind: 'git', head, entries };
+    const normalizedEvidenceFiles = [...new Set(evidenceFiles.map(normalizePath).filter(Boolean))];
+    for (const filePath of normalizedEvidenceFiles) {
+      if (ignored(filePath, normalizedIgnore)) continue;
+      entries[filePath] = {
+        status: 'evidence',
+        fingerprint: await fileFingerprint(path.join(cwd, filePath))
+      };
+    }
+    return { available: true, kind: 'git', head, entries, evidenceFiles: normalizedEvidenceFiles };
   } catch (error) {
     return { available: false, kind: 'none', reason: error.message, entries: {} };
   }
@@ -191,6 +200,26 @@ async function copyUntrackedFiles({ sourceRoot, targetRoot, state }) {
   }
 }
 
+async function copyEvidenceFiles({ sourceRoot, targetRoot, state }) {
+  for (const filePath of state?.evidenceFiles ?? []) {
+    const source = path.join(sourceRoot, filePath);
+    const target = path.join(targetRoot, filePath);
+    try {
+      const info = await lstat(source);
+      if (info.isSymbolicLink()) throw new Error(`Evidence file must not be a symlink: ${filePath}`);
+      if (!info.isFile()) throw new Error(`Evidence path must be a regular file: ${filePath}`);
+      await mkdir(path.dirname(target), { recursive: true });
+      await cp(source, target, { force: true });
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        await rm(target, { force: true });
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 async function prepareVerificationWorkspace({ cwd, state, isolationMode }) {
   if (isolationMode !== 'git-worktree') {
     return { cwd, isolation: 'same-workspace', cleanup: async () => {} };
@@ -218,6 +247,7 @@ async function prepareVerificationWorkspace({ cwd, state, isolationMode }) {
       if (apply.exitCode !== 0) throw new Error(apply.stderr.trim() || 'git apply failed');
     }
     await copyUntrackedFiles({ sourceRoot: cwd, targetRoot: worktree, state });
+    await copyEvidenceFiles({ sourceRoot: cwd, targetRoot: worktree, state });
     return {
       cwd: worktree,
       isolation: 'git-worktree',
@@ -233,21 +263,33 @@ async function prepareVerificationWorkspace({ cwd, state, isolationMode }) {
   }
 }
 
-async function runChecks({ checks, cwd, evidenceDir, timeoutMs, onStep }) {
+async function runChecks({ checks, cwd, evidenceDir, timeoutMs, totalTimeoutMs, maxOutputBytes, onStep }) {
+  const deadline = Date.now() + totalTimeoutMs;
   const results = [];
   for (let index = 0; index < checks.length; index += 1) {
     const check = checks[index];
-    const result = await runCommand(buildShellCommand(check.command), { cwd, timeoutMs });
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      results.push({ command: check.command, visibility: check.visibility, exitCode: null, timedOut: true, outputLimitExceeded: false, terminationReason: 'verification-deadline', durationMs: 0, stdoutSha256: sha256(''), stderrSha256: sha256(''), stdoutPath: null, stderrPath: null });
+      break;
+    }
+    // A per-check timeout of 0 disables the executor watchdog; fall back to the
+    // remaining total deadline so no single verification command can run
+    // unbounded and void the overall verification deadline.
+    const perCheckTimeoutMs = timeoutMs > 0 ? Math.min(timeoutMs, remainingMs) : remainingMs;
+    const result = await runCommand(buildShellCommand(check.command), { cwd, timeoutMs: perCheckTimeoutMs, maxOutputBytes });
     const prefix = `${String(index + 1).padStart(2, '0')}-${check.visibility}`;
     const stdoutPath = path.join(evidenceDir, `${prefix}.stdout.log`);
     const stderrPath = path.join(evidenceDir, `${prefix}.stderr.log`);
-    await atomicWriteText(stdoutPath, result.stdout);
-    await atomicWriteText(stderrPath, result.stderr);
+    await atomicWriteText(stdoutPath, redactSecrets(result.stdout));
+    await atomicWriteText(stderrPath, redactSecrets(result.stderr));
     const record = {
       command: check.command,
       visibility: check.visibility,
       exitCode: result.exitCode,
       timedOut: result.timedOut,
+      outputLimitExceeded: result.outputLimitExceeded,
+      terminationReason: result.terminationReason,
       durationMs: result.durationMs,
       stdoutSha256: sha256(result.stdout),
       stderrSha256: sha256(result.stderr),
@@ -256,7 +298,7 @@ async function runChecks({ checks, cwd, evidenceDir, timeoutMs, onStep }) {
     };
     results.push(record);
     onStep?.(index + 1, checks.length);
-    if (result.exitCode !== 0 || result.timedOut) break;
+    if (result.exitCode !== 0 || result.timedOut || result.outputLimitExceeded) break;
   }
   return results;
 }
@@ -269,6 +311,19 @@ export class VerificationError extends Error {
   }
 }
 
+// Redact first, then digest the redacted attestation, then persist it. The
+// digest must cover exactly the bytes that land on disk; hashing the
+// pre-redaction object made every attestation carrying a secret-shaped string
+// fail its own tamper check once redaction rewrote the persisted copy.
+async function persistAttestation(attestation, { runDir, evidenceDir, verificationId }) {
+  const redacted = redactValue(attestation);
+  redacted.evidenceDigest = sha256(redacted);
+  const attestationPath = path.join(evidenceDir, 'attestation.json');
+  await atomicWriteJson(attestationPath, redacted);
+  await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
+  return { ...redacted, path: attestationPath };
+}
+
 export async function verifyTaskClaim({
   task,
   receipt,
@@ -277,6 +332,9 @@ export async function verifyTaskClaim({
   beforeState,
   afterState,
   timeoutMs = 15 * 60 * 1000,
+  totalTimeoutMs = 30 * 60 * 1000,
+  maxOutputBytes = 8 * 1024 * 1024,
+  maxChecks = 20,
   isolationMode = 'same-workspace',
   onStep
 }) {
@@ -284,6 +342,18 @@ export async function verifyTaskClaim({
   const verificationId = randomUUID();
   const evidenceDir = path.join(runDir, 'verifier', verificationId);
   await mkdir(evidenceDir, { recursive: true });
+  const declaredChecks = (task.verificationCommands?.length ?? 0) + (task.verifierCommands?.length ?? 0);
+  if (!Number.isInteger(maxChecks) || maxChecks < 1 || declaredChecks > maxChecks) {
+    const attestation = {
+      schemaVersion: 1, verificationId, taskId: task.id, runId: task.runId ?? null,
+      status: 'fail', issuedAt: new Date().toISOString(), isolation: 'not-started',
+      taskHash: sha256(task), claimHash: sha256(receipt),
+      changeEvidence: { status: 'not-checked', actualChangedFiles: [] }, checks: [],
+      failure: `Too many verifier checks: ${declaredChecks}; maximum is ${maxChecks}`
+    };
+    const persisted = await persistAttestation(attestation, { runDir, evidenceDir, verificationId });
+    throw new VerificationError(`Independent verification failed: ${attestation.failure}`, persisted);
+  }
 
   let changeEvidence;
   try {
@@ -303,14 +373,11 @@ export async function verifyTaskClaim({
       checks: [],
       failure: error.message
     };
-    attestation.evidenceDigest = sha256(attestation);
-    const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await atomicWriteJson(attestationPath, attestation);
-    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
-    throw new VerificationError(`Independent verification failed: ${error.message}`, { ...attestation, path: attestationPath });
+    const persisted = await persistAttestation(attestation, { runDir, evidenceDir, verificationId });
+    throw new VerificationError(`Independent verification failed: ${error.message}`, persisted);
   }
 
-  const workspaceState = afterState ?? await captureWorkspaceState(cwd);
+  const workspaceState = afterState ?? await captureWorkspaceState(cwd, { evidenceFiles: task.evidenceFiles ?? [] });
   let workspace;
   try {
     workspace = await prepareVerificationWorkspace({ cwd, state: workspaceState, isolationMode });
@@ -329,11 +396,8 @@ export async function verifyTaskClaim({
       checks: [],
       failure: error.message
     };
-    attestation.evidenceDigest = sha256(attestation);
-    const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await atomicWriteJson(attestationPath, attestation);
-    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
-    throw new VerificationError(`Independent verification failed: ${error.message}`, { ...attestation, path: attestationPath });
+    const persisted = await persistAttestation(attestation, { runDir, evidenceDir, verificationId });
+    throw new VerificationError(`Independent verification failed: ${error.message}`, persisted);
   }
 
   try {
@@ -341,8 +405,8 @@ export async function verifyTaskClaim({
       ...(task.verificationCommands ?? []).map((command) => ({ command, visibility: 'worker-visible' })),
       ...(task.verifierCommands ?? []).map((command) => ({ command, visibility: 'hidden' }))
     ];
-    const results = await runChecks({ checks, cwd: workspace.cwd, evidenceDir, timeoutMs, onStep });
-    const failed = results.find((entry) => entry.exitCode !== 0 || entry.timedOut);
+    const results = await runChecks({ checks, cwd: workspace.cwd, evidenceDir, timeoutMs, totalTimeoutMs, maxOutputBytes, onStep });
+    const failed = results.find((entry) => entry.exitCode !== 0 || entry.timedOut || entry.outputLimitExceeded);
     // With zero replayed checks and no verified change evidence there is
     // nothing independent behind this attestation; 'pass' would launder an
     // unverified claim into apparent evidence.
@@ -361,17 +425,11 @@ export async function verifyTaskClaim({
       checks: results,
       ...(failed ? { failure: `Verifier check failed: ${failed.command}` } : {})
     };
-    attestation.evidenceDigest = sha256(attestation);
-    const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await atomicWriteJson(attestationPath, attestation);
-    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
+    const persisted = await persistAttestation(attestation, { runDir, evidenceDir, verificationId });
     if (failed) {
-      throw new VerificationError(`Independent verification failed: verifier check failed: ${failed.command}`, {
-        ...attestation,
-        path: attestationPath
-      });
+      throw new VerificationError(`Independent verification failed: verifier check failed: ${failed.command}`, persisted);
     }
-    return { ...attestation, path: attestationPath };
+    return persisted;
   } finally {
     await workspace.cleanup();
   }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -149,6 +149,36 @@ test('verify command creates an independent attestation from a task and worker c
   assert.ok(output.attestationPath.endsWith('attestation.json'));
 });
 
+test('verify command applies the configured total, output, and check-count budgets', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-verify-budget-cli-'));
+  const config = JSON.parse(await readFile(defaultConfig, 'utf8'));
+  config.verification.maxChecks = 1;
+  const configPath = path.join(dir, 'config.json');
+  const taskPath = path.join(dir, 'task.json');
+  const receiptPath = path.join(dir, 'receipt.json');
+  await writeFile(configPath, JSON.stringify(config));
+  await writeFile(taskPath, JSON.stringify({
+    id: 'TCLI-budget', objective: 'Verify bounded claim', kind: 'testing', role: 'executor', risk: 'low',
+    write: false, acceptanceCriteria: ['verified'],
+    verificationCommands: ['node --version', 'node --version'], verifierCommands: []
+  }));
+  await writeFile(receiptPath, JSON.stringify({
+    status: 'complete', summary: 'claim', filesInspected: [], filesChanged: [],
+    commands: [
+      { command: 'node --version', exitCode: 0, outcome: process.version },
+      { command: 'node --version', exitCode: 0, outcome: process.version }
+    ],
+    criteria: [{ criterion: 'verified', status: 'pass', evidence: 'claim' }],
+    unresolvedRisks: [], confidence: 0.8
+  }));
+  const result = spawnSync(process.execPath, [
+    cli, 'verify', '--config', configPath, '--cwd', dir,
+    '--task', taskPath, '--receipt', receiptPath
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /maximum is 1/i);
+});
+
 test('unknown options and boolean flags with junk values fail instead of being silently ignored', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-cli-flags-'));
   const taskPath = path.join(dir, 'task.json');
@@ -171,4 +201,166 @@ test('unknown options and boolean flags with junk values fail instead of being s
   const badTimeout = spawnSync(process.execPath, [cli, 'exec', '--config', defaultConfig, '--task', taskPath, '--timeout-ms', '30s'], { encoding: 'utf8' });
   assert.equal(badTimeout.status, 1);
   assert.match(badTimeout.stderr, /--timeout-ms must be/i);
+});
+
+test('lane command classifies a low-risk coherent task as one delegated worker', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-lane-cli-'));
+  const taskPath = path.join(dir, 'task.json');
+  await writeFile(taskPath, JSON.stringify({
+    id: 'T-single', objective: 'Fix one local guard.', kind: 'implementation', role: 'executor',
+    risk: 'low', complexity: 'low', write: true, allowedScope: ['src/guard.js'],
+    acceptanceCriteria: ['The guard handles null.'], verificationCommands: ['node --test test/guard.test.js'],
+    signature: {
+      ambiguity: 'low', repositoryBreadth: 'local', editBreadth: 'one-file', contextVolume: 'small',
+      toolIntensity: 'low', stateComplexity: 'none', testCoverage: 'good', externalIntegration: 'none'
+    }
+  }));
+  const result = spawnSync(process.execPath, [
+    cli, 'lane', '--config', defaultConfig, '--task', taskPath,
+    '--host-provider', 'anthropic', '--host-model', 'sonnet', '--host-resolved-model', 'sonnet',
+    '--host-effort', 'high', '--host-mode', 'preferred'
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.lane, 'single-worker');
+  assert.equal(output.host.selectionMode, 'preferred');
+  assert.equal(output.host.executionMode, 'bootstrap-only');
+  assert.equal(output.budget.maxExternalModelCalls, 1);
+});
+
+test('route command exposes primary and record-only shadow routes with host context', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-route-plan-cli-'));
+  const taskPath = path.join(dir, 'task.json');
+  await writeFile(taskPath, JSON.stringify({
+    id: 'T-route-plan', objective: 'Implement a small module change.', kind: 'implementation', role: 'executor',
+    risk: 'low', complexity: 'low', write: false, acceptanceCriteria: ['The result is correct.'],
+    verificationCommands: ['node --version'],
+    signature: {
+      ambiguity: 'medium', repositoryBreadth: 'module', editBreadth: 'few-files', contextVolume: 'medium',
+      toolIntensity: 'medium', stateComplexity: 'none', testCoverage: 'good', externalIntegration: 'none'
+    }
+  }));
+  const result = spawnSync(process.execPath, [
+    cli, 'route', '--config', defaultConfig, '--task', taskPath,
+    '--host-provider', 'anthropic', '--host-model', 'sonnet', '--host-resolved-model', 'sonnet',
+    '--host-effort', 'high', '--host-mode', 'preferred', '--shadow', 'record-only'
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.lane.lane, 'bundled');
+  assert.ok(output.primary.provider);
+  assert.equal(output.shadow?.execute, false);
+  assert.equal(output.host.resolvedModel, 'sonnet');
+});
+
+test('prompt compile returns official-source delegated worker prompts for every substantive lane', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-prompt-cli-'));
+  const delegatedPath = path.join(dir, 'delegated.json');
+  await writeFile(delegatedPath, JSON.stringify({
+    id: 'T-prompt', objective: 'Inspect repository behavior.', kind: 'research', role: 'executor',
+    risk: 'low', complexity: 'low', write: false, acceptanceCriteria: ['Relevant evidence is returned.'],
+    verificationCommands: ['node --version'], context: 'Read the repository before concluding.',
+    signature: {
+      ambiguity: 'medium', repositoryBreadth: 'module', editBreadth: 'none', contextVolume: 'medium',
+      toolIntensity: 'medium', stateComplexity: 'none', testCoverage: 'unknown', externalIntegration: 'none'
+    }
+  }));
+  const delegated = spawnSync(process.execPath, [
+    cli, 'prompt', '--action', 'compile', '--config', defaultConfig, '--task', delegatedPath,
+    '--host-provider', 'anthropic', '--host-model', 'sonnet', '--host-resolved-model', 'sonnet',
+    '--host-effort', 'high', '--host-mode', 'bootstrap-only'
+  ], { encoding: 'utf8' });
+  assert.equal(delegated.status, 0, delegated.stderr);
+  const delegatedOutput = JSON.parse(delegated.stdout);
+  assert.match(delegatedOutput.prompt, /OBJECTIVE|<objective>/i);
+  assert.ok(delegatedOutput.manifest.promptProfileId);
+  assert.equal(delegatedOutput.manifest.officialSources.every((source) => source.official === true), true);
+  assert.equal(delegatedOutput.manifest.promptProfileFresh, true);
+  assert.equal(typeof delegatedOutput.manifest.promptProfileAgeDays, 'number');
+  assert.equal(delegatedOutput.commandSpec.command.length > 0, true);
+
+  const singlePath = path.join(dir, 'single-worker.json');
+  await writeFile(singlePath, JSON.stringify({
+    id: 'T-single-prompt', objective: 'Fix one local guard.', kind: 'implementation', role: 'executor',
+    risk: 'low', complexity: 'low', write: true, allowedScope: ['src/guard.js'],
+    acceptanceCriteria: ['The guard handles null.'], verificationCommands: ['node --test test/guard.test.js'],
+    signature: {
+      ambiguity: 'low', repositoryBreadth: 'local', editBreadth: 'one-file', contextVolume: 'small',
+      toolIntensity: 'low', stateComplexity: 'none', testCoverage: 'good', externalIntegration: 'none'
+    }
+  }));
+  const single = spawnSync(process.execPath, [
+    cli, 'prompt', '--action', 'compile', '--config', defaultConfig, '--task', singlePath,
+    '--host-provider', 'anthropic', '--host-model', 'sonnet', '--host-resolved-model', 'sonnet',
+    '--host-effort', 'high', '--host-mode', 'preferred'
+  ], { encoding: 'utf8' });
+  assert.equal(single.status, 0, single.stderr);
+  const singleOutput = JSON.parse(single.stdout);
+  assert.equal('directExecution' in singleOutput, false);
+  assert.equal(singleOutput.lane.lane, 'single-worker');
+  assert.ok(singleOutput.commandSpec?.command);
+  assert.match(singleOutput.prompt, /OBJECTIVE|<objective>/i);
+});
+
+test('trace command renders host executor shadow and verification use', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-trace-cli-'));
+  const tracePath = path.join(dir, 'trace.jsonl');
+  const { appendTraceEvent } = await import('../src/trace.js');
+  await appendTraceEvent(tracePath, { type: 'host', role: 'host', provider: 'anthropic', resolvedModel: 'sonnet', effectiveEffort: 'high' });
+  await appendTraceEvent(tracePath, { type: 'route', role: 'router', lane: 'bundled', provider: 'openai', model: 'gpt-5.6-terra', modelRevision: 'r1', effort: 'high', profileId: 'terra', execution: 'delegated' });
+  await appendTraceEvent(tracePath, { type: 'shadow', role: 'shadow', provider: 'openai', model: 'gpt-5.6-luna', modelRevision: 'r1', effort: 'medium', profileId: 'luna', mode: 'record-only', execute: false });
+  await appendTraceEvent(tracePath, { type: 'verification', role: 'verifier', status: 'pass', evidenceCount: 3 });
+  const result = spawnSync(process.execPath, [cli, 'trace', '--file', tracePath], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.summary.host.resolvedModel, 'sonnet');
+  assert.equal(output.summary.executor.model, 'gpt-5.6-terra');
+  assert.equal(output.summary.shadow.execute, false);
+  assert.match(output.formatted, /Shadow: openai\/gpt-5\.6-luna/);
+});
+
+test('lane command denies an explicit weak lane for high-risk work', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-lane-monotonic-cli-'));
+  const taskPath = path.join(dir, 'task.json');
+  await writeFile(taskPath, JSON.stringify({
+    id: 'T-high-lane', objective: 'Change authentication state transitions.', kind: 'implementation', role: 'executor',
+    risk: 'high', complexity: 'high', write: true, executionLane: 'single-worker', allowedScope: ['src/auth/**'],
+    acceptanceCriteria: ['Authentication state transitions remain safe.'], verificationCommands: ['node --version'],
+    signature: {
+      ambiguity: 'medium', repositoryBreadth: 'module', editBreadth: 'few-files', contextVolume: 'medium',
+      toolIntensity: 'high', stateComplexity: 'complex', testCoverage: 'partial', externalIntegration: 'none'
+    }
+  }));
+  const result = spawnSync(process.execPath, [cli, 'lane', '--config', defaultConfig, '--task', taskPath], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.lane, 'orchestrated');
+  assert.equal(output.requestedLane, 'single-worker');
+  assert.match(output.reason, /denied|downgrade|stronger/i);
+});
+
+test('verify rejects an unrecognized --isolation value instead of silently downgrading', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-cli-iso-'));
+  const taskPath = path.join(dir, 'task.json');
+  const receiptPath = path.join(dir, 'receipt.json');
+  await writeFile(taskPath, JSON.stringify({
+    id: 'T1', objective: 'x', kind: 'implementation', role: 'executor', risk: 'low', complexity: 'low',
+    write: false, acceptanceCriteria: ['works'], verificationCommands: ['node --version']
+  }));
+  await writeFile(receiptPath, JSON.stringify({
+    status: 'complete', summary: 's', filesInspected: [], filesChanged: [],
+    commands: [{ command: 'node --version', exitCode: 0, outcome: 'ok' }],
+    criteria: [{ criterion: 'works', status: 'pass', evidence: 'ok' }], unresolvedRisks: [], confidence: 0.9
+  }));
+  const result = spawnSync(process.execPath, [
+    cli, 'verify', '--config', defaultConfig, '--cwd', dir, '--task', taskPath, '--receipt', receiptPath, '--isolation', 'worktree'
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--isolation must be same-workspace or git-worktree/);
+});
+
+test('a value flag given with no value fails with a clear message rather than a raw crash', () => {
+  const result = spawnSync(process.execPath, [cli, 'inventory', '--config', defaultConfig, '--cwd'], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--cwd requires a value/);
 });

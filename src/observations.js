@@ -23,6 +23,12 @@ export async function readObservations(filePath) {
 }
 
 export async function appendObservation(filePath, input) {
+  // `aorch record` asserts an independently reviewed observation; silently
+  // flipping an explicit reviewed:false to true would launder an unreviewed
+  // sample into route evidence. Reject it instead.
+  if (input.reviewed === false) {
+    throw new Error('aorch record only accepts independently reviewed observations; refusing to record reviewed:false');
+  }
   const quality = input.quality ?? verdictToQuality(input.verdict);
   const observation = normalizeObservation({
     ...input,

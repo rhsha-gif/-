@@ -150,3 +150,146 @@ test('standard-risk verification defaults to an isolated Git worktree', () => {
   assert.equal(validated.verification.isolationByRisk.standard, 'git-worktree');
   assert.equal(validated.verification.isolationByRisk.low, 'same-workspace');
 });
+
+test('host and lane policies normalize conservative defaults', () => {
+  const validated = validateConfig(minimalConfig());
+  assert.equal(validated.hostPolicy.selectionMode, 'preferred');
+  assert.equal(validated.hostPolicy.executionMode, 'bootstrap-only');
+  assert.equal(validated.hostPolicy.allowHostProductEdits, false);
+  assert.equal(validated.lanePolicy['single-worker'].maxExternalModelCalls, 1);
+  assert.equal(validated.lanePolicy.bundled.maxExternalModelCalls, 1);
+  assert.equal(validated.lanePolicy.orchestrated.maxTasks, 24);
+});
+
+test('host and lane policies reject unsafe or ambiguous values', () => {
+  const invalidMode = minimalConfig();
+  invalidMode.hostPolicy = { selectionMode: 'magic' };
+  assert.throws(() => validateConfig(invalidMode), /hostPolicy\.selectionMode/i);
+
+  const invalidBudget = minimalConfig();
+  invalidBudget.lanePolicy = { 'single-worker': { maxTasks: 0 } };
+  assert.throws(() => validateConfig(invalidBudget), /lanePolicy\.single-worker\.maxTasks/i);
+});
+
+test('model revisions and observation freshness defaults are explicit', () => {
+  const config = minimalConfig();
+  const validated = validateConfig(config);
+  assert.equal(validated.models[0].revision, 'new-model');
+  assert.equal(validated.routing.maxObservationAgeDays, 180);
+  assert.equal(validated.routing.maxFutureSkewMinutes, 5);
+
+  config.routing.maxObservationAgeDays = 0;
+  assert.throws(() => validateConfig(config), /maxObservationAgeDays/i);
+});
+
+test('model prompt profile references are explicit non-empty IDs', () => {
+  const config = minimalConfig();
+  config.models[0].promptProfileIds = ['openai-codex-terra-v1'];
+  assert.deepEqual(validateConfig(config).models[0].promptProfileIds, ['openai-codex-terra-v1']);
+
+  config.models[0].promptProfileIds = [''];
+  assert.throws(() => validateConfig(config), /promptProfileIds/i);
+});
+
+test('prompt compilation policy bounds generated prompts and keeps official-source enforcement enabled', () => {
+  const validated = validateConfig(minimalConfig());
+  assert.equal(validated.promptCompilation.maxChars, 40000);
+  assert.equal(validated.promptCompilation.officialSourcesOnly, true);
+
+  const invalid = minimalConfig();
+  invalid.promptCompilation = { maxChars: 0 };
+  assert.throws(() => validateConfig(invalid), /promptCompilation\.maxChars/i);
+  const unsafe = minimalConfig();
+  unsafe.promptCompilation = { officialSourcesOnly: false };
+  assert.throws(() => validateConfig(unsafe), /officialSourcesOnly/i);
+});
+
+test('record-only shadow routing is the safe P2 default and executable shadows are rejected', () => {
+  const validated = validateConfig(minimalConfig());
+  assert.equal(validated.shadowRouting.mode, 'record-only');
+  assert.equal(validated.shadowRouting.execute, false);
+
+  const off = minimalConfig();
+  off.shadowRouting = { mode: 'off' };
+  assert.equal(validateConfig(off).shadowRouting.mode, 'off');
+
+  const unsafe = minimalConfig();
+  unsafe.shadowRouting = { mode: 'record-only', execute: true };
+  assert.throws(() => validateConfig(unsafe), /shadowRouting\.execute.*false/i);
+
+  const invalid = minimalConfig();
+  invalid.shadowRouting = { mode: 'execute' };
+  assert.throws(() => validateConfig(invalid), /shadowRouting\.mode/i);
+});
+
+test('execution and verification budgets normalize conservative defaults', () => {
+  const validated = validateConfig(minimalConfig());
+  assert.equal(validated.execution.workerTimeoutMs, 60 * 60 * 1000);
+  assert.equal(validated.execution.killGraceMs, 1000);
+  assert.equal(validated.execution.maxOutputBytes, 10 * 1024 * 1024);
+  assert.equal(validated.execution.maxReceiptBytes, 2 * 1024 * 1024);
+  assert.equal(validated.verification.totalTimeoutMs, 30 * 60 * 1000);
+  assert.equal(validated.verification.maxOutputBytes, 8 * 1024 * 1024);
+  assert.equal(validated.verification.maxChecks, 20);
+});
+
+test('execution and verification budgets reject non-positive or ambiguous values', () => {
+  const cases = [
+    ['execution', 'workerTimeoutMs', -1],
+    ['execution', 'killGraceMs', -1],
+    ['execution', 'maxOutputBytes', 0],
+    ['execution', 'maxReceiptBytes', 0],
+    ['verification', 'totalTimeoutMs', 0],
+    ['verification', 'maxOutputBytes', 0],
+    ['verification', 'maxChecks', 0]
+  ];
+  for (const [section, field, value] of cases) {
+    const config = minimalConfig();
+    config[section] = { ...(config[section] ?? {}), [field]: value };
+    assert.throws(() => validateConfig(config), new RegExp(`${section}\\.${field}`, 'i'));
+  }
+});
+
+test('orchestration task budget defaults conservatively and rejects oversized values', () => {
+  assert.equal(validateConfig(minimalConfig()).orchestration.maxTasksPerRun, 24);
+  const explicit = minimalConfig();
+  explicit.orchestration = { maxTasksPerRun: 8 };
+  assert.equal(validateConfig(explicit).orchestration.maxTasksPerRun, 8);
+  for (const value of [0, 101, 1.5, '24']) {
+    const invalid = minimalConfig();
+    invalid.orchestration = { maxTasksPerRun: value };
+    assert.throws(() => validateConfig(invalid), /maxTasksPerRun/i);
+  }
+});
+
+
+test('legacy lanePolicy.direct migrates to single-worker without enabling host edits', () => {
+  const config = minimalConfig();
+  config.lanePolicy = { direct: { maxTasks: 1, maxExternalModelCalls: 1, maxLlmReviewers: 0 } };
+  const validated = validateConfig(config);
+  assert.equal(validated.lanePolicy['single-worker'].maxExternalModelCalls, 1);
+  assert.equal(validated.lanePolicy.direct, undefined);
+  assert.equal(validated.hostPolicy.executionMode, 'bootstrap-only');
+});
+
+test('prompt profile freshness policy is explicit and bounded', () => {
+  const defaults = validateConfig(minimalConfig()).promptCompilation;
+  assert.equal(defaults.maxProfileAgeDays, 120);
+  assert.equal(defaults.maxFutureSkewDays, 1);
+
+  for (const [field, value] of [['maxProfileAgeDays', 0], ['maxFutureSkewDays', -1], ['maxProfileAgeDays', '120']]) {
+    const config = minimalConfig();
+    config.promptCompilation = { [field]: value };
+    assert.throws(() => validateConfig(config), new RegExp(`promptCompilation\\.${field}`, 'i'));
+  }
+});
+
+test('validateConfig rejects a non-boolean enabled flag instead of treating it as enabled', () => {
+  const provider = minimalConfig();
+  provider.providers[0].enabled = 'false';
+  assert.throws(() => validateConfig(provider), /provider newco\.enabled must be a boolean/);
+
+  const model = minimalConfig();
+  model.models[0].enabled = 'false';
+  assert.throws(() => validateConfig(model), /model newco-best\.enabled must be a boolean/);
+});

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { captureWorkspaceState, inspectWorkspaceIsolation, verifyTaskClaim } from '../src/verifier.js';
+import { captureWorkspaceState, changedPathsBetween, inspectWorkspaceIsolation, verifyTaskClaim } from '../src/verifier.js';
 
 const baseTask = {
   id: 'T-verify', objective: 'Verify a worker claim', kind: 'testing', role: 'executor',
@@ -266,4 +266,105 @@ test('untracked files are replayed into the isolated worktree for verification',
   });
   assert.equal(attestation.status, 'pass');
   assert.equal(attestation.isolation, 'git-worktree');
+});
+
+test('verifier enforces maximum checks and persists a failed attestation', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-check-budget-'));
+  const runDir = path.join(cwd, '.aorch/run');
+  await assert.rejects(() => verifyTaskClaim({
+    task: baseTask,
+    receipt,
+    cwd,
+    runDir,
+    timeoutMs: 5000,
+    totalTimeoutMs: 5000,
+    maxChecks: 1,
+    isolationMode: 'same-workspace'
+  }), /maximum.*checks|too many.*checks/i);
+  const latest = JSON.parse(await readFile(path.join(runDir, 'verification-latest.json'), 'utf8'));
+  const attestation = JSON.parse(await readFile(latest.attestationPath, 'utf8'));
+  assert.equal(attestation.status, 'fail');
+  assert.match(attestation.failure, /checks/i);
+});
+
+test('verifier shares one total deadline across all checks', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-total-budget-'));
+  const slow = `${process.execPath} -e "setTimeout(() => {}, 60000)"`;
+  await assert.rejects(() => verifyTaskClaim({
+    task: { ...baseTask, verificationCommands: [slow], verifierCommands: [] },
+    receipt: { ...receipt, commands: [{ command: slow, exitCode: 0, outcome: 'claimed' }] },
+    cwd,
+    runDir: path.join(cwd, '.aorch/run'),
+    timeoutMs: 5000,
+    totalTimeoutMs: 100,
+    maxChecks: 20,
+    isolationMode: 'same-workspace'
+  }), /verification failed|deadline|verifier check failed/i);
+});
+
+test('explicit evidence files detect ignored-file changes and replay them in isolated verification', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-evidence-file-'));
+  spawnSync('git', ['init', '-q'], { cwd });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd });
+  await writeFile(path.join(cwd, '.gitignore'), '.env\n');
+  await writeFile(path.join(cwd, 'tracked.txt'), 'baseline\n');
+  await writeFile(path.join(cwd, '.env'), 'TOKEN=before\n');
+  spawnSync('git', ['add', '.gitignore', 'tracked.txt'], { cwd });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd });
+
+  const before = await captureWorkspaceState(cwd, { evidenceFiles: ['.env'] });
+  await writeFile(path.join(cwd, '.env'), 'TOKEN=after\n');
+  const after = await captureWorkspaceState(cwd, { evidenceFiles: ['.env'] });
+  assert.deepEqual(changedPathsBetween(before, after), ['.env']);
+
+  const command = `${process.execPath} -e "if(require('node:fs').readFileSync('.env','utf8')!=='TOKEN=after\\n')process.exit(7)"`;
+  const attestation = await verifyTaskClaim({
+    task: { ...baseTask, write: true, allowedScope: ['.env'], evidenceFiles: ['.env'], verificationCommands: [command], verifierCommands: [] },
+    receipt: { ...receipt, filesChanged: ['.env'], commands: [{ command, exitCode: 0, outcome: 'claimed' }] },
+    cwd,
+    runDir: path.join(cwd, '.aorch/run'),
+    beforeState: before,
+    afterState: after,
+    timeoutMs: 5000,
+    totalTimeoutMs: 10000,
+    isolationMode: 'git-worktree'
+  });
+  assert.equal(attestation.status, 'pass');
+  assert.deepEqual(attestation.changeEvidence.actualChangedFiles, ['.env']);
+});
+
+function sortValue(value) {
+  if (Array.isArray(value)) return value.map(sortValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortValue(value[key])]));
+  }
+  return value;
+}
+
+test('persisted attestation digest matches its redacted on-disk content even with secret-shaped check output', async () => {
+  const { createHash } = await import('node:crypto');
+  const { readdir } = await import('node:fs/promises');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-digest-'));
+  const runDir = path.join(cwd, '.aorch/task-runs/R/T-verify');
+  const before = await captureWorkspaceState(cwd);
+  // A failing hidden verifier command whose text embeds a token-shaped secret;
+  // the failure message carries the command, which redaction rewrites on disk.
+  const task = {
+    ...baseTask,
+    verifierCommands: [`${process.execPath} -e "console.log('ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'); process.exit(1)"`]
+  };
+  await assert.rejects(() => verifyTaskClaim({
+    task, receipt, cwd, runDir, beforeState: before, afterState: before, timeoutMs: 5000, isolationMode: 'same-workspace'
+  }));
+
+  const dir = path.join(runDir, 'verifier');
+  const sub = (await readdir(dir))[0];
+  const onDisk = JSON.parse(await readFile(path.join(dir, sub, 'attestation.json'), 'utf8'));
+  const { evidenceDigest, ...rest } = onDisk;
+  const recomputed = createHash('sha256').update(Buffer.from(JSON.stringify(sortValue(rest)))).digest('hex');
+  assert.equal(recomputed, evidenceDigest, 'persisted attestation digest must match its redacted on-disk content');
+  assert.doesNotMatch(JSON.stringify(onDisk), /ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ/, 'secret must be redacted on disk');
 });

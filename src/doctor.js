@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { access, readFile, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { inspectFileStore } from './file-store.js';
+import { inspectFileStore, withFileLock } from './file-store.js';
 
 async function exists(filePath) {
   try { await access(filePath); return true; } catch { return false; }
@@ -25,6 +25,19 @@ async function assertInsideRoot(root, candidate) {
   return resolved;
 }
 
+async function validateActiveRunPointer(root, pointerPath) {
+  const pointer = JSON.parse(await readFile(pointerPath, 'utf8'));
+  if (typeof pointer.runPath !== 'string' || pointer.runPath.trim() === '') {
+    throw new Error('Active run pointer requires a non-empty runPath');
+  }
+  const runPath = await assertInsideRoot(root, pointer.runPath);
+  const run = JSON.parse(await readFile(runPath, 'utf8'));
+  if (!run || typeof run !== 'object' || typeof run.id !== 'string' || run.id.trim() === '') {
+    throw new Error('Active run target is not a valid run state');
+  }
+  return { runPath, runId: run.id };
+}
+
 async function inspectActiveRunPointer(root, { repair = false } = {}) {
   const pointerPath = path.join(root, 'active-run.json');
   if (!(await exists(pointerPath))) {
@@ -32,43 +45,26 @@ async function inspectActiveRunPointer(root, { repair = false } = {}) {
   }
 
   try {
-    const pointer = JSON.parse(await readFile(pointerPath, 'utf8'));
-    if (typeof pointer.runPath !== 'string' || pointer.runPath.trim() === '') {
-      throw new Error('Active run pointer requires a non-empty runPath');
-    }
-    const runPath = await assertInsideRoot(root, pointer.runPath);
-    const run = JSON.parse(await readFile(runPath, 'utf8'));
-    if (!run || typeof run !== 'object' || typeof run.id !== 'string' || run.id.trim() === '') {
-      throw new Error('Active run target is not a valid run state');
-    }
-    return {
-      status: 'pass',
-      present: true,
-      repaired: false,
-      pointerPath,
-      runPath,
-      runId: run.id
-    };
+    const { runPath, runId } = await validateActiveRunPointer(root, pointerPath);
+    return { status: 'pass', present: true, repaired: false, pointerPath, runPath, runId };
   } catch (error) {
     if (repair) {
-      await unlink(pointerPath).catch((unlinkError) => {
-        if (unlinkError.code !== 'ENOENT') throw unlinkError;
+      // Re-validate and unlink under the same lock createRun uses to publish
+      // the pointer, so a concurrent `aorch run start` cannot have its freshly
+      // written valid pointer deleted between our check and the unlink.
+      return withFileLock(`${pointerPath}.lock`, async () => {
+        try {
+          const { runPath, runId } = await validateActiveRunPointer(root, pointerPath);
+          return { status: 'pass', present: true, repaired: false, pointerPath, runPath, runId };
+        } catch (lockedError) {
+          await unlink(pointerPath).catch((unlinkError) => {
+            if (unlinkError.code !== 'ENOENT') throw unlinkError;
+          });
+          return { status: 'pass', present: true, repaired: true, pointerPath, issue: lockedError.message };
+        }
       });
-      return {
-        status: 'pass',
-        present: true,
-        repaired: true,
-        pointerPath,
-        issue: error.message
-      };
     }
-    return {
-      status: 'fail',
-      present: true,
-      repaired: false,
-      pointerPath,
-      issue: error.message
-    };
+    return { status: 'fail', present: true, repaired: false, pointerPath, issue: error.message };
   }
 }
 
@@ -88,13 +84,25 @@ export function checkExecutable(provider) {
 export function runDoctor(config) {
   const node = { status: Number(process.versions.node.split('.')[0]) >= 20 ? 'pass' : 'fail', version: process.versions.node };
   const providers = config.providers.filter((provider) => provider.enabled !== false).map(checkExecutable);
-  const status = node.status === 'pass' && providers.every((provider) => provider.status === 'pass') ? 'pass' : 'fail';
-  return {
-    status,
-    node,
-    providers,
-    catalog: { status: 'pass', providers: config.providers.length, models: config.models.length, capabilities: config.capabilities.length, modelSupport: 'not-probed' }
+  const enabledModels = config.models.filter((model) => model.enabled !== false).length;
+  // A catalog with no usable provider or model can never route a task; report
+  // it as a failure instead of a hollow 'pass'.
+  const catalogIssues = [];
+  if (providers.length === 0) catalogIssues.push('no enabled providers configured');
+  if (enabledModels === 0) catalogIssues.push('no enabled models configured');
+  const catalog = {
+    status: catalogIssues.length === 0 ? 'pass' : 'fail',
+    providers: config.providers.length,
+    enabledProviders: providers.length,
+    models: config.models.length,
+    enabledModels,
+    capabilities: config.capabilities.length,
+    modelSupport: 'not-probed',
+    ...(catalogIssues.length ? { issues: catalogIssues } : {})
   };
+  const status = node.status === 'pass' && catalog.status === 'pass'
+    && providers.every((provider) => provider.status === 'pass') ? 'pass' : 'fail';
+  return { status, node, providers, catalog };
 }
 
 export async function inspectStateHealth(root, options = {}) {

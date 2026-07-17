@@ -1,7 +1,7 @@
 {
   "name": "adaptive-orchestrator",
-  "version": "0.4.0",
-  "description": "Adaptive task decomposition and capability routing for Claude Code and Codex CLI",
+  "version": "0.6.2",
+  "description": "Bootstrap-only adaptive worker routing and official-source prompt compilation for Claude Code and Codex CLI",
   "type": "module",
   "bin": {
     "aorch": "./src/cli.js"
@@ -19,9 +19,12 @@
     "scripts",
     "config",
     "schemas",
+    "prompt-profiles",
     "integrations",
     "examples",
     "docs/DESIGN.md",
+    "docs/REVIEW-0.6.1.md",
+    "docs/REVIEW-0.6.2.md",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

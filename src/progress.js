@@ -49,6 +49,9 @@ export function calculateProgress(tasks = []) {
   );
   const ratio = totalWeight > 0 ? completedWeight / totalWeight : 0;
   const phase = progressPhase(normalized);
+  // Rounding must not report 100% while any task is still in flight; the
+  // per-task 0.99 cap is meaningless if the weighted total rounds past it.
+  const percent = phase === 'complete' ? Math.round(ratio * 100) : Math.min(99, Math.round(ratio * 100));
   const blockers = normalized
     .filter((task) => ['blocked', 'failed'].includes(task.status) || task.blocker)
     .map((task) => ({ taskId: task.id, message: task.blocker ?? task.note ?? 'Task is blocked.' }));
@@ -57,7 +60,7 @@ export function calculateProgress(tasks = []) {
     .filter((value) => typeof value === 'string' && Number.isFinite(Date.parse(value)))
     .sort();
   return {
-    percent: Math.round(ratio * 100),
+    percent,
     label: 'estimated',
     phase,
     confidence: progressConfidence(normalized, phase),
@@ -68,7 +71,9 @@ export function calculateProgress(tasks = []) {
     totalWeight,
     activeTaskIds: normalized
       .filter((task) => task.status === 'running' || task.status === 'verifying')
-      .map((task) => task.id)
+      .map((task) => task.id),
+    lane: normalized.find((task) => typeof task.lane === 'string')?.lane ?? null,
+    modelUse: normalized.find((task) => task.modelUse)?.modelUse ?? null
   };
 }
 
@@ -86,12 +91,27 @@ export function formatProgressReport(entry = {}) {
     : 'none';
   const percentValue = Number(entry.percent ?? 0);
   const percent = Number.isFinite(percentValue) ? Math.max(0, Math.min(100, percentValue)) : 0;
+  const host = entry.modelUse?.host?.provider && entry.modelUse?.host?.resolvedModel
+    ? `${inlineText(entry.modelUse.host.provider, 'provider', 80)}/${inlineText(entry.modelUse.host.resolvedModel, 'model', 120)}` +
+      `${entry.modelUse.host.effectiveEffort ? `@${inlineText(entry.modelUse.host.effectiveEffort, 'effort', 40)}` : ''}`
+    : 'unknown';
+  const executor = entry.modelUse?.executor?.provider && entry.modelUse?.executor?.model
+    ? `${inlineText(entry.modelUse.executor.provider, 'provider', 80)}/${inlineText(entry.modelUse.executor.model, 'model', 120)}` +
+      `${entry.modelUse.executor.effort ? `@${inlineText(entry.modelUse.executor.effort, 'effort', 40)}` : ''}`
+    : 'unknown';
+  const shadow = entry.modelUse?.shadow?.provider && entry.modelUse?.shadow?.model
+    ? `${inlineText(entry.modelUse.shadow.provider, 'provider', 80)}/${inlineText(entry.modelUse.shadow.model, 'model', 120)}` +
+      `${entry.modelUse.shadow.effort ? `@${inlineText(entry.modelUse.shadow.effort, 'effort', 40)}` : ''}` +
+      `${entry.modelUse.shadow.execute === false ? '(record-only)' : ''}`
+    : 'none';
   return `[aorch] ${inlineText(entry.label, 'estimated', 40)} progress ${percent}%` +
     ` phase=${inlineText(entry.phase, 'unknown', 40)}` +
     ` confidence=${inlineText(entry.confidence, 'unknown', 40)}` +
     ` evidence=${Number.isFinite(Number(entry.evidenceCount)) ? Math.max(0, Number(entry.evidenceCount)) : 0}` +
     ` lastEvidenceAt=${inlineText(entry.lastEvidenceAt, 'none', 80)}` +
-    ` blockers=${blockers}`;
+    ` blockers=${blockers}` +
+    `${entry.lane ? ` lane=${inlineText(entry.lane, 'unknown', 40)}` : ''}` +
+    `${entry.modelUse ? ` host=${host} executor=${executor} shadow=${shadow}` : ''}`;
 }
 
 export class ProgressReporter {

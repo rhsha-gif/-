@@ -10,6 +10,62 @@ This skill is the root control plane. Invoke it before substantive work for ever
 
 The system's purpose is **task decomposition and task-specific capability selection**. Do not replace that purpose with a universal cost, latency, or model-vendor preference. Choose the route that is most likely to satisfy the task's acceptance criteria under its actual risk, scope, capability, budget, and latency constraints.
 
+
+## Host context and execution lane
+
+The model and reasoning effort selected in the current CLI are the **host** configuration. Record the host provider, requested model, resolved model when known, requested effort, effective effort, and selection mode. Never invent a resolved model: preserve unknown identity when the host interface does not expose it.
+
+Use one of three host policies:
+
+- `preferred` (default): prefer the host only inside a quality-equivalent route tier; stronger or better-suited workers may be selected.
+- `pinned`: all eligible work must remain on the selected host provider/model; fail rather than silently switch.
+- `bootstrap-only`: the host starts orchestration, but substantive tasks are delegated to the selected worker route.
+
+Before splitting or dispatching, write the bounded task envelope and run:
+
+```bash
+aorch lane --task <file>   --host-provider <provider>   --host-model <requested-model>   --host-resolved-model <resolved-model-if-known>   --host-effort <requested-effort>   --host-effective-effort <effective-effort>   --host-mode preferred
+```
+
+- `single-worker`: one low-risk coherent task, exactly one bounded worker call, no separate router-model call, no LLM reviewer, and deterministic verification. The host remains bootstrap-only and never edits product files.
+- `bundled`: one coherent specialist call, normally one or two tasks and no routine LLM reviewer.
+- `orchestrated`: explicit task graph, only when ambiguity, breadth, risk, state complexity, external effects, or failure evidence justifies it.
+
+Keep file lookup, implementation, focused tests, and diff inspection inside one bounded worker call when one model can complete them coherently. Escalate out of single-worker/bundled lanes when scope, ambiguity, risk, or state complexity expands.
+
+## Official-source prompt compilation
+
+Never hand a delegated worker an improvised generic prompt. Compile it through the provider/model profile that was derived from official OpenAI or Anthropic guidance:
+
+```bash
+aorch prompt --action compile --task <file>   --host-provider <provider>   --host-model <model>   --host-effort <effort>   --host-mode <mode>
+```
+
+The compiler converts the canonical task envelope into Claude XML-style sections or OpenAI/Codex role-objective-scope-verification sections, then deterministically checks objective, scope, acceptance criteria, output contract, capability IDs, hidden-verifier secrecy, placeholders, and prompt size. Every substantive task is delegated; there is no direct host-execution lane.
+
+Prompt profiles are versioned, official-source-only harness artifacts. Do not rewrite them from memory during a task. Updating a profile requires official-document review, prompt regression evaluation, a proposal, user approval, and a separate bounded control-plane run.
+
+## P2 shadow routing and model-use visibility
+
+Use `--shadow record-only` or the configured default for bundled/orchestrated work. A shadow route records an eligible alternative but has `execute=false`; it never creates a second write worker. Use the trace to show what actually happened:
+
+```bash
+aorch trace --file <task-run-dir>/trace.jsonl
+```
+
+Progress and final reporting must distinguish:
+
+```text
+host provider/model/effort
+execution lane
+actual executor provider/model/revision/effort
+record-only shadow provider/model/effort
+prompt profile and verifier status
+route escalations
+```
+
+Do not describe a shadow candidate as executed work.
+
 ## Run lifecycle
 
 For substantive work, first inspect the active run. Resume it if it is still running, or complete its pending reflection before starting another run. Then create a durable run before dispatching tasks:
@@ -42,8 +98,8 @@ Then invoke `post-run-reflection` and persist the retrospective. A terminal run 
 3. Decompose into the smallest independently verifiable tasks. Split where a reviewer could approve one task and reject another; do not split setup or documentation away from the deliverable that needs it.
 4. Classify risk first and derive the allowed isolation, provider trust tier, adapter maturity, reviewer requirements, and human-approval boundary. Then assign each task: `kind`, `role`, `complexity`, `risk`, `write`, `weight`, scopes, acceptance criteria, verification commands, exact capability IDs, and task-specific routing constraints. Treat `complexity` as reasoning/implementation difficulty and `risk` as failure cost/verification strength; do not substitute one for the other. Use `routingPriorities` only when the task or user actually favors quality, token efficiency, or latency in a different order; a non-quality-first order requires an explicit `minimumQuality`.
 5. Run `aorch inventory` before naming skills, plugins, or hooks. Select only exact available IDs; usually no more than three skills, two plugins, and three hooks.
-6. Write each task envelope to JSON and run `aorch route --task <file>`. The route uses current reviewed performance evidence rather than assuming model ability is fixed. Override it only for a concrete task-specific reason and record that reason.
-7. Dispatch with `aorch exec --task <file>`. Workers must not delegate. Every write task must run from an isolated worktree unless the session is already isolated. Independent tasks with non-overlapping scopes may run in parallel; overlapping writes run serially. If isolation is unavailable, fail closed for high/critical work and obtain explicit user authorization before any lower-risk in-place fallback.
+6. Write each task envelope to JSON, run `aorch lane --task <file>` with the current host context, then run `aorch route --task <file> --shadow record-only`. The route uses current reviewed performance evidence rather than assuming model ability is fixed. Override it only for a concrete task-specific reason and record that reason.
+7. For delegated work, inspect `aorch prompt --action compile --task <file>` and dispatch with `aorch exec --task <file>`. The host never executes substantive tasks itself; every lane, including single-worker, dispatches exactly one bounded provider worker. Workers must not delegate. Every write task must run from an isolated worktree unless the session is already isolated. Independent tasks with non-overlapping scopes may run in parallel; overlapping writes run serially. If isolation is unavailable, fail closed for high/critical work and obtain explicit user authorization before any lower-risk in-place fallback.
 8. Treat the worker receipt as a claim. Require a separate verifier attestation from `aorch exec` or `aorch verify`, inspect the real diff, and use fresh replayed command output before accepting completion.
 9. For standard or higher risk, use an independent reviewer when it materially increases confidence. Give the reviewer requirements, invariants, actual diff, and verifier artifacts before exposing executor rationale or self-confidence. For critical work, require cross-provider review and verify relevant failure paths, rollback, security, concurrency, data integrity, or financial invariants.
 10. Record independently reviewed route outcomes with `aorch record` so later tasks can adapt to model-performance changes.

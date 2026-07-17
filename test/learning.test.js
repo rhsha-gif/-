@@ -10,6 +10,10 @@ import {
   lintLessons,
   loadLessons,
   loadRetrospective,
+  markProposalApplied,
+  pruneExpiredLessons,
+  releaseProposalReservation,
+  reserveProposal,
   saveRetrospective
 } from '../src/learning.js';
 
@@ -321,4 +325,60 @@ test('an explicit lessons limit of zero returns no lessons', async () => {
   await finishRun(run.path, 'completed');
   await saveRetrospective({ root, runPath: run.path, input: reflection('RL0') });
   assert.deepEqual(await loadLessons({ root, limit: 0 }), []);
+});
+
+test('approved proposals are reserved and consumed exactly once', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-proposal-reservation-'));
+  const run = await createRun({ root, prompt: 'build it', tasks: [] });
+  await finishRun(run.path, 'completed');
+  await saveRetrospective({ root, runPath: run.path, input: reflection(run.id) });
+  await decideProposal({ root, runId: run.id, proposalId: 'P1', decision: 'approved' });
+
+  const reserved = await reserveProposal({ root, runId: run.id, proposalId: 'P1', taskId: 'T-apply' });
+  assert.equal(reserved.reservedBy, 'T-apply');
+  await assert.rejects(() => reserveProposal({ root, runId: run.id, proposalId: 'P1', taskId: 'T-other' }), /reserved/i);
+  const applied = await markProposalApplied({ root, runId: run.id, proposalId: 'P1', taskId: 'T-apply', evidence: ['attestation.json'] });
+  assert.equal(applied.applied, true);
+  await assert.rejects(() => reserveProposal({ root, runId: run.id, proposalId: 'P1', taskId: 'T-again' }), /already.*applied|consumed/i);
+});
+
+test('failed bounded work can release its own proposal reservation', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-proposal-release-'));
+  const run = await createRun({ root, prompt: 'build it', tasks: [] });
+  await finishRun(run.path, 'completed');
+  await saveRetrospective({ root, runPath: run.path, input: reflection(run.id) });
+  await decideProposal({ root, runId: run.id, proposalId: 'P1', decision: 'approved' });
+  await reserveProposal({ root, runId: run.id, proposalId: 'P1', taskId: 'T-failed' });
+  await releaseProposalReservation({ root, runId: run.id, proposalId: 'P1', taskId: 'T-failed' });
+  const reserved = await reserveProposal({ root, runId: run.id, proposalId: 'P1', taskId: 'T-retry' });
+  assert.equal(reserved.reservedBy, 'T-retry');
+});
+
+test('an approved proposal cannot change its affected-file authority in a retrospective revision', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-proposal-immutable-'));
+  const run = await createRun({ root, prompt: 'build it', tasks: [] });
+  await finishRun(run.path, 'completed');
+  await saveRetrospective({ root, runPath: run.path, input: reflection(run.id) });
+  await decideProposal({ root, runId: run.id, proposalId: 'P1', decision: 'approved' });
+  const modified = reflection(run.id);
+  modified.proposals[0].affectedFiles = ['src/verifier.js'];
+  await assert.rejects(() => saveRetrospective({ root, runPath: run.path, input: modified }), /decided proposal.*cannot be changed|affectedFiles/i);
+});
+
+test('pruneExpiredLessons removes expired lessons so lint can pass again', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-lessons-prune-'));
+  const indexPath = path.join(root, 'learning', 'lessons.json');
+  await mkdir(path.dirname(indexPath), { recursive: true });
+  const lesson = {
+    id: 'l1', type: 'negative', status: 'advisory', description: 'd', prevention: 'p',
+    scopeTags: ['tag'], evidence: ['e'], confidence: 0.8, sourceRunIds: ['r1'],
+    promotedToPolicy: false, expiresAt: new Date(Date.now() - 1000).toISOString()
+  };
+  await writeFile(indexPath, JSON.stringify({ version: 2, lessons: [lesson] }));
+  const before = await lintLessons({ root });
+  assert.equal(before.status, 'fail');
+  const result = await pruneExpiredLessons({ root });
+  assert.equal(result.pruned, 1);
+  const after = await lintLessons({ root });
+  assert.equal(after.status, 'pass');
 });
