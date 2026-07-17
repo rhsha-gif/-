@@ -1,5 +1,6 @@
 import { estimateRouteQuality } from './performance-store.js';
 import { isCapabilityAllowedForTask } from './capabilities.js';
+import { hostMatchesRoute } from './host.js';
 
 const ROUTE_METRICS = ['quality', 'tokens', 'latency'];
 const TASK_COMPLEXITIES = ['low', 'standard', 'high', 'critical'];
@@ -45,11 +46,7 @@ function providerSupportsCapabilities(provider, requestedIds, inventory, task, p
 }
 
 function providerMetadata(catalog, providerId) {
-  // Raw catalogs may omit provider metadata entirely (direct API use); the
-  // CLI path cannot reach this fallback because validateConfig rejects models
-  // that reference undeclared providers.
-  return (catalog.providers ?? []).find((entry) => entry.id === providerId)
-    ?? { id: providerId, trustTier: 'trusted', adapterMaturity: 'stable' };
+  return (catalog.providers ?? []).find((entry) => entry.id === providerId) ?? null;
 }
 
 function providerAllowedForTask(provider, task, policy) {
@@ -69,7 +66,8 @@ function providerAllowedForTask(provider, task, policy) {
 
 function supportsTask(profile, task, catalog) {
   const provider = providerMetadata(catalog, profile.provider);
-  return profile.enabled !== false
+  return provider !== null
+    && profile.enabled !== false
     && provider.enabled !== false
     && providerAllowedForTask(provider, task, catalog.controlPlane ?? {})
     && (profile.roles?.includes(task.role) ?? true)
@@ -87,11 +85,13 @@ function expandCandidates(task, catalog, complexity) {
       .filter((effort) => !effort.complexities?.length || effort.complexities.includes(complexity))
       .map((effort) => {
         const provider = providerMetadata(catalog, profile.provider);
+        if (!provider) throw new Error(`Provider metadata disappeared while expanding route ${profile.id}`);
         const prior = profile.quality?.[task.kind] ?? profile.quality?.default ?? 0.5;
         return {
           provider: profile.provider,
           profileId: profile.id,
           model: profile.model,
+          modelRevision: profile.revision ?? profile.model,
           effort: effort.name,
           maturity: profile.maturity ?? 'stable',
           providerTrustTier: provider.trustTier ?? 'reviewed',
@@ -149,7 +149,7 @@ function narrowByMetric(candidates, metric, policy) {
   return candidates.filter((candidate) => candidate[field] <= best * (1 + tolerance));
 }
 
-export function selectRoute({ task, catalog, observations = [], now = new Date() }) {
+export function selectRoute({ task, catalog, observations = [], now = new Date(), host = null }) {
   if (!task?.kind || !task?.role) {
     throw new TypeError('task.kind and task.role are required');
   }
@@ -165,6 +165,8 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
       observations,
       now,
       halfLifeDays: policy.observationHalfLifeDays ?? 30,
+      maxObservationAgeDays: policy.maxObservationAgeDays ?? 180,
+      maxFutureSkewMinutes: policy.maxFutureSkewMinutes ?? 5,
       priorWeight: policy.priorWeight ?? 3,
       uncertaintyPenalty: policy.uncertaintyPenalty ?? 0.02
     })
@@ -174,6 +176,14 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
   // empty candidate set is not misattributed to model maturity.
   if (candidates.length === 0) {
     throw new Error(`No eligible route for task ${task.id ?? '<unknown>'}`);
+  }
+
+  if (host?.selectionMode === 'pinned') {
+    const pinned = candidates.filter((candidate) => hostMatchesRoute(host, candidate));
+    if (pinned.length === 0) {
+      throw new Error(`Pinned host has no eligible route for task ${task.id ?? '<unknown>'}`);
+    }
+    candidates = pinned;
   }
 
   if (task.risk === 'critical') {
@@ -202,7 +212,14 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
     stageCounts.push({ metric, remaining: tier.length });
   }
 
-  tier.sort(byStableIdentity);
+  tier.sort((left, right) => {
+    if (host?.selectionMode === 'preferred') {
+      const leftMatches = hostMatchesRoute(host, left);
+      const rightMatches = hostMatchesRoute(host, right);
+      if (leftMatches !== rightMatches) return leftMatches ? -1 : 1;
+    }
+    return byStableIdentity(left, right);
+  });
   const selected = tier[0];
   return {
     ...selected,
@@ -217,7 +234,62 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
         minimumQuality: task.minimumQuality ?? null,
         maxTokenIndex: task.maxTokenIndex ?? null,
         maxLatencyIndex: task.maxLatencyIndex ?? null
-      }
+      },
+      host: host ? {
+        selectionMode: host.selectionMode ?? 'preferred',
+        matched: hostMatchesRoute(host, selected)
+      } : null
     }
+  };
+}
+
+function selectShadowRoute({ task, catalog, observations, now, primary, shadowMode }) {
+  if (shadowMode !== 'record-only') return null;
+  try {
+    const alternative = selectRoute({
+      task: {
+        ...task,
+        forbiddenProfileIds: [...new Set([...(task.forbiddenProfileIds ?? []), primary.profileId])]
+      },
+      catalog,
+      observations,
+      now,
+      host: { selectionMode: 'bootstrap-only' }
+    });
+    return {
+      ...alternative,
+      mode: 'record-only',
+      execute: false,
+      evidenceStatus: 'counterfactual-only',
+      reason: 'Eligible shadow alternative recorded for route comparison without a second write execution.'
+    };
+  } catch (error) {
+    if (/No eligible route|No proven route|explicit constraints/i.test(error.message)) return null;
+    throw error;
+  }
+}
+
+export function selectRoutePlan({
+  task,
+  catalog,
+  observations = [],
+  now = new Date(),
+  host = null,
+  lane = { lane: 'orchestrated', budget: {} },
+  shadowMode = 'off'
+}) {
+  if (!['off', 'record-only'].includes(shadowMode)) {
+    throw new Error('shadowMode must be off or record-only');
+  }
+  const primary = {
+    ...selectRoute({ task, catalog, observations, now, host }),
+    execution: 'delegated'
+  };
+  const shadow = selectShadowRoute({ task, catalog, observations, now, primary, shadowMode });
+  return {
+    lane: lane?.lane ?? 'orchestrated',
+    budget: lane?.budget ?? {},
+    primary,
+    shadow
   };
 }

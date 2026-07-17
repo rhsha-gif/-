@@ -30,6 +30,20 @@ function assertNonEmptyStrings(entries, name) {
   }
 }
 
+function exactProjectFiles(entries, name) {
+  assertNonEmptyStrings(entries, name);
+  const normalized = entries.map((entry) => {
+    const raw = entry.trim().replaceAll('\\', '/').replace(/^\.\//, '');
+    if (!raw || raw.endsWith('/') || raw.startsWith('/') || /^[A-Za-z]:\//.test(raw)
+      || /[*?[]/.test(raw) || raw.split('/').some((part) => !part || part === '.' || part === '..')) {
+      throw new Error(`${name} must contain exact project-relative files`);
+    }
+    return raw;
+  });
+  if (new Set(normalized).size !== normalized.length) throw new Error(`${name} must not contain duplicates`);
+  return normalized;
+}
+
 function positiveNumber(value, name, fallback) {
   const resolved = value ?? fallback;
   if (!Number.isFinite(resolved) || resolved <= 0) throw new RangeError(`${name} must be positive`);
@@ -97,13 +111,112 @@ function validateControlPlane(input = {}) {
   if (!RISK_TIERS.includes(experimentalAdapterMaxRisk)) {
     throw new Error('controlPlane.experimentalAdapterMaxRisk must be low, standard, high, or critical');
   }
+  const defaultProtectedFiles = [
+    '.aorch/config.json',
+    '.aorch/hooks/gate.mjs',
+    '.aorch/hooks/user-prompt-submit.mjs',
+    '.aorch/hooks/session-review.mjs',
+    '.claude/settings.json',
+    '.codex/hooks.json',
+    '.claude/skills/adaptive-orchestrate/SKILL.md',
+    '.claude/skills/post-run-reflection/SKILL.md',
+    '.agents/skills/adaptive-orchestrate/SKILL.md',
+    '.agents/skills/post-run-reflection/SKILL.md'
+  ];
   return {
     ...input,
     providerTrustByRisk: validateTrustMap(input.providerTrustByRisk, 'controlPlane.providerTrustByRisk', defaultProviders),
     capabilityTrustByRisk: validateTrustMap(input.capabilityTrustByRisk, 'controlPlane.capabilityTrustByRisk', defaultCapabilities),
-    experimentalAdapterMaxRisk
+    experimentalAdapterMaxRisk,
+    protectedFiles: exactProjectFiles(input.protectedFiles ?? defaultProtectedFiles, 'controlPlane.protectedFiles')
   };
 }
+function boundedInteger(value, name, fallback, { minimum = 0, maximum = Number.MAX_SAFE_INTEGER } = {}) {
+  const resolved = value ?? fallback;
+  if (!Number.isInteger(resolved) || resolved < minimum || resolved > maximum) {
+    throw new RangeError(`${name} must be an integer between ${minimum} and ${maximum}`);
+  }
+  return resolved;
+}
+
+function validateHostPolicy(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('hostPolicy must be an object');
+  const selectionMode = input.selectionMode ?? 'preferred';
+  if (!['preferred', 'pinned', 'bootstrap-only'].includes(selectionMode)) {
+    throw new Error('hostPolicy.selectionMode must be preferred, pinned, or bootstrap-only');
+  }
+  const executionMode = input.executionMode ?? 'bootstrap-only';
+  if (executionMode !== 'bootstrap-only') throw new Error('hostPolicy.executionMode must remain bootstrap-only');
+  const allowHostProductEdits = input.allowHostProductEdits ?? false;
+  if (allowHostProductEdits !== false) throw new Error('hostPolicy.allowHostProductEdits must remain false');
+  if (input.directExecutionWhenUnknown === true) throw new Error('hostPolicy.directExecutionWhenUnknown is no longer supported');
+  return {
+    ...input,
+    selectionMode,
+    executionMode,
+    allowHostProductEdits: false,
+    routerEscalationThreshold: boundedInteger(input.routerEscalationThreshold, 'hostPolicy.routerEscalationThreshold', 6, { minimum: 0, maximum: 20 })
+  };
+}
+
+function validateLanePolicy(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('lanePolicy must be an object');
+  if (input.direct !== undefined && input['single-worker'] !== undefined) {
+    throw new Error('lanePolicy cannot define both legacy direct and single-worker');
+  }
+  const defaults = {
+    'single-worker': { maxTasks: 1, maxExternalModelCalls: 1, maxLlmReviewers: 0 },
+    bundled: { maxTasks: 2, maxExternalModelCalls: 1, maxLlmReviewers: 0 },
+    orchestrated: { maxTasks: 24, maxExternalModelCalls: 12, maxLlmReviewers: 3 }
+  };
+  const source = { ...input, 'single-worker': input['single-worker'] ?? input.direct };
+  delete source.direct;
+  const result = {};
+  for (const lane of ['single-worker', 'bundled', 'orchestrated']) {
+    const value = source[lane] ?? {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`lanePolicy.${lane} must be an object`);
+    result[lane] = {
+      ...value,
+      maxTasks: boundedInteger(value.maxTasks, `lanePolicy.${lane}.maxTasks`, defaults[lane].maxTasks, { minimum: 1, maximum: 100 }),
+      maxExternalModelCalls: boundedInteger(value.maxExternalModelCalls, `lanePolicy.${lane}.maxExternalModelCalls`, defaults[lane].maxExternalModelCalls, { minimum: 1, maximum: 100 }),
+      maxLlmReviewers: boundedInteger(value.maxLlmReviewers, `lanePolicy.${lane}.maxLlmReviewers`, defaults[lane].maxLlmReviewers, { minimum: 0, maximum: 20 })
+    };
+  }
+  return result;
+}
+
+function validateShadowRouting(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new TypeError('shadowRouting must be an object');
+  }
+  const mode = input.mode ?? 'record-only';
+  if (!['off', 'record-only'].includes(mode)) {
+    throw new Error('shadowRouting.mode must be off or record-only');
+  }
+  const execute = input.execute ?? false;
+  if (execute !== false) {
+    throw new Error('shadowRouting.execute must remain false; P2 shadow routing is record-only');
+  }
+  return { ...input, mode, execute: false };
+}
+
+function validatePromptCompilation(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new TypeError('promptCompilation must be an object');
+  }
+  const officialSourcesOnly = input.officialSourcesOnly ?? true;
+  if (officialSourcesOnly !== true) {
+    throw new Error('promptCompilation.officialSourcesOnly must remain true');
+  }
+  return {
+    ...input,
+    maxChars: boundedInteger(input.maxChars, 'promptCompilation.maxChars', 40_000, { minimum: 1, maximum: 1_000_000 }),
+    maxProfileAgeDays: boundedInteger(input.maxProfileAgeDays, 'promptCompilation.maxProfileAgeDays', 120, { minimum: 1, maximum: 3650 }),
+    maxFutureSkewDays: boundedInteger(input.maxFutureSkewDays, 'promptCompilation.maxFutureSkewDays', 1, { minimum: 0, maximum: 30 }),
+    officialSourcesOnly
+  };
+}
+
 function validateRouting(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new TypeError('routing must be an object');
@@ -132,6 +245,16 @@ function validateRouting(input = {}) {
     'routing.observationHalfLifeDays',
     30
   );
+  const maxObservationAgeDays = positiveNumber(
+    input.maxObservationAgeDays,
+    'routing.maxObservationAgeDays',
+    180
+  );
+  const maxFutureSkewMinutes = nonNegativeNumber(
+    input.maxFutureSkewMinutes,
+    'routing.maxFutureSkewMinutes',
+    5
+  );
   const priorWeight = nonNegativeNumber(input.priorWeight, 'routing.priorWeight', 3);
   const uncertaintyPenalty = nonNegativeNumber(
     input.uncertaintyPenalty,
@@ -151,6 +274,8 @@ function validateRouting(input = {}) {
     ...input,
     ...tolerances,
     observationHalfLifeDays,
+    maxObservationAgeDays,
+    maxFutureSkewMinutes,
     priorWeight,
     uncertaintyPenalty,
     criticalMinimumSamples,
@@ -197,8 +322,19 @@ export function validateConfig(input) {
   for (const model of normalizedModels) {
     if (!providerIds.has(model.provider)) throw new Error(`Model ${model.id} references unknown provider ${model.provider}`);
     if (typeof model.model !== 'string' || model.model.trim() === '') throw new Error(`Model ${model.id} requires model`);
+    model.revision = model.revision ?? model.model;
+    if (typeof model.revision !== 'string' || model.revision.trim() === '') {
+      throw new Error(`Model ${model.id} requires a non-empty revision`);
+    }
     assertNonEmptyStrings(model.roles, `model ${model.id}.roles`);
     assertNonEmptyStrings(model.taskKinds, `model ${model.id}.taskKinds`);
+    if (model.promptProfileIds !== undefined) {
+      assertNonEmptyStrings(model.promptProfileIds, `model ${model.id}.promptProfileIds`);
+      if (model.promptProfileIds.length === 0 || new Set(model.promptProfileIds).size !== model.promptProfileIds.length) {
+        throw new TypeError(`model ${model.id}.promptProfileIds must be a unique non-empty array`);
+      }
+    }
+    model.promptProfileIds = [...(model.promptProfileIds ?? [])];
     assertArray(model.efforts, `model ${model.id}.efforts`);
     validateQualityMap(model.quality, model.id);
     positiveNumber(model.tokenIndex, `model ${model.id}.tokenIndex`, 1);
@@ -252,15 +388,30 @@ export function validateConfig(input) {
   });
   const routing = validateRouting(input.routing ?? {});
   const controlPlane = validateControlPlane(input.controlPlane ?? {});
+  const hostPolicy = validateHostPolicy(input.hostPolicy ?? {});
+  const lanePolicy = validateLanePolicy(input.lanePolicy ?? {});
+  const promptCompilation = validatePromptCompilation(input.promptCompilation ?? {});
+  const shadowRouting = validateShadowRouting(input.shadowRouting ?? {});
+  const orchestration = { ...(input.orchestration ?? {}), maxTasksPerRun: boundedInteger(input.orchestration?.maxTasksPerRun, 'orchestration.maxTasksPerRun', 24, { minimum: 1, maximum: 100 }) };
 
   const progressMinutes = input.progress?.intervalMinutes ?? 30;
   if (!Number.isFinite(progressMinutes) || progressMinutes <= 0) {
     throw new Error('progress.intervalMinutes must be positive');
   }
+  const execution = {
+    ...(input.execution ?? {}),
+    workerTimeoutMs: nonNegativeNumber(input.execution?.workerTimeoutMs, 'execution.workerTimeoutMs', 60 * 60 * 1000),
+    killGraceMs: nonNegativeNumber(input.execution?.killGraceMs, 'execution.killGraceMs', 1000),
+    maxOutputBytes: boundedInteger(input.execution?.maxOutputBytes, 'execution.maxOutputBytes', 10 * 1024 * 1024, { minimum: 1 }),
+    maxReceiptBytes: boundedInteger(input.execution?.maxReceiptBytes, 'execution.maxReceiptBytes', 2 * 1024 * 1024, { minimum: 1 })
+  };
   const verificationTimeoutMs = input.verification?.commandTimeoutMs ?? 15 * 60 * 1000;
   if (!Number.isFinite(verificationTimeoutMs) || verificationTimeoutMs <= 0) {
     throw new Error('verification.commandTimeoutMs must be positive');
   }
+  const verificationTotalTimeoutMs = positiveNumber(input.verification?.totalTimeoutMs, 'verification.totalTimeoutMs', 30 * 60 * 1000);
+  const verificationMaxOutputBytes = boundedInteger(input.verification?.maxOutputBytes, 'verification.maxOutputBytes', 8 * 1024 * 1024, { minimum: 1 });
+  const verificationMaxChecks = boundedInteger(input.verification?.maxChecks, 'verification.maxChecks', 20, { minimum: 1, maximum: 100 });
   const defaultIsolationByRisk = {
     low: 'same-workspace', standard: 'git-worktree', high: 'git-worktree', critical: 'git-worktree'
   };
@@ -278,8 +429,21 @@ export function validateConfig(input) {
     capabilities: normalizedCapabilities,
     routing,
     controlPlane,
+    hostPolicy,
+    lanePolicy,
+    promptCompilation,
+    shadowRouting,
+    orchestration,
     progress: { intervalMinutes: progressMinutes, ...(input.progress ?? {}) },
-    verification: { ...(input.verification ?? {}), commandTimeoutMs: verificationTimeoutMs, isolationByRisk },
+    execution,
+    verification: {
+      ...(input.verification ?? {}),
+      commandTimeoutMs: verificationTimeoutMs,
+      totalTimeoutMs: verificationTotalTimeoutMs,
+      maxOutputBytes: verificationMaxOutputBytes,
+      maxChecks: verificationMaxChecks,
+      isolationByRisk
+    },
     paths: { stateDir: '.aorch', ...(input.paths ?? {}) }
   });
 }

@@ -64,3 +64,61 @@ test('performance evidence is stratified by task risk and complexity', () => {
   assert.equal(estimate.rawSamples, 1);
   assert.ok(estimate.mean < 0.7, `expected only critical/high evidence to apply, got ${estimate.mean}`);
 });
+
+test('model revision prevents stale alias evidence from transferring to a replacement model', () => {
+  const route = { provider: 'openai', profileId: 'terra', model: 'gpt-5.6-terra', modelRevision: '2026-07', effort: 'high' };
+  const estimate = estimateRouteQuality({
+    route,
+    task: { kind: 'implementation', role: 'executor', risk: 'standard', complexity: 'standard' },
+    priorQuality: 0.8,
+    observations: [normalizeObservation({
+      ...route, modelRevision: '2026-06', taskKind: 'implementation', role: 'executor', risk: 'standard', complexity: 'standard',
+      quality: 1, recordedAt: '2026-07-16T00:00:00Z'
+    })],
+    now: new Date('2026-07-17T00:00:00Z'), priorWeight: 1, uncertaintyPenalty: 0
+  });
+  assert.equal(estimate.rawSamples, 0);
+  assert.equal(estimate.diagnostics.revisionMismatch, 1);
+  assert.equal(estimate.mean, 0.8);
+});
+
+test('expired and future observations are excluded with diagnostics', () => {
+  const route = { provider: 'openai', profileId: 'terra', model: 'gpt-5.6-terra', modelRevision: '2026-07', effort: 'high' };
+  const baseObservation = {
+    ...route, taskKind: 'implementation', role: 'executor', risk: 'standard', complexity: 'standard', quality: 1
+  };
+  const estimate = estimateRouteQuality({
+    route,
+    task: { kind: 'implementation', role: 'executor', risk: 'standard', complexity: 'standard' },
+    priorQuality: 0.75,
+    observations: [
+      normalizeObservation({ ...baseObservation, recordedAt: '2025-01-01T00:00:00Z' }),
+      normalizeObservation({ ...baseObservation, recordedAt: '2026-07-18T00:00:00Z' })
+    ],
+    now: new Date('2026-07-17T00:00:00Z'), maxObservationAgeDays: 180, maxFutureSkewMinutes: 5,
+    priorWeight: 1, uncertaintyPenalty: 0
+  });
+  assert.equal(estimate.rawSamples, 0);
+  assert.equal(estimate.diagnostics.stale, 1);
+  assert.equal(estimate.diagnostics.future, 1);
+});
+
+test('signature-tagged evidence applies only to compatible task signatures', () => {
+  const route = { provider: 'openai', profileId: 'terra', model: 'gpt-5.6-terra', modelRevision: '2026-07', effort: 'high' };
+  const estimate = estimateRouteQuality({
+    route,
+    task: {
+      kind: 'implementation', role: 'executor', risk: 'standard', complexity: 'standard',
+      signature: { repositoryBreadth: 'wide', stateComplexity: 'complex' }
+    },
+    priorQuality: 0.8,
+    observations: [normalizeObservation({
+      ...route, taskKind: 'implementation', role: 'executor', risk: 'standard', complexity: 'standard',
+      taskSignature: { repositoryBreadth: 'local', stateComplexity: 'none' }, quality: 1,
+      recordedAt: '2026-07-16T00:00:00Z'
+    })],
+    now: new Date('2026-07-17T00:00:00Z'), priorWeight: 1, uncertaintyPenalty: 0
+  });
+  assert.equal(estimate.rawSamples, 0);
+  assert.equal(estimate.diagnostics.signatureMismatch, 1);
+});

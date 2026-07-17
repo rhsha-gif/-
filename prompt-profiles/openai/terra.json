@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "id": "openai-codex-terra-v1",
+  "provider": "openai",
+  "modelFamilies": [
+    "gpt-5.6-terra"
+  ],
+  "roles": [
+    "planner",
+    "executor",
+    "reviewer"
+  ],
+  "taskKinds": [
+    "exploration",
+    "planning",
+    "implementation",
+    "debugging",
+    "testing",
+    "review",
+    "research",
+    "qa",
+    "documentation"
+  ],
+  "strategy": "sections",
+  "status": "active",
+  "verifiedAt": "2026-07-17",
+  "officialSources": [
+    {
+      "publisher": "OpenAI",
+      "document": "OpenAI model catalog",
+      "url": "https://developers.openai.com/api/docs/models",
+      "verifiedAt": "2026-07-17"
+    },
+    {
+      "publisher": "OpenAI",
+      "document": "GPT-5.6 Terra model",
+      "url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+      "verifiedAt": "2026-07-17"
+    }
+  ],
+  "rules": {
+    "detail": "balanced",
+    "requiredSections": [
+      "ROLE",
+      "OBJECTIVE",
+      "REPOSITORY CONTEXT",
+      "ALLOWED SCOPE",
+      "FORBIDDEN SCOPE",
+      "REQUIREMENTS",
+      "SUCCESS CRITERIA",
+      "VERIFICATION",
+      "FAILURE POLICY",
+      "OUTPUT"
+    ],
+    "singleObjective": false,
+    "inspectBeforeEditing": true,
+    "smallestCoherentChange": true,
+    "noUnrelatedCleanup": true,
+    "doNotWeakenTests": true,
+    "structuredOutput": true
+  }
+}

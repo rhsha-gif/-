@@ -1,0 +1,31 @@
+{
+  "id": "T-bundled-parser",
+  "title": "Implement a bounded parser behavior",
+  "objective": "Inspect the parser module, implement the documented behavior, and add focused regression tests as one coherent bundle.",
+  "kind": "implementation",
+  "role": "executor",
+  "risk": "low",
+  "complexity": "standard",
+  "write": true,
+  "weight": 2,
+  "context": "Follow the existing parser conventions and avoid unrelated refactoring.",
+  "requirements": ["Inspect the current parser and tests before editing."],
+  "allowedScope": ["src/parser/**", "test/parser/**"],
+  "forbiddenScope": ["deployment/**"],
+  "acceptanceCriteria": ["Valid input produces the documented structure.", "Malformed input produces the documented error.", "Focused tests pass."],
+  "verificationCommands": ["node --test test/parser"],
+  "verifierCommands": ["npm run check"],
+  "verificationIsolation": "git-worktree",
+  "signature": {
+    "ambiguity": "medium",
+    "repositoryBreadth": "module",
+    "editBreadth": "few-files",
+    "contextVolume": "medium",
+    "toolIntensity": "medium",
+    "stateComplexity": "none",
+    "testCoverage": "partial",
+    "externalIntegration": "none",
+    "language": "javascript",
+    "framework": "node"
+  }
+}

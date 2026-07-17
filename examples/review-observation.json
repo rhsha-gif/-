@@ -12,5 +12,18 @@
   "metadata": {
     "reviewerProvider": "anthropic",
     "taskId": "T-parser"
+  },
+  "modelRevision": "gpt-5.6-terra",
+  "taskSignature": {
+    "ambiguity": "medium",
+    "repositoryBreadth": "module",
+    "editBreadth": "few-files",
+    "contextVolume": "medium",
+    "toolIntensity": "medium",
+    "stateComplexity": "none",
+    "testCoverage": "partial",
+    "externalIntegration": "none",
+    "language": "javascript",
+    "framework": "node"
   }
 }

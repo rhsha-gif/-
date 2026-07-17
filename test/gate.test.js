@@ -47,9 +47,27 @@ test('destructive verbs veto read-only demotion and explicit read-only cannot ma
   assert.equal(masked.requestClass, 'high-risk');
 
   const deploy = classifyPrompt('Deploy the schema migration to production, but do not modify the config file.');
-  assert.equal(deploy.requestClass, 'read-only');
+  assert.equal(deploy.requestClass, 'high-risk');
   assert.equal(deploy.failPolicy, 'closed');
-  assert.equal(deploy.riskHint, 'standard');
+  assert.equal(deploy.riskHint, 'critical');
+
+  const push = classifyPrompt('Push the release tag without editing files.');
+  assert.equal(push.requestClass, 'high-risk');
+  assert.equal(push.failPolicy, 'closed');
+  assert.equal(push.riskHint, 'critical');
+});
+
+test('high-risk explanations remain read-only when no external side effect is requested', () => {
+  for (const prompt of [
+    'Explain the production migration without changes.',
+    'Analyze authentication; do not edit files.',
+    'Explain how to deploy this service, but do not execute anything.'
+  ]) {
+    const result = classifyPrompt(prompt);
+    assert.equal(result.requestClass, 'read-only', prompt);
+    assert.equal(result.riskHint, 'low', prompt);
+    assert.equal(result.failPolicy, 'open', prompt);
+  }
 });
 
 test('korean negative connectives count as explicit read-only intent', () => {
@@ -78,4 +96,13 @@ test('thin gate context injects only bounded policy and defers heavy orchestrati
   assert.match(context, /provider.*model.*reasoning effort.*skills.*hooks.*plugins/i);
   assert.doesNotMatch(context, /prior reviewed runs/i);
   assert.ok(context.length < 2200);
+});
+
+test('thin gate announces lane selection, official prompt compilation, and record-only shadow policy', () => {
+  const context = buildGateContext(classifyPrompt('Fix this local parser guard.'));
+  assert.match(context, /single-worker.*bundled.*orchestrated/i);
+  assert.match(context, /bootstrap-only/i);
+  assert.doesNotMatch(context, /stay in the current host context/i);
+  assert.match(context, /official.*prompt/i);
+  assert.match(context, /record-only shadow/i);
 });

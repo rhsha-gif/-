@@ -18,6 +18,7 @@ test('installs both CLI integrations idempotently without editing root instructi
   assert.equal(claudeSettings.hooks.SessionEnd.length, 1);
   assert.equal(codexHooks.hooks.UserPromptSubmit.length, 1);
   assert.equal(codexHooks.hooks.Stop.length, 1);
+  const claudePromptCommand = claudeSettings.hooks.UserPromptSubmit[0].hooks[0].command;
   const codexPromptCommand = codexHooks.hooks.UserPromptSubmit[0].hooks[0].command;
   assert.match(codexPromptCommand, /\.aorch\/hooks\/user-prompt-submit\.mjs/);
   if (process.platform !== 'win32') {
@@ -27,6 +28,15 @@ test('installs both CLI integrations idempotently without editing root instructi
     // (monorepo package installs must not depend on the git toplevel).
     const nested = path.join(projectRoot, 'packages/app');
     await mkdir(nested, { recursive: true });
+    const { CLAUDE_PROJECT_DIR: _ignored, ...environmentWithoutClaudeRoot } = process.env;
+    const claudeHookResult = spawnSync('/bin/sh', ['-c', claudePromptCommand], {
+      cwd: nested,
+      env: environmentWithoutClaudeRoot,
+      input: JSON.stringify({ prompt: 'Explain this project.', cwd: nested }),
+      encoding: 'utf8'
+    });
+    assert.equal(claudeHookResult.status, 0, claudeHookResult.stderr);
+    assert.match(JSON.parse(claudeHookResult.stdout).hookSpecificOutput.additionalContext, /orchestrator must run first/i);
     const hookResult = spawnSync('/bin/sh', ['-c', codexPromptCommand], {
       cwd: nested,
       input: JSON.stringify({ prompt: 'Explain this project.', cwd: nested }),
@@ -43,6 +53,19 @@ test('installs both CLI integrations idempotently without editing root instructi
   assert.match(claudeSkill, /verifier attestation/i);
   assert.match(claudeSkill, /phase.*confidence.*blockers/i);
   assert.match(await readFile(path.join(projectRoot, '.agents/skills/adaptive-orchestrate/SKILL.md'), 'utf8'), /task decomposition/i);
+  for (const skillPath of [
+    path.join(projectRoot, '.claude/skills/adaptive-orchestrate/SKILL.md'),
+    path.join(projectRoot, '.agents/skills/adaptive-orchestrate/SKILL.md')
+  ]) {
+    const skill = await readFile(skillPath, 'utf8');
+    assert.match(skill, /aorch lane/i);
+    assert.match(skill, /aorch prompt.*compile/i);
+    assert.match(skill, /single-worker[\s\S]*bundled[\s\S]*orchestrated/i);
+    assert.match(skill, /bootstrap-only/i);
+    assert.doesNotMatch(skill, /host inspects, implements/i);
+    assert.match(skill, /record-only shadow/i);
+    assert.match(skill, /host[\s\S]*executor[\s\S]*effort/i);
+  }
   assert.match(await readFile(path.join(projectRoot, '.claude/skills/post-run-reflection/SKILL.md'), 'utf8'), /user approval/i);
   assert.match(await readFile(path.join(projectRoot, '.agents/skills/post-run-reflection/SKILL.md'), 'utf8'), /user approval/i);
 });

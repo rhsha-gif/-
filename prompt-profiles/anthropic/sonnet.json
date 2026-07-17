@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "id": "anthropic-claude-sonnet-v1",
+  "provider": "anthropic",
+  "modelFamilies": [
+    "sonnet"
+  ],
+  "roles": [
+    "planner",
+    "executor",
+    "reviewer"
+  ],
+  "taskKinds": [
+    "planning",
+    "implementation",
+    "debugging",
+    "testing",
+    "review",
+    "research",
+    "qa",
+    "documentation"
+  ],
+  "strategy": "xml",
+  "status": "active",
+  "verifiedAt": "2026-07-17",
+  "officialSources": [
+    {
+      "publisher": "Anthropic",
+      "document": "Claude prompting best practices",
+      "url": "https://platform.claude.com/docs/ko/build-with-claude/prompt-engineering/claude-prompting-best-practices",
+      "verifiedAt": "2026-07-17"
+    },
+    {
+      "publisher": "Anthropic",
+      "document": "Claude Code subagents",
+      "url": "https://code.claude.com/docs/en/subagents",
+      "verifiedAt": "2026-07-17"
+    }
+  ],
+  "rules": {
+    "detail": "balanced",
+    "requiredSections": [
+      "role",
+      "objective",
+      "context",
+      "scope",
+      "requirements",
+      "acceptance_criteria",
+      "tools",
+      "verification",
+      "cleanup",
+      "output"
+    ],
+    "includeMotivation": true,
+    "singleObjective": false,
+    "inspectBeforeClaiming": true,
+    "avoidTestSpecificSolutions": true,
+    "avoidOverengineering": true,
+    "reviewToolResults": true,
+    "structuredOutput": true
+  }
+}

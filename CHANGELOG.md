@@ -1,5 +1,88 @@
 # Changelog
 
+## 0.6.1 - 2026-07-17
+
+Bootstrap-only contract and prompt-boundary hardening release.
+
+### Corrected orchestration semantics
+
+- Removed runtime `direct` and `host-direct` execution. Every substantive task is delegated from a bootstrap-only host to a separate bounded worker.
+- Added `single-worker` as the low-risk one-task, one-worker-call lane with no separate router-model call, no LLM reviewer, and no executable shadow.
+- Made lane resolution monotonic so explicit task input may strengthen but never weaken the classifier's required safety lane.
+- Kept `lanePolicy.direct` only as an in-memory migration alias; task-level `executionLane: direct` now fails with migration guidance.
+
+### Gate and routing safety
+
+- Separated external side-effect detection from local file-edit intent, preventing deploy/push/tag requests from being demoted by “do not modify files” phrasing.
+- Removed implicit trusted/stable provider metadata; models referencing undeclared providers are ineligible.
+- Clarified trace output with bootstrap-only host mode, actual external model call counts, and `counterfactual-only` shadow status.
+
+### Official prompt compiler hardening
+
+- Bound official prompt sources to provider-owned domains and publishers and added a 120-day freshness policy.
+- Resolve the first fresh compatible official profile rather than allowing a stale earlier candidate to block a valid fallback.
+- Added prompt-profile health to `aorch doctor` so stale guidance is detected before worker execution.
+- Isolated repository/external context as reference data: quoted JSON for OpenAI prompts and policy-wrapped XML data for Anthropic prompts.
+- Reject positive nested-delegation instructions in every worker prompt while allowing explicit no-delegation constraints.
+- Migrated prompt manifests, examples, and installed Claude/Codex skills to `single-worker | bundled | orchestrated` and delegated-only execution.
+
+### Verification
+
+- Expanded regression coverage for host bootstrap-only normalization, unsafe lane downgrades, external-action classification, undeclared providers, stale/fresh prompt-profile fallback, context injection boundaries, nested delegation lint, schemas, examples, and integration installation.
+- Replaced file-per-process `node --check` verification with one `vm.SourceTextModule` parser process, removing dozens of runtime startups from every release check and making repeated verification faster and more bounded.
+
+## 0.6.0 - 2026-07-17
+
+Adaptive lane and provider-aware prompt compilation release.
+
+### Host-aware orchestration
+
+- Added explicit host context: provider, requested/resolved model, requested/effective effort, source, and `preferred`, `pinned`, or `bootstrap-only` selection mode.
+- Added `direct`, `bundled`, and `orchestrated` execution lanes. Low-risk coherent work can stay in the current host context with zero external model calls; broad or risky work escalates to a task graph.
+- Added compact task signatures for ambiguity, repository/edit breadth, context/tool intensity, state complexity, test coverage, external integration, language, and framework.
+- Added lane budgets that discourage splitting file discovery, implementation, focused tests, and diff inspection into separate model calls when one coherent bundle is sufficient.
+
+### Adaptive model routing
+
+- Added model `revision` to separate observations across silent model updates or alias changes.
+- Added observation freshness and future-skew limits plus route diagnostics for matched, stale, future, and revision-mismatched evidence.
+- Preferred host models now win only inside the final quality-equivalent route tier; pinned hosts fail rather than silently switch.
+- Added record-only P2 shadow routing. Shadow alternatives are stored with `execute=false` and never launch a second write worker.
+
+### Official-source prompt compiler
+
+- Added six versioned prompt profiles for Anthropic Haiku/Sonnet/Opus and OpenAI Luna/Terra/Sol.
+- Prompt profiles contain official source URLs and verification dates; non-official domains are rejected at load time.
+- Added provider-aware prompt compilation: Claude XML-style contracts and Codex sectioned role/objective/scope/verification contracts, with concise Luna and invariant/failure-mode-rich Sol variants.
+- Added deterministic prompt lint for required sections, bounded scope, acceptance criteria, output contract, capability IDs, hidden verifier leakage, placeholders, direct-lane delegation, and prompt size.
+- Added prompt manifests containing model/revision/effort, profile/source metadata, capability IDs, and prompt SHA-256 without persisting the raw prompt.
+
+### P2 observability
+
+- Added append-only task traces for host, primary route, record-only shadow, prompt profile/hash, executor result, verifier result, review, and escalation events.
+- Added `aorch trace` and exposed actual host/executor/shadow model use in task results and 30-minute progress reports.
+- Added `aorch lane` and `aorch prompt --action compile|lint`; enhanced `route` and `exec` with host and shadow options.
+
+### Reliability and integration
+
+- Fixed worker process-tree termination so timed-out shell grandchildren cannot keep the orchestrator or test suite alive.
+- Added bounded combined stdout/stderr capture, abort support, termination reasons, and SIGTERM-to-SIGKILL escalation.
+- Updated Claude and Codex root skills to use lane classification, official-source prompt compilation, record-only shadow routing, and actual model-use reporting.
+- Claude hook commands now fall back to an upward project-root search when `CLAUDE_PROJECT_DIR` is unavailable, matching Codex behavior in nested monorepo directories.
+- Preserved the dependency-free Node.js runtime, thin blocking hook, file-first state, independent verifier, shallow delegation, and proposal-only harness improvement boundary.
+
+### Evidence and control-plane integrity
+
+- Added separate worker and verifier budgets for timeout, total deadline, output size, receipt size, and verification check count. Manual `aorch verify` uses the same verifier budgets as delegated execution.
+- Added exact-path `evidenceFiles` so ignored `.env`, local configuration, and orchestration files participate in before/after evidence and isolated verifier replay without scanning every ignored file.
+- Added best-effort secret redaction for persisted worker/verifier artifacts while retaining SHA-256 digests of original commands and outputs.
+- Added bounded regular-file receipt reads that reject oversized files, symlinks, hard links, ownership changes, and read-time metadata races.
+- Upgraded durable JSONL records to a backward-compatible `previousChecksum` chain and kept repair limited to safe torn-tail recovery.
+- Added `orchestration.maxTasksPerRun` as a runtime decomposition ceiling, not a target.
+- Added one-time scoped control-plane proposal reservations. Protected-file changes require a critical isolated task, hidden verification, and an approved immutable `affectedFiles` set; approval is consumed only after a passing attestation.
+- Prevented explicit direct or bundled lanes from bypassing control-plane approval when their write scope can touch protected files.
+
+
 ## 0.4.0 - 2026-07-16
 
 Critical-review hardening release. Every change below fixes a defect confirmed against the running code (most reproduced empirically) during a full-source review of 0.3.0; see `docs/REVIEW-2026-07-16.md` for the report. Test suite grew from 141 (1 failing) to 172, all passing.

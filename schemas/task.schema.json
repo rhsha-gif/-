@@ -123,6 +123,172 @@
         "same-workspace",
         "git-worktree"
       ]
+    },
+    "executionLane": {
+      "type": "string",
+      "enum": [
+        "single-worker",
+        "bundled",
+        "orchestrated"
+      ]
+    },
+    "laneReason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "escalationSignals": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ambiguity": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "repositoryBreadth": {
+          "type": "string",
+          "enum": [
+            "local",
+            "module",
+            "wide"
+          ]
+        },
+        "editBreadth": {
+          "type": "string",
+          "enum": [
+            "none",
+            "one-file",
+            "few-files",
+            "many-files"
+          ]
+        },
+        "contextVolume": {
+          "type": "string",
+          "enum": [
+            "small",
+            "medium",
+            "large"
+          ]
+        },
+        "toolIntensity": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "stateComplexity": {
+          "type": "string",
+          "enum": [
+            "none",
+            "simple",
+            "complex"
+          ]
+        },
+        "testCoverage": {
+          "type": "string",
+          "enum": [
+            "good",
+            "partial",
+            "poor",
+            "unknown"
+          ]
+        },
+        "externalIntegration": {
+          "type": "string",
+          "enum": [
+            "none",
+            "read-only",
+            "mutating"
+          ]
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1
+        },
+        "framework": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "context": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "invariants": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "failureModes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "contextFiles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "evidenceFiles": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?!/)(?![A-Za-z]:/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*[?*\\[])(?!.*//$)(?!.*\\/$).+$"
+      }
+    },
+    "controlPlaneChange": {
+      "type": "boolean"
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "proposalId"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "proposalId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        }
+      }
     }
   },
   "required": [
