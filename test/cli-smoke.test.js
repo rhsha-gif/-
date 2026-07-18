@@ -341,3 +341,62 @@ test('lane command denies an explicit weak lane for high-risk work', async () =>
   assert.equal(output.requestedLane, 'single-worker');
   assert.match(output.reason, /denied|downgrade|stronger/i);
 });
+
+test('usage and models commands operate on the subscription plane', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-usage-cli-'));
+  const cleanEnv = { PATH: process.env.PATH, HOME: process.env.HOME };
+
+  const setResult = spawnSync(process.execPath, [
+    cli, 'usage', 'set', '--config', defaultConfig, '--cwd', dir,
+    '--pool', 'anthropic-subscription', '--state', 'yellow', '--source', 'user'
+  ], { encoding: 'utf8', env: cleanEnv });
+  assert.equal(setResult.status, 0, setResult.stderr);
+  assert.equal(JSON.parse(setResult.stdout).state, 'yellow');
+
+  const showResult = spawnSync(process.execPath, [
+    cli, 'usage', 'show', '--config', defaultConfig, '--cwd', dir
+  ], { encoding: 'utf8', env: cleanEnv });
+  assert.equal(showResult.status, 0, showResult.stderr);
+  const pools = JSON.parse(showResult.stdout).pools;
+  assert.equal(pools['anthropic-subscription'].state, 'yellow');
+  assert.equal(pools['openai-agentic'].state, 'unknown');
+
+  const invented = spawnSync(process.execPath, [
+    cli, 'usage', 'set', '--config', defaultConfig, '--cwd', dir,
+    '--pool', 'anthropic-subscription', '--state', '42%', '--source', 'user'
+  ], { encoding: 'utf8', env: cleanEnv });
+  assert.equal(invented.status, 1);
+
+  const inspect = spawnSync(process.execPath, [
+    cli, 'models', 'inspect', '--config', defaultConfig, '--cwd', dir
+  ], { encoding: 'utf8', env: cleanEnv });
+  assert.equal(inspect.status, 0, inspect.stderr);
+  const report = JSON.parse(inspect.stdout);
+  assert.ok(report.models.length > 0);
+  assert.ok(report.models.every((model) => model.availability.state === 'unknown'));
+
+  const unconfirmed = spawnSync(process.execPath, [
+    cli, 'models', 'probe', '--live', '--profile', 'claude-sonnet-general', '--config', defaultConfig, '--cwd', dir
+  ], { encoding: 'utf8', env: cleanEnv });
+  assert.equal(unconfirmed.status, 1);
+  assert.match(unconfirmed.stderr, /--yes|allowance/i);
+});
+
+test('doctor subscription and surface reports never invent enforcement or auth', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-subdoc-cli-'));
+  const cleanEnv = { PATH: process.env.PATH, HOME: process.env.HOME };
+
+  const surface = spawnSync(process.execPath, [
+    cli, 'doctor', '--surface', 'codex-app', '--config', defaultConfig, '--cwd', dir
+  ], { encoding: 'utf8', env: cleanEnv });
+  assert.equal(surface.status, 0, surface.stderr);
+  assert.equal(JSON.parse(surface.stdout).status, 'unknown');
+
+  const subscription = spawnSync(process.execPath, [
+    cli, 'doctor', '--subscription', '--config', defaultConfig, '--cwd', dir
+  ], { encoding: 'utf8', env: cleanEnv });
+  const parsed = JSON.parse(subscription.stdout);
+  assert.ok(['pass', 'warning', 'unknown'].includes(parsed.status), subscription.stdout);
+  assert.ok(parsed.providers.anthropic);
+  assert.ok(parsed.usage['anthropic-subscription']);
+});

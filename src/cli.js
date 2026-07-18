@@ -33,7 +33,9 @@ import {
   saveRetrospective
 } from './learning.js';
 import { installProject } from './install.js';
-import { inspectStateHealth, runDoctor } from './doctor.js';
+import { inspectCodexAppEnforcement, inspectStateHealth, runDoctor, runSubscriptionDoctor } from './doctor.js';
+import { loadUsagePools, recordUsage } from './usage-store.js';
+import { inspectModels, probeModelLive } from './models.js';
 import { validateTask } from './task.js';
 import { validateReceipt } from './receipt.js';
 import { verifyTaskClaim } from './verifier.js';
@@ -53,7 +55,11 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  lessons   Show advisory prevention rules; add --lint to inspect memory governance\n` +
   `  run       Manage run lifecycle, reflection, feedback, and proposal consent\n` +
   `  install   Install project-local Claude Code and/or Codex integration\n` +
-  `  doctor    Validate config, CLIs, and durable state; add --repair to repair JSONL tails and stale locks\n\n` +
+  `  doctor    Validate config, CLIs, and durable state; add --repair to repair JSONL tails and stale locks\n` +
+  `            --subscription checks subscription auth and credential conflicts\n` +
+  `            --surface codex-app reports host enforcement (strict|advisory|unsupported|unknown)\n` +
+  `  usage     show | set --pool <id> --state <state> --source <source> subscription pool pressure\n` +
+  `  models    inspect (no model calls) | probe --live --yes --profile <id> (consumes allowance)\n\n` +
   `Run actions:\n` +
   `  start     --input <manifest.json>\n` +
   `  task      [--run active|id|path] --task <id> --status <status> [--fraction <0..1>]\n` +
@@ -75,7 +81,7 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  --host-mode preferred|pinned|bootstrap-only\n` +
   `  --shadow off|record-only      Record an alternative route without executing it\n`;
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'repair', 'force-config', 'lint', 'project-only', 'help', 'h']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'repair', 'force-config', 'lint', 'project-only', 'help', 'h', 'subscription', 'live', 'yes']);
 
 const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
 const HOST_FLAGS = ['host-provider', 'host-model', 'host-resolved-model', 'host-effort', 'host-effective-effort', 'host-mode', 'host-source'];
@@ -92,8 +98,14 @@ const COMMAND_FLAGS = Object.freeze({
   progress: [...COMMON_FLAGS, 'tasks', 'run'],
   run: [...COMMON_FLAGS, 'action', 'input', 'run', 'task', 'status', 'fraction', 'note', 'proposal', 'decision', 'comment'],
   install: ['cwd', 'help', 'h', 'target', 'project', 'force-config'],
-  doctor: [...COMMON_FLAGS, 'repair']
+  doctor: [...COMMON_FLAGS, 'repair', 'subscription', 'surface'],
+  usage: [...COMMON_FLAGS, 'action', 'pool', 'state', 'source', 'age-minutes'],
+  models: [...COMMON_FLAGS, 'action', 'live', 'yes', 'profile', 'timeout-ms']
 });
+
+// usage/models read like git subcommands (aorch usage show); fold the first
+// positional into --action so flag validation stays uniform.
+const POSITIONAL_ACTION_COMMANDS = new Set(['usage', 'models']);
 
 function coerceBoolean(rawKey, value) {
   if (value === 'true') return true;
@@ -323,6 +335,9 @@ async function main(argv = process.argv.slice(2)) {
     process.stdout.write(HELP);
     return 0;
   }
+  if (POSITIONAL_ACTION_COMMANDS.has(command) && positionals.length > 0 && flags.action === undefined) {
+    flags.action = positionals.shift();
+  }
   validateCommandArgs(command, flags, positionals);
   const cwd = path.resolve(flags.cwd || process.cwd());
 
@@ -516,6 +531,74 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === 'run') {
     const result = await handleRunCommand({ flags, cwd, config });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return 0;
+  }
+
+  if (command === 'usage') {
+    const action = requireFlag(flags, 'action');
+    const root = stateRoot(config, cwd);
+    if (action === 'show') {
+      const usage = await loadUsagePools({ root, config });
+      process.stdout.write(`${JSON.stringify(usage, null, 2)}\n`);
+      return 0;
+    }
+    if (action === 'set') {
+      const ageMinutes = flags['age-minutes'] !== undefined && flags['age-minutes'] !== true
+        ? Number(flags['age-minutes'])
+        : undefined;
+      const record = await recordUsage({
+        root,
+        pool: requireFlag(flags, 'pool'),
+        state: requireFlag(flags, 'state'),
+        source: requireFlag(flags, 'source'),
+        ...(ageMinutes === undefined ? {} : { ageMinutes })
+      });
+      process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
+      return 0;
+    }
+    throw new Error('usage action must be show or set');
+  }
+
+  if (command === 'models') {
+    const action = requireFlag(flags, 'action');
+    const root = stateRoot(config, cwd);
+    if (action === 'inspect') {
+      const report = await inspectModels({ config, root });
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+      return 0;
+    }
+    if (action === 'probe') {
+      if (flags.live !== true) throw new Error('models probe requires --live');
+      if (flags.yes !== true) {
+        process.stderr.write('A live probe sends a real request through the subscription client and can consume the subscription allowance. Re-run with --yes to confirm.\n');
+        return 1;
+      }
+      const result = await probeModelLive({
+        config,
+        root,
+        profileId: requireFlag(flags, 'profile'),
+        confirmed: true,
+        ...(numericFlag(flags, 'timeout-ms') === undefined ? {} : { timeoutMs: numericFlag(flags, 'timeout-ms') })
+      });
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      return 0;
+    }
+    throw new Error('models action must be inspect or probe');
+  }
+
+  if (command === 'doctor' && flags.subscription === true) {
+    const root = stateRoot(config, cwd);
+    const report = runSubscriptionDoctor({ config });
+    const usage = await loadUsagePools({ root, config });
+    const result = { ...report, usage: usage.pools };
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return result.status === 'fail' ? 1 : 0;
+  }
+
+  if (command === 'doctor' && flags.surface !== undefined) {
+    if (flags.surface !== 'codex-app') throw new Error('doctor --surface currently supports codex-app');
+    const result = await inspectCodexAppEnforcement({ root: stateRoot(config, cwd) });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return 0;
   }
