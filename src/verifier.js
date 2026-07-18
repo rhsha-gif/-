@@ -104,7 +104,11 @@ export async function inspectWorkspaceIsolation(cwd = process.cwd()) {
   }
 }
 
-export async function captureWorkspaceState(cwd, { ignorePaths = [], evidenceFiles = [] } = {}) {
+function sortedFileList(entries) {
+  return Object.keys(entries).sort().map((filePath) => ({ path: filePath, fingerprint: entries[filePath].fingerprint }));
+}
+
+export async function captureWorkspaceState(cwd, { ignorePaths = [], evidenceFiles = [], snapshotDir } = {}) {
   const normalizedIgnore = ignorePaths.map(normalizePath).filter(Boolean);
   try {
     const probe = await gitCommand(['rev-parse', '--is-inside-work-tree'], { cwd });
@@ -133,7 +137,52 @@ export async function captureWorkspaceState(cwd, { ignorePaths = [], evidenceFil
         fingerprint: await fileFingerprint(path.join(cwd, filePath))
       };
     }
-    return { available: true, kind: 'git', head, entries, evidenceFiles: normalizedEvidenceFiles };
+
+    // Capture the patch bytes once, at capture time. Verification later
+    // materializes from these bytes; it never re-reads the live diff, so a
+    // workspace mutation between capture and verification cannot change what
+    // gets verified (git binary patches are ASCII-safe base85).
+    let patch = null;
+    let patchSha256 = null;
+    if (head) {
+      const patchResult = await gitCommand(['diff', '--binary', 'HEAD'], { cwd, timeoutMs: 30000 });
+      if (patchResult.exitCode !== 0) {
+        return { available: false, kind: 'git', reason: patchResult.stderr.trim() || 'git diff failed', entries: {} };
+      }
+      patch = patchResult.stdout;
+      patchSha256 = sha256(patch);
+    }
+
+    // Immutable copies of content the patch cannot reproduce (untracked and
+    // explicit evidence files). Without a snapshotDir the copies are skipped
+    // and verification falls back to live copies re-checked by fingerprint.
+    let snapshotRoot = null;
+    if (snapshotDir) {
+      snapshotRoot = path.resolve(snapshotDir);
+      await mkdir(snapshotRoot, { recursive: true });
+      for (const [filePath, entry] of Object.entries(entries)) {
+        if (entry.status !== '??' && entry.status !== 'evidence') continue;
+        if (entry.fingerprint === 'missing') continue;
+        const source = path.join(cwd, filePath);
+        const target = path.join(snapshotRoot, filePath);
+        await mkdir(path.dirname(target), { recursive: true });
+        await cp(source, target, { recursive: true, force: true });
+      }
+    }
+
+    const state = {
+      available: true,
+      kind: 'git',
+      head,
+      entries,
+      evidenceFiles: normalizedEvidenceFiles,
+      capturedAt: new Date().toISOString(),
+      patch,
+      patchSha256,
+      snapshotRoot
+    };
+    state.snapshotDigest = sha256({ head, patchSha256, files: sortedFileList(entries) });
+    return state;
   } catch (error) {
     return { available: false, kind: 'none', reason: error.message, entries: {} };
   }
@@ -193,6 +242,7 @@ function buildShellCommand(command) {
 async function copyUntrackedFiles({ sourceRoot, targetRoot, state }) {
   for (const [filePath, entry] of Object.entries(state?.entries ?? {})) {
     if (entry.status !== '??') continue;
+    if (entry.fingerprint === 'missing') continue;
     const source = path.join(sourceRoot, filePath);
     const target = path.join(targetRoot, filePath);
     await mkdir(path.dirname(target), { recursive: true });
@@ -220,12 +270,32 @@ async function copyEvidenceFiles({ sourceRoot, targetRoot, state }) {
   }
 }
 
+// Copied content must still match the fingerprints taken at capture time;
+// otherwise the snapshot copy (or the live fallback source) was modified
+// between capture and verification and the materialized tree is not the tree
+// the worker produced.
+async function assertMaterializedFingerprints({ targetRoot, state }) {
+  for (const [filePath, entry] of Object.entries(state?.entries ?? {})) {
+    if (entry.status.endsWith(':source')) continue;
+    const actual = await fileFingerprint(path.join(targetRoot, filePath));
+    if (actual !== entry.fingerprint) {
+      throw new Error(`Materialized content fingerprint mismatch for ${filePath}: workspace changed between capture and verification`);
+    }
+  }
+}
+
 async function prepareVerificationWorkspace({ cwd, state, isolationMode }) {
   if (isolationMode !== 'git-worktree') {
     return { cwd, isolation: 'same-workspace', cleanup: async () => {} };
   }
   if (!state?.available || state.kind !== 'git' || !state.head) {
     throw new Error('git-worktree verification requires a Git repository with a committed HEAD');
+  }
+  if (typeof state.patch !== 'string') {
+    throw new Error('git-worktree verification requires captured patch bytes; re-capture the workspace state');
+  }
+  if (state.patchSha256 !== sha256(state.patch)) {
+    throw new Error('captured patch bytes do not match their recorded hash');
   }
 
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-'));
@@ -236,18 +306,18 @@ async function prepareVerificationWorkspace({ cwd, state, isolationMode }) {
     if (add.exitCode !== 0) throw new Error(add.stderr.trim() || 'git worktree add failed');
     added = true;
 
-    const patch = await gitCommand(['diff', '--binary', 'HEAD'], { cwd, timeoutMs: 30000 });
-    if (patch.exitCode !== 0) throw new Error(patch.stderr.trim() || 'git diff failed');
-    if (patch.stdout.length > 0) {
+    if (state.patch.length > 0) {
       const apply = await gitCommand(['apply', '--binary', '--whitespace=nowarn', '-'], {
         cwd: worktree,
-        stdin: patch.stdout,
+        stdin: state.patch,
         timeoutMs: 30000
       });
       if (apply.exitCode !== 0) throw new Error(apply.stderr.trim() || 'git apply failed');
     }
-    await copyUntrackedFiles({ sourceRoot: cwd, targetRoot: worktree, state });
-    await copyEvidenceFiles({ sourceRoot: cwd, targetRoot: worktree, state });
+    const copySource = state.snapshotRoot ?? cwd;
+    await copyUntrackedFiles({ sourceRoot: copySource, targetRoot: worktree, state });
+    await copyEvidenceFiles({ sourceRoot: copySource, targetRoot: worktree, state });
+    await assertMaterializedFingerprints({ targetRoot: worktree, state });
     return {
       cwd: worktree,
       isolation: 'git-worktree',
@@ -307,6 +377,35 @@ export class VerificationError extends Error {
   }
 }
 
+function attestationBase({ verificationId, task, receipt, state }) {
+  return {
+    schemaVersion: 2,
+    verificationId,
+    taskId: task.id,
+    runId: task.runId ?? null,
+    issuedAt: new Date().toISOString(),
+    taskHash: sha256(task),
+    claimHash: sha256(receipt),
+    baseHead: state?.head ?? null,
+    patchSha256: state?.patchSha256 ?? null,
+    snapshotDigest: state?.snapshotDigest ?? null,
+    files: state?.entries
+      ? Object.keys(state.entries).sort().map((filePath) => ({ path: filePath, fingerprint: state.entries[filePath].fingerprint }))
+      : []
+  };
+}
+
+// Redact before digesting so the evidenceDigest matches the bytes actually
+// persisted; a digest over pre-redaction content could never be re-verified.
+async function sealAttestation({ evidenceDir, runDir, verificationId, attestation }) {
+  const sealed = redactValue(attestation);
+  sealed.evidenceDigest = sha256(sealed);
+  const attestationPath = path.join(evidenceDir, 'attestation.json');
+  await atomicWriteJson(attestationPath, sealed);
+  await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
+  return { ...sealed, path: attestationPath };
+}
+
 export async function verifyTaskClaim({
   task,
   receipt,
@@ -327,69 +426,55 @@ export async function verifyTaskClaim({
   await mkdir(evidenceDir, { recursive: true });
   const declaredChecks = (task.verificationCommands?.length ?? 0) + (task.verifierCommands?.length ?? 0);
   if (!Number.isInteger(maxChecks) || maxChecks < 1 || declaredChecks > maxChecks) {
-    const attestation = {
-      schemaVersion: 1, verificationId, taskId: task.id, runId: task.runId ?? null,
-      status: 'fail', issuedAt: new Date().toISOString(), isolation: 'not-started',
-      taskHash: sha256(task), claimHash: sha256(receipt),
-      changeEvidence: { status: 'not-checked', actualChangedFiles: [] }, checks: [],
-      failure: `Too many verifier checks: ${declaredChecks}; maximum is ${maxChecks}`
-    };
-    attestation.evidenceDigest = sha256(attestation);
-    const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await atomicWriteJson(attestationPath, redactValue(attestation));
-    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
-    throw new VerificationError(`Independent verification failed: ${attestation.failure}`, { ...attestation, path: attestationPath });
+    const failure = `Too many verifier checks: ${declaredChecks}; maximum is ${maxChecks}`;
+    const sealed = await sealAttestation({
+      evidenceDir, runDir, verificationId,
+      attestation: {
+        ...attestationBase({ verificationId, task, receipt, state: afterState }),
+        status: 'fail', isolation: 'not-started',
+        changeEvidence: { status: 'not-checked', actualChangedFiles: [] }, checks: [],
+        failure
+      }
+    });
+    throw new VerificationError(`Independent verification failed: ${failure}`, sealed);
   }
 
   let changeEvidence;
   try {
     changeEvidence = validateClaimedChanges({ task, receipt, beforeState, afterState });
   } catch (error) {
-    const attestation = {
-      schemaVersion: 1,
-      verificationId,
-      taskId: task.id,
-      runId: task.runId ?? null,
-      status: 'fail',
-      issuedAt: new Date().toISOString(),
-      isolation: 'not-started',
-      taskHash: sha256(task),
-      claimHash: sha256(receipt),
-      changeEvidence: { status: 'mismatch', actualChangedFiles: changedPathsBetween(beforeState, afterState) ?? [] },
-      checks: [],
-      failure: error.message
-    };
-    attestation.evidenceDigest = sha256(attestation);
-    const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await atomicWriteJson(attestationPath, redactValue(attestation));
-    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
-    throw new VerificationError(`Independent verification failed: ${error.message}`, { ...attestation, path: attestationPath });
+    const sealed = await sealAttestation({
+      evidenceDir, runDir, verificationId,
+      attestation: {
+        ...attestationBase({ verificationId, task, receipt, state: afterState }),
+        status: 'fail', isolation: 'not-started',
+        changeEvidence: { status: 'mismatch', actualChangedFiles: changedPathsBetween(beforeState, afterState) ?? [] },
+        checks: [],
+        failure: error.message
+      }
+    });
+    throw new VerificationError(`Independent verification failed: ${error.message}`, sealed);
   }
 
-  const workspaceState = afterState ?? await captureWorkspaceState(cwd, { evidenceFiles: task.evidenceFiles ?? [] });
+  const workspaceState = afterState ?? await captureWorkspaceState(cwd, {
+    evidenceFiles: task.evidenceFiles ?? [],
+    snapshotDir: path.join(evidenceDir, 'snapshot')
+  });
   let workspace;
   try {
     workspace = await prepareVerificationWorkspace({ cwd, state: workspaceState, isolationMode });
   } catch (error) {
-    const attestation = {
-      schemaVersion: 1,
-      verificationId,
-      taskId: task.id,
-      runId: task.runId ?? null,
-      status: 'fail',
-      issuedAt: new Date().toISOString(),
-      isolation: isolationMode,
-      taskHash: sha256(task),
-      claimHash: sha256(receipt),
-      changeEvidence,
-      checks: [],
-      failure: error.message
-    };
-    attestation.evidenceDigest = sha256(attestation);
-    const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await atomicWriteJson(attestationPath, redactValue(attestation));
-    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
-    throw new VerificationError(`Independent verification failed: ${error.message}`, { ...attestation, path: attestationPath });
+    const sealed = await sealAttestation({
+      evidenceDir, runDir, verificationId,
+      attestation: {
+        ...attestationBase({ verificationId, task, receipt, state: workspaceState }),
+        status: 'fail', isolation: isolationMode,
+        changeEvidence,
+        checks: [],
+        failure: error.message
+      }
+    });
+    throw new VerificationError(`Independent verification failed: ${error.message}`, sealed);
   }
 
   try {
@@ -403,31 +488,21 @@ export async function verifyTaskClaim({
     // nothing independent behind this attestation; 'pass' would launder an
     // unverified claim into apparent evidence.
     const inconclusive = !failed && results.length === 0 && changeEvidence.status !== 'verified';
-    const attestation = {
-      schemaVersion: 1,
-      verificationId,
-      taskId: task.id,
-      runId: task.runId ?? null,
-      status: failed ? 'fail' : inconclusive ? 'inconclusive' : 'pass',
-      issuedAt: new Date().toISOString(),
-      isolation: workspace.isolation,
-      taskHash: sha256(task),
-      claimHash: sha256(receipt),
-      changeEvidence,
-      checks: results,
-      ...(failed ? { failure: `Verifier check failed: ${failed.command}` } : {})
-    };
-    attestation.evidenceDigest = sha256(attestation);
-    const attestationPath = path.join(evidenceDir, 'attestation.json');
-    await atomicWriteJson(attestationPath, redactValue(attestation));
-    await atomicWriteJson(path.join(runDir, 'verification-latest.json'), { verificationId, attestationPath });
+    const sealed = await sealAttestation({
+      evidenceDir, runDir, verificationId,
+      attestation: {
+        ...attestationBase({ verificationId, task, receipt, state: workspaceState }),
+        status: failed ? 'fail' : inconclusive ? 'inconclusive' : 'pass',
+        isolation: workspace.isolation,
+        changeEvidence,
+        checks: results,
+        ...(failed ? { failure: `Verifier check failed: ${failed.command}` } : {})
+      }
+    });
     if (failed) {
-      throw new VerificationError(`Independent verification failed: verifier check failed: ${failed.command}`, {
-        ...attestation,
-        path: attestationPath
-      });
+      throw new VerificationError(`Independent verification failed: verifier check failed: ${failed.command}`, sealed);
     }
-    return { ...attestation, path: attestationPath };
+    return sealed;
   } finally {
     await workspace.cleanup();
   }

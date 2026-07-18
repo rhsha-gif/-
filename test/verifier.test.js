@@ -30,7 +30,7 @@ test('verifier issues a separate hashed attestation for visible and hidden check
   });
 
   assert.equal(attestation.status, 'pass');
-  assert.equal(attestation.schemaVersion, 1);
+  assert.equal(attestation.schemaVersion, 2);
   assert.equal(attestation.checks.length, 2);
   assert.equal(attestation.checks.filter((entry) => entry.visibility === 'hidden').length, 1);
   assert.match(attestation.claimHash, /^[a-f0-9]{64}$/);
@@ -334,4 +334,103 @@ test('explicit evidence files detect ignored-file changes and replay them in iso
   });
   assert.equal(attestation.status, 'pass');
   assert.deepEqual(attestation.changeEvidence.actualChangedFiles, ['.env']);
+});
+
+function initGitFixture(spawnSync, cwd) {
+  spawnSync('git', ['init', '-q'], { cwd });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd });
+}
+
+test('verifier replays captured content even when the live workspace mutates after capture', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-toctou-'));
+  initGitFixture(spawnSync, cwd);
+  await writeFile(path.join(cwd, 'tracked.txt'), 'before\n');
+  spawnSync('git', ['add', '.'], { cwd });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd });
+  const before = await captureWorkspaceState(cwd);
+  await writeFile(path.join(cwd, 'tracked.txt'), 'after\n');
+  const after = await captureWorkspaceState(cwd, { snapshotDir: path.join(cwd, '.aorch/snapshot') });
+  assert.ok(after.patchSha256, 'capture must record the patch hash');
+  assert.ok(after.snapshotDigest, 'capture must record a snapshot digest');
+
+  // TOCTOU attempt: the live workspace changes between capture and verification.
+  await writeFile(path.join(cwd, 'tracked.txt'), 'tampered\n');
+
+  const command = `${process.execPath} -e "const fs=require('fs');if(fs.readFileSync('tracked.txt','utf8')!=='after\\n')process.exit(7)"`;
+  const task = {
+    ...baseTask, write: true, allowedScope: ['tracked.txt'],
+    acceptanceCriteria: ['captured content is what gets verified'],
+    verificationCommands: [command], verifierCommands: []
+  };
+  const claim = {
+    ...receipt, filesChanged: ['tracked.txt'],
+    commands: [{ command, exitCode: 0, outcome: 'claimed pass' }],
+    criteria: [{ criterion: 'captured content is what gets verified', status: 'pass', evidence: 'worker claim' }]
+  };
+  const attestation = await verifyTaskClaim({
+    task, receipt: claim, cwd, runDir: path.join(cwd, '.aorch/run'),
+    beforeState: before, afterState: after, isolationMode: 'git-worktree'
+  });
+  assert.equal(attestation.status, 'pass');
+  assert.equal(attestation.schemaVersion, 2);
+  assert.equal(attestation.baseHead, after.head);
+  assert.equal(attestation.patchSha256, after.patchSha256);
+  assert.equal(attestation.snapshotDigest, after.snapshotDigest);
+  assert.ok(Array.isArray(attestation.files));
+  assert.ok(attestation.files.some((entry) => entry.path === 'tracked.txt'));
+});
+
+test('a tampered untracked snapshot copy fails verification with a fingerprint mismatch', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-tamper-'));
+  initGitFixture(spawnSync, cwd);
+  await writeFile(path.join(cwd, 'tracked.txt'), 'stable\n');
+  spawnSync('git', ['add', '.'], { cwd });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd });
+  const before = await captureWorkspaceState(cwd);
+  await writeFile(path.join(cwd, 'untracked.txt'), 'fresh evidence\n');
+  const snapshotDir = path.join(cwd, '.aorch/snapshot');
+  const after = await captureWorkspaceState(cwd, { snapshotDir });
+
+  // Tamper with the immutable copy the verifier will materialize from.
+  await writeFile(path.join(snapshotDir, 'untracked.txt'), 'forged evidence\n');
+
+  const task = {
+    ...baseTask, write: true, allowedScope: ['untracked.txt'],
+    verificationCommands: ['node --version'], verifierCommands: []
+  };
+  const claim = { ...receipt, filesChanged: ['untracked.txt'] };
+  await assert.rejects(() => verifyTaskClaim({
+    task, receipt: claim, cwd, runDir: path.join(cwd, '.aorch/run'),
+    beforeState: before, afterState: after, isolationMode: 'git-worktree'
+  }), /fingerprint/i);
+});
+
+test('live workspace mutation of an untracked file after a snapshot-less capture fails closed', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-livemut-'));
+  initGitFixture(spawnSync, cwd);
+  await writeFile(path.join(cwd, 'tracked.txt'), 'stable\n');
+  spawnSync('git', ['add', '.'], { cwd });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd });
+  const before = await captureWorkspaceState(cwd);
+  await writeFile(path.join(cwd, 'untracked.txt'), 'fresh\n');
+  const after = await captureWorkspaceState(cwd);
+
+  await writeFile(path.join(cwd, 'untracked.txt'), 'mutated after capture\n');
+
+  const task = {
+    ...baseTask, write: true, allowedScope: ['untracked.txt'],
+    verificationCommands: ['node --version'], verifierCommands: []
+  };
+  const claim = { ...receipt, filesChanged: ['untracked.txt'] };
+  await assert.rejects(() => verifyTaskClaim({
+    task, receipt: claim, cwd, runDir: path.join(cwd, '.aorch/run'),
+    beforeState: before, afterState: after, isolationMode: 'git-worktree'
+  }), /fingerprint/i);
 });

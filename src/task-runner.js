@@ -393,7 +393,8 @@ export async function executeTask({
     await atomicWriteJson(receiptPath, redactValue(receipt));
     const afterState = await captureWorkspaceState(cwd, {
       ignorePaths: ignoredPaths,
-      evidenceFiles: snapshotEvidenceFiles
+      evidenceFiles: snapshotEvidenceFiles,
+      snapshotDir: path.join(runDir, 'snapshot')
     });
     const changedPaths = changedPathsBetween(beforeState, afterState) ?? [];
     assertProtectedChangePolicy({
