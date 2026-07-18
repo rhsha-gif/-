@@ -113,6 +113,19 @@ export function validateTask(input, { forExecution = false } = {}) {
   task.acceptanceCriteria = ensureStringArray(task.acceptanceCriteria, 'acceptanceCriteria');
   task.verificationCommands = ensureStringArray(task.verificationCommands, 'verificationCommands');
   task.verifierCommands = ensureStringArray(task.verifierCommands, 'verifierCommands');
+  task.verifierPrepareCommands = ensureStringArray(task.verifierPrepareCommands, 'verifierPrepareCommands');
+  task.verifierProtectedScope = ensureStringArray(task.verifierProtectedScope, 'verifierProtectedScope')
+    .map((entry) => entry.trim().replaceAll('\\', '/').replace(/^\.\//, ''));
+  if (task.verifierProtectedScope.some((entry) => entry === '' || entry.startsWith('/') || entry.includes('\0'))) {
+    throw new Error('task.verifierProtectedScope must contain project-relative patterns');
+  }
+  if (task.allowChangeEvidenceOnly !== undefined && typeof task.allowChangeEvidenceOnly !== 'boolean') {
+    throw new TypeError('task.allowChangeEvidenceOnly must be boolean');
+  }
+  task.allowChangeEvidenceOnly = task.allowChangeEvidenceOnly === true;
+  if (task.allowChangeEvidenceOnly && task.risk !== 'low') {
+    throw new Error('task.allowChangeEvidenceOnly is limited to low-risk tasks');
+  }
   task.requirements = ensureStringArray(task.requirements, 'requirements');
   task.invariants = ensureStringArray(task.invariants, 'invariants');
   task.failureModes = ensureStringArray(task.failureModes, 'failureModes');
@@ -193,6 +206,21 @@ export function validateTask(input, { forExecution = false } = {}) {
     if (task.risk === 'critical' && task.verificationCommands.length === 0) {
       throw new Error('Critical task requires explicit verification commands');
     }
+    const executableChecks = task.verificationCommands.length + task.verifierCommands.length;
+    if (task.write === true && executableChecks === 0 && !task.allowChangeEvidenceOnly) {
+      throw new Error('Write task requires at least one executable check; low-risk evidence-only work must set allowChangeEvidenceOnly');
+    }
   }
   return task;
+}
+
+// Fields the worker must never see: hidden verification plans, protected
+// scope, and approval references. Everything else in the task envelope is
+// public worker input.
+const PRIVATE_TASK_FIELDS = ['verifierCommands', 'verifierPrepareCommands', 'verifierProtectedScope', 'approval'];
+
+export function publicWorkerEnvelope(task) {
+  const envelope = structuredClone(task);
+  for (const field of PRIVATE_TASK_FIELDS) delete envelope[field];
+  return envelope;
 }

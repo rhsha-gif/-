@@ -481,7 +481,8 @@ async function main(argv = process.argv.slice(2)) {
       timeoutMs: numericFlag(flags, 'verification-timeout-ms') ?? config.verification?.commandTimeoutMs,
       totalTimeoutMs: config.verification?.totalTimeoutMs,
       maxOutputBytes: config.verification?.maxOutputBytes,
-      maxChecks: config.verification?.maxChecks
+      maxChecks: config.verification?.maxChecks,
+      envAllowlist: config.verification?.envAllowlist ?? []
     });
     process.stdout.write(`${JSON.stringify({ attestation, attestationPath: attestation.path, runDir }, null, 2)}\n`);
     return 0;

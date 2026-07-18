@@ -117,6 +117,21 @@
         "type": "string"
       }
     },
+    "verifierPrepareCommands": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "verifierProtectedScope": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "allowChangeEvidenceOnly": {
+      "type": "boolean"
+    },
     "verificationIsolation": {
       "type": "string",
       "enum": [

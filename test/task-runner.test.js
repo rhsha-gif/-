@@ -672,3 +672,24 @@ test('automation credentials require an explicit access policy before subscripti
   const result = await executeTask({ task, config: approvedConfig, cwd, dryRun: true, env });
   assert.equal(result.commandSpec.envMode, 'replace');
 });
+
+test('compiled worker prompts never contain private verifier fields', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-envelope-'));
+  const privateTask = {
+    ...task,
+    id: 'T-envelope', write: true, allowedScope: ['src/x.js'],
+    verificationCommands: ['node --version'],
+    verifierCommands: ['node hidden-tests/secret-replay.mjs'],
+    verifierPrepareCommands: ['npm ci --ignore-scripts-sentinel'],
+    verifierProtectedScope: ['hidden-tests/**', 'protected-sentinel.json']
+  };
+  const result = await executeTask({
+    task: privateTask, config: claudeAdapterConfig(), cwd, dryRun: true,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME }
+  });
+  const publicSurface = JSON.stringify({ prompt: result.compiledPrompt ?? result.executionContract, spec: result.commandSpec });
+  assert.doesNotMatch(publicSurface, /secret-replay/);
+  assert.doesNotMatch(publicSurface, /ignore-scripts-sentinel/);
+  assert.doesNotMatch(publicSurface, /protected-sentinel/);
+  assert.match(publicSurface, /node --version/);
+});

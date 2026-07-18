@@ -5,6 +5,7 @@ import path from 'node:path';
 import { runCommand } from './executor.js';
 import { atomicWriteJson, atomicWriteText } from './file-store.js';
 import { redactSecrets, redactValue } from './security.js';
+import { sanitizeSubscriptionWorkerEnv } from './subscription.js';
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -219,24 +220,47 @@ export function validateClaimedChanges({ task, receipt, beforeState, afterState 
   return { status: 'verified', actualChangedFiles: actual };
 }
 
-function buildShellCommand(command) {
+function buildShellCommand(command, baseEnv) {
+  const env = { ...baseEnv, AORCH_WORKER: '1', AORCH_VERIFIER: '1' };
   if (process.platform === 'win32') {
     return {
       command: process.env.ComSpec ?? 'cmd.exe',
       args: ['/d', '/s', '/c', command],
       stdin: null,
-      env: { AORCH_WORKER: '1', AORCH_VERIFIER: '1' }
+      env,
+      envMode: 'replace'
     };
   }
-  // Non-login shell: the child inherits the orchestrator's environment, and a
-  // login shell could source user profiles that print into the captured
-  // stdout/stderr evidence and change PATH between worker and verifier runs.
+  // Non-login shell: a login shell could source user profiles that print into
+  // the captured stdout/stderr evidence and change PATH between worker and
+  // verifier runs. The environment is a sanitized replacement set, never the
+  // orchestrator's full environment.
   return {
     command: '/bin/sh',
     args: ['-c', command],
     stdin: null,
-    env: { AORCH_WORKER: '1', AORCH_VERIFIER: '1' }
+    env,
+    envMode: 'replace'
   };
+}
+
+function globToRegExp(pattern) {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  const regex = escaped.replaceAll('**', '\u0000').replaceAll('*', '[^/]*').replaceAll('\u0000', '.*');
+  return new RegExp(`^${regex}$`);
+}
+
+export function pathsIntersectProtectedScope(paths, protectedScope = []) {
+  if (protectedScope.length === 0) return [];
+  const matchers = protectedScope.map((pattern) => {
+    const normalized = normalizePath(pattern);
+    if (/[*?[]/.test(normalized)) {
+      const regex = globToRegExp(normalized);
+      return (candidate) => regex.test(candidate);
+    }
+    return (candidate) => candidate === normalized || candidate.startsWith(`${normalized}/`);
+  });
+  return paths.filter((candidate) => matchers.some((matches) => matches(normalizePath(candidate))));
 }
 
 async function copyUntrackedFiles({ sourceRoot, targetRoot, state }) {
@@ -333,7 +357,7 @@ async function prepareVerificationWorkspace({ cwd, state, isolationMode }) {
   }
 }
 
-async function runChecks({ checks, cwd, evidenceDir, timeoutMs, totalTimeoutMs, maxOutputBytes, onStep }) {
+async function runChecks({ checks, cwd, evidenceDir, timeoutMs, totalTimeoutMs, maxOutputBytes, baseEnv = {}, onStep }) {
   const deadline = Date.now() + totalTimeoutMs;
   const results = [];
   for (let index = 0; index < checks.length; index += 1) {
@@ -343,7 +367,7 @@ async function runChecks({ checks, cwd, evidenceDir, timeoutMs, totalTimeoutMs, 
       results.push({ command: check.command, visibility: check.visibility, exitCode: null, timedOut: true, outputLimitExceeded: false, terminationReason: 'verification-deadline', durationMs: 0, stdoutSha256: sha256(''), stderrSha256: sha256(''), stdoutPath: null, stderrPath: null });
       break;
     }
-    const result = await runCommand(buildShellCommand(check.command), { cwd, timeoutMs: Math.min(timeoutMs, remainingMs), maxOutputBytes });
+    const result = await runCommand(buildShellCommand(check.command, baseEnv), { cwd, timeoutMs: Math.min(timeoutMs, remainingMs), maxOutputBytes });
     const prefix = `${String(index + 1).padStart(2, '0')}-${check.visibility}`;
     const stdoutPath = path.join(evidenceDir, `${prefix}.stdout.log`);
     const stderrPath = path.join(evidenceDir, `${prefix}.stderr.log`);
@@ -418,15 +442,34 @@ export async function verifyTaskClaim({
   maxOutputBytes = 8 * 1024 * 1024,
   maxChecks = 20,
   isolationMode = 'same-workspace',
+  envAllowlist = [],
   onStep
 }) {
   if (!runDir) throw new TypeError('runDir is required');
   const verificationId = randomUUID();
   const evidenceDir = path.join(runDir, 'verifier', verificationId);
   await mkdir(evidenceDir, { recursive: true });
+  // Checks execute with a sanitized replacement environment: process basics
+  // plus explicitly allowlisted names. API credentials and unrelated secrets
+  // never reach verification commands, even when allowlisted by mistake.
+  const checkEnv = sanitizeSubscriptionWorkerEnv({ env: process.env, provider: 'anthropic', extraAllow: envAllowlist });
   const declaredChecks = (task.verificationCommands?.length ?? 0) + (task.verifierCommands?.length ?? 0);
   if (!Number.isInteger(maxChecks) || maxChecks < 1 || declaredChecks > maxChecks) {
     const failure = `Too many verifier checks: ${declaredChecks}; maximum is ${maxChecks}`;
+    const sealed = await sealAttestation({
+      evidenceDir, runDir, verificationId,
+      attestation: {
+        ...attestationBase({ verificationId, task, receipt, state: afterState }),
+        status: 'fail', isolation: 'not-started',
+        changeEvidence: { status: 'not-checked', actualChangedFiles: [] }, checks: [],
+        failure
+      }
+    });
+    throw new VerificationError(`Independent verification failed: ${failure}`, sealed);
+  }
+
+  if (task.write === true && declaredChecks === 0 && task.allowChangeEvidenceOnly !== true) {
+    const failure = 'Write task has no executable check; low-risk evidence-only work must set allowChangeEvidenceOnly';
     const sealed = await sealAttestation({
       evidenceDir, runDir, verificationId,
       attestation: {
@@ -456,6 +499,28 @@ export async function verifyTaskClaim({
     throw new VerificationError(`Independent verification failed: ${error.message}`, sealed);
   }
 
+  // Anti-gaming boundary: a worker change that touches the files protecting
+  // verification (hidden tests, lockfiles, verifier scripts) fails before any
+  // check executes, because the checks themselves can no longer be trusted.
+  const protectedHits = pathsIntersectProtectedScope(
+    changeEvidence.actualChangedFiles ?? [],
+    task.verifierProtectedScope ?? []
+  );
+  if (protectedHits.length > 0) {
+    const failure = `Worker changed verifier-protected scope before checks ran: ${protectedHits.join(', ')}`;
+    const sealed = await sealAttestation({
+      evidenceDir, runDir, verificationId,
+      attestation: {
+        ...attestationBase({ verificationId, task, receipt, state: afterState }),
+        status: 'fail', isolation: 'not-started',
+        changeEvidence,
+        checks: [],
+        failure
+      }
+    });
+    throw new VerificationError(`Independent verification failed: ${failure}`, sealed);
+  }
+
   const workspaceState = afterState ?? await captureWorkspaceState(cwd, {
     evidenceFiles: task.evidenceFiles ?? [],
     snapshotDir: path.join(evidenceDir, 'snapshot')
@@ -479,15 +544,32 @@ export async function verifyTaskClaim({
 
   try {
     const checks = [
+      ...(task.verifierPrepareCommands ?? []).map((command) => ({ command, visibility: 'prepare' })),
       ...(task.verificationCommands ?? []).map((command) => ({ command, visibility: 'worker-visible' })),
       ...(task.verifierCommands ?? []).map((command) => ({ command, visibility: 'hidden' }))
     ];
-    const results = await runChecks({ checks, cwd: workspace.cwd, evidenceDir, timeoutMs, totalTimeoutMs, maxOutputBytes, onStep });
+    const results = await runChecks({ checks, cwd: workspace.cwd, evidenceDir, timeoutMs, totalTimeoutMs, maxOutputBytes, baseEnv: checkEnv, onStep });
     const failed = results.find((entry) => entry.exitCode !== 0 || entry.timedOut || entry.outputLimitExceeded);
+    if (failed && failed.visibility === 'prepare') {
+      const sealed = await sealAttestation({
+        evidenceDir, runDir, verificationId,
+        attestation: {
+          ...attestationBase({ verificationId, task, receipt, state: workspaceState }),
+          status: 'fail',
+          isolation: workspace.isolation,
+          changeEvidence,
+          checks: results,
+          failure: `Verifier prepare failed: ${failed.command}`
+        }
+      });
+      throw new VerificationError(`Independent verification failed: verifier prepare failed: ${failed.command}`, sealed);
+    }
     // With zero replayed checks and no verified change evidence there is
     // nothing independent behind this attestation; 'pass' would launder an
-    // unverified claim into apparent evidence.
-    const inconclusive = !failed && results.length === 0 && changeEvidence.status !== 'verified';
+    // unverified claim into apparent evidence. Prepare commands set up the
+    // workspace but are not verification evidence themselves.
+    const replayedChecks = results.filter((entry) => entry.visibility !== 'prepare');
+    const inconclusive = !failed && replayedChecks.length === 0 && changeEvidence.status !== 'verified';
     const sealed = await sealAttestation({
       evidenceDir, runDir, verificationId,
       attestation: {

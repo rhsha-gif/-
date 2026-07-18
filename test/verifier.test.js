@@ -434,3 +434,105 @@ test('live workspace mutation of an untracked file after a snapshot-less capture
     beforeState: before, afterState: after, isolationMode: 'git-worktree'
   }), /fingerprint/i);
 });
+
+test('worker changes touching verifier-protected scope fail before any check runs', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-protected-'));
+  initGitFixture(spawnSync, cwd);
+  await writeFile(path.join(cwd, 'package.json'), '{"name":"fixture"}\n');
+  await writeFile(path.join(cwd, 'src.js'), 'before\n');
+  spawnSync('git', ['add', '.'], { cwd });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd });
+  const before = await captureWorkspaceState(cwd);
+  await writeFile(path.join(cwd, 'package.json'), '{"name":"fixture","scripts":{"test":"true"}}\n');
+  const after = await captureWorkspaceState(cwd, { snapshotDir: path.join(cwd, '.aorch/snapshot') });
+
+  const task = {
+    ...baseTask, write: true, allowedScope: ['package.json'],
+    verificationCommands: ['node --version'], verifierCommands: [],
+    verifierProtectedScope: ['package.json', 'hidden-tests/**']
+  };
+  const claim = { ...receipt, filesChanged: ['package.json'] };
+  let sealedAttestation = null;
+  try {
+    await verifyTaskClaim({
+      task, receipt: claim, cwd, runDir: path.join(cwd, '.aorch/run'),
+      beforeState: before, afterState: after, isolationMode: 'git-worktree'
+    });
+    assert.fail('protected-scope change must not verify');
+  } catch (error) {
+    sealedAttestation = error.attestation;
+    assert.match(error.message, /protected/i);
+  }
+  assert.equal(sealedAttestation.status, 'fail');
+  assert.equal(sealedAttestation.checks.length, 0, 'no check may run after a protected-scope violation');
+});
+
+test('verifier checks run in a sanitized environment without inherited secrets', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-env-'));
+  const command = `${process.execPath} -e "process.exit(process.env.LEAKY_VERIFIER_SECRET ? 3 : 0)"`;
+  const task = {
+    ...baseTask,
+    verificationCommands: [command],
+    verifierCommands: []
+  };
+  const claim = {
+    ...receipt,
+    commands: [{ command, exitCode: 0, outcome: 'clean env' }]
+  };
+  process.env.LEAKY_VERIFIER_SECRET = 'secret';
+  try {
+    const attestation = await verifyTaskClaim({
+      task, receipt: claim, cwd, runDir: path.join(cwd, '.aorch/run'),
+      timeoutMs: 15000, isolationMode: 'same-workspace'
+    });
+    assert.equal(attestation.status, 'pass');
+  } finally {
+    delete process.env.LEAKY_VERIFIER_SECRET;
+  }
+});
+
+test('verifier env allowlist admits named variables without opening credentials', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-allow-'));
+  const command = `${process.execPath} -e "process.exit(process.env.CI_MARKER === 'yes' && !process.env.ANTHROPIC_API_KEY ? 0 : 3)"`;
+  const task = { ...baseTask, verificationCommands: [command], verifierCommands: [] };
+  const claim = { ...receipt, commands: [{ command, exitCode: 0, outcome: 'allowlisted' }] };
+  process.env.CI_MARKER = 'yes';
+  process.env.ANTHROPIC_API_KEY = 'sk-secret';
+  try {
+    const attestation = await verifyTaskClaim({
+      task, receipt: claim, cwd, runDir: path.join(cwd, '.aorch/run'),
+      timeoutMs: 15000, isolationMode: 'same-workspace',
+      envAllowlist: ['CI_MARKER', 'ANTHROPIC_API_KEY']
+    });
+    assert.equal(attestation.status, 'pass');
+  } finally {
+    delete process.env.CI_MARKER;
+    delete process.env.ANTHROPIC_API_KEY;
+  }
+});
+
+test('failing prepare commands fail the attestation before checks execute', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-prepare-'));
+  initGitFixture(spawnSync, cwd);
+  await writeFile(path.join(cwd, 'tracked.txt'), 'stable\n');
+  spawnSync('git', ['add', '.'], { cwd });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd });
+  const before = await captureWorkspaceState(cwd);
+  await writeFile(path.join(cwd, 'tracked.txt'), 'changed\n');
+  const after = await captureWorkspaceState(cwd, { snapshotDir: path.join(cwd, '.aorch/snapshot') });
+
+  const task = {
+    ...baseTask, write: true, allowedScope: ['tracked.txt'],
+    verificationCommands: ['node --version'], verifierCommands: [],
+    verifierPrepareCommands: [`${process.execPath} -e "process.exit(9)"`]
+  };
+  const claim = { ...receipt, filesChanged: ['tracked.txt'] };
+  await assert.rejects(() => verifyTaskClaim({
+    task, receipt: claim, cwd, runDir: path.join(cwd, '.aorch/run'),
+    beforeState: before, afterState: after, isolationMode: 'git-worktree'
+  }), /prepare/i);
+});

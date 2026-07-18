@@ -455,6 +455,8 @@ export function validateConfig(input) {
   const verificationTotalTimeoutMs = positiveNumber(input.verification?.totalTimeoutMs, 'verification.totalTimeoutMs', 30 * 60 * 1000);
   const verificationMaxOutputBytes = boundedInteger(input.verification?.maxOutputBytes, 'verification.maxOutputBytes', 8 * 1024 * 1024, { minimum: 1 });
   const verificationMaxChecks = boundedInteger(input.verification?.maxChecks, 'verification.maxChecks', 20, { minimum: 1, maximum: 100 });
+  const verificationEnvAllowlist = input.verification?.envAllowlist ?? [];
+  assertNonEmptyStrings(verificationEnvAllowlist, 'verification.envAllowlist');
   const defaultIsolationByRisk = {
     low: 'same-workspace', standard: 'git-worktree', high: 'git-worktree', critical: 'git-worktree'
   };
@@ -494,6 +496,7 @@ export function validateConfig(input) {
       totalTimeoutMs: verificationTotalTimeoutMs,
       maxOutputBytes: verificationMaxOutputBytes,
       maxChecks: verificationMaxChecks,
+      envAllowlist: [...verificationEnvAllowlist],
       isolationByRisk
     },
     paths: { stateDir: '.aorch', ...(input.paths ?? {}) }

@@ -187,3 +187,55 @@ test('single-worker is the lowest execution lane and legacy direct is rejected',
   assert.equal(single.executionLane, 'single-worker');
   assert.throws(() => validateTask({ ...base, executionLane: 'direct' }), /direct.*single-worker|single-worker.*direct/i);
 });
+
+import { publicWorkerEnvelope } from '../src/task.js';
+
+test('write tasks require at least one executable check unless explicitly low-risk evidence-only', () => {
+  const base = {
+    id: 'T-checks', objective: 'Change a file.', kind: 'implementation', role: 'executor',
+    risk: 'standard', write: true, allowedScope: ['src/a.js'],
+    acceptanceCriteria: ['file changed'], verificationCommands: [], verifierCommands: []
+  };
+  assert.throws(() => validateTask(base, { forExecution: true }), /executable check/i);
+
+  assert.throws(
+    () => validateTask({ ...base, allowChangeEvidenceOnly: true }, { forExecution: true }),
+    /low/i
+  );
+
+  const lowEvidenceOnly = validateTask({
+    ...base, risk: 'low', allowChangeEvidenceOnly: true
+  }, { forExecution: true });
+  assert.equal(lowEvidenceOnly.allowChangeEvidenceOnly, true);
+
+  const withCheck = validateTask({
+    ...base, verificationCommands: ['node --test test/a.test.js']
+  }, { forExecution: true });
+  assert.equal(withCheck.verificationCommands.length, 1);
+});
+
+test('verifier-private fields validate and stay out of the public worker envelope', () => {
+  const task = validateTask({
+    id: 'T-private', objective: 'Implement guarded change.', kind: 'implementation', role: 'executor',
+    risk: 'standard', write: true, allowedScope: ['src/**'],
+    acceptanceCriteria: ['done'],
+    verificationCommands: ['npm test'],
+    verifierCommands: ['node hidden-tests/replay.mjs'],
+    verifierProtectedScope: ['package.json', 'hidden-tests/**'],
+    verifierPrepareCommands: ['npm ci --ignore-scripts']
+  }, { forExecution: true });
+  assert.deepEqual(task.verifierProtectedScope, ['package.json', 'hidden-tests/**']);
+
+  const publicEnvelope = publicWorkerEnvelope(task);
+  assert.equal(publicEnvelope.id, 'T-private');
+  assert.ok(!('verifierCommands' in publicEnvelope));
+  assert.ok(!('verifierProtectedScope' in publicEnvelope));
+  assert.ok(!('verifierPrepareCommands' in publicEnvelope));
+  assert.ok(!('approval' in publicEnvelope));
+  assert.deepEqual(publicEnvelope.verificationCommands, ['npm test']);
+
+  assert.throws(() => validateTask({
+    id: 'T-bad', kind: 'implementation', role: 'executor', risk: 'low',
+    verifierProtectedScope: ['']
+  }), /verifierProtectedScope/i);
+});

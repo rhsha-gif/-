@@ -12,7 +12,7 @@ import { buildGenericCommand } from './providers/generic-cli.js';
 import { runCommand } from './executor.js';
 import { inspectSubscriptionEnvironment, sanitizeSubscriptionWorkerEnv } from './subscription.js';
 import { formatProgressReport, ProgressReporter } from './progress.js';
-import { validateTask } from './task.js';
+import { publicWorkerEnvelope, validateTask } from './task.js';
 import { validateReceipt } from './receipt.js';
 import {
   captureWorkspaceState,
@@ -220,6 +220,9 @@ export async function executeTask({
 
   const provider = providerById(config, route.provider);
   const modelProfile = config.models.find((entry) => entry.id === route.profileId);
+  // The worker sees the public envelope only; hidden verification plans,
+  // protected scope, and approval references stay in the private task.
+  const workerEnvelope = publicWorkerEnvelope(task);
   let promptProfile = null;
   let compiled;
   if ((modelProfile?.promptProfileIds?.length ?? 0) > 0) {
@@ -233,7 +236,7 @@ export async function executeTask({
       policy: config.promptCompilation ?? {}
     });
     compiled = compileWorkerPrompt({
-      task,
+      task: workerEnvelope,
       route,
       profile: promptProfile,
       capabilities,
@@ -241,12 +244,12 @@ export async function executeTask({
       lane: laneDecision
     });
   } else {
-    const prompt = buildTaskPrompt({ task, route, capabilities, receiptPath });
+    const prompt = buildTaskPrompt({ task: workerEnvelope, route, capabilities, receiptPath });
     compiled = {
       prompt,
       manifest: createPromptManifest({
         prompt,
-        task,
+        task: workerEnvelope,
         route,
         profile: null,
         lane: laneDecision,
@@ -424,6 +427,7 @@ export async function executeTask({
         totalTimeoutMs: config.verification?.totalTimeoutMs ?? 30 * 60 * 1000,
         maxOutputBytes: config.verification?.maxOutputBytes ?? 8 * 1024 * 1024,
         maxChecks: config.verification?.maxChecks ?? 20,
+        envAllowlist: config.verification?.envAllowlist ?? [],
         isolationMode,
         onStep: (completed) => {
           progressFraction = totalChecks > 0 ? 0.7 + (0.29 * completed / totalChecks) : 0.99;
