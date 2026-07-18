@@ -1,6 +1,49 @@
 import { readFile, access } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  validateAccessProfile,
+  validateSurfaces,
+  USAGE_POOLS,
+  USAGE_POOL_STATES
+} from './subscription.js';
+
+const MODEL_AVAILABILITY_STATES = ['unknown', 'available', 'unavailable', 'temporarily-limited'];
+
+function validateUsagePools(input) {
+  const source = input ?? {};
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    throw new TypeError('usagePools must be an object');
+  }
+  const result = {};
+  for (const pool of USAGE_POOLS) result[pool] = 'unknown';
+  for (const [pool, state] of Object.entries(source)) {
+    if (!USAGE_POOLS.includes(pool)) throw new Error(`usagePools contains unknown pool: ${pool}`);
+    if (!USAGE_POOL_STATES.includes(state)) {
+      throw new Error(`usagePools.${pool} must be one of ${USAGE_POOL_STATES.join(', ')}`);
+    }
+    result[pool] = state;
+  }
+  return result;
+}
+
+function validateModelAvailability(input, models) {
+  const source = input ?? {};
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    throw new TypeError('modelAvailability must be an object');
+  }
+  const modelIds = new Set(models.map((model) => model.id));
+  const result = {};
+  for (const id of modelIds) result[id] = 'unknown';
+  for (const [id, state] of Object.entries(source)) {
+    if (!modelIds.has(id)) throw new Error(`modelAvailability references unknown model: ${id}`);
+    if (!MODEL_AVAILABILITY_STATES.includes(state)) {
+      throw new Error(`modelAvailability.${id} must be one of ${MODEL_AVAILABILITY_STATES.join(', ')}`);
+    }
+    result[id] = state;
+  }
+  return result;
+}
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ROUTE_METRICS = ['quality', 'tokens', 'latency'];
@@ -422,11 +465,20 @@ export function validateConfig(input) {
     }
   }
 
+  const accessProfile = validateAccessProfile(input.access);
+  const surfaces = validateSurfaces(input.surfaces);
+  const usagePools = validateUsagePools(input.usagePools);
+  const modelAvailability = validateModelAvailability(input.modelAvailability, normalizedModels);
+
   return structuredClone({
     ...input,
     providers: normalizedProviders,
     models: normalizedModels,
     capabilities: normalizedCapabilities,
+    access: accessProfile,
+    surfaces,
+    usagePools,
+    modelAvailability,
     routing,
     controlPlane,
     hostPolicy,

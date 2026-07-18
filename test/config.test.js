@@ -283,3 +283,51 @@ test('prompt profile freshness policy is explicit and bounded', () => {
     assert.throws(() => validateConfig(config), new RegExp(`promptCompilation\\.${field}`, 'i'));
   }
 });
+
+test('v0.6 configs without access settings migrate to subscription-local defaults', () => {
+  const config = validateConfig(minimalConfig());
+  assert.equal(config.access.profile, 'subscription-local');
+  assert.equal(config.access.allowDirectApi, false);
+  assert.equal(config.access.overflowPolicy, 'reroute-or-wait');
+  assert.equal(config.surfaces.openai.workerTransport, 'codex-cli');
+  assert.equal(config.surfaces.anthropic.crossHostWorkerTransport, 'claude-print');
+  assert.deepEqual(config.usagePools, {
+    'openai-agentic': 'unknown',
+    'anthropic-subscription': 'unknown'
+  });
+});
+
+test('config rejects API fallback, cloud delegation, and paid-credit enablement', () => {
+  for (const field of ['allowDirectApi', 'allowApiFallback', 'allowCloudDelegation', 'allowPaidCredits']) {
+    const config = minimalConfig();
+    config.access = { profile: 'subscription-local', [field]: true };
+    assert.throws(() => validateConfig(config), new RegExp(field));
+  }
+});
+
+test('config rejects invalid overflow policies and usage pool states', () => {
+  const badOverflow = minimalConfig();
+  badOverflow.access = { overflowPolicy: 'api-fallback' };
+  assert.throws(() => validateConfig(badOverflow), /overflowPolicy/i);
+
+  const badPool = minimalConfig();
+  badPool.usagePools = { 'openai-agentic': '37%' };
+  assert.throws(() => validateConfig(badPool), /usagePools/i);
+
+  const unknownPool = minimalConfig();
+  unknownPool.usagePools = { 'mystery-pool': 'green' };
+  assert.throws(() => validateConfig(unknownPool), /usagePools/i);
+});
+
+test('model availability defaults to unknown and rejects invented states', () => {
+  const config = validateConfig(minimalConfig());
+  assert.equal(config.modelAvailability['newco-best'], 'unknown');
+
+  const bad = minimalConfig();
+  bad.modelAvailability = { 'newco-best': 'definitely-fine' };
+  assert.throws(() => validateConfig(bad), /modelAvailability/i);
+
+  const orphan = minimalConfig();
+  orphan.modelAvailability = { 'missing-model': 'available' };
+  assert.throws(() => validateConfig(orphan), /modelAvailability/i);
+});
