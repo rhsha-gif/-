@@ -2,6 +2,7 @@ import { access, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { atomicWriteJson, withFileLock } from './file-store.js';
+import { assertPassingAttestation, loadAndValidateAttestation } from './attestation.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'partial', 'blocked', 'failed', 'cancelled']);
 const TASK_STATUSES = new Set([
@@ -9,6 +10,10 @@ const TASK_STATUSES = new Set([
   'complete', 'accepted', 'done', 'blocked', 'failed', 'cancelled', 'skipped'
 ]);
 const SUCCESS_TASK_STATUSES = new Set(['complete', 'accepted', 'done', 'skipped']);
+// Success statuses that assert real work happened. Only a passing attestation
+// bound to this task and run may record them; 'skipped' asserts the opposite
+// and is exempt.
+const EVIDENCE_REQUIRED_STATUSES = new Set(['complete', 'accepted', 'done']);
 const ACTIVE_RUN_FILE = 'active-run.json';
 
 async function exists(filePath) {
@@ -56,6 +61,9 @@ function normalizeTask(task, index) {
   }
   const status = task.status ?? 'pending';
   if (!TASK_STATUSES.has(status)) throw new Error(`Unsupported task status: ${status}`);
+  if (EVIDENCE_REQUIRED_STATUSES.has(status)) {
+    throw new Error(`Task ${task.id} cannot be created as ${status}: completion requires a passing attestation recorded through a task update`);
+  }
   const weight = Number(task.weight ?? 1);
   if (!Number.isFinite(weight) || weight <= 0) throw new RangeError(`Task ${task.id} weight must be positive`);
   const fraction = task.fraction === undefined
@@ -151,8 +159,15 @@ export async function resolveActiveRun(root) {
 }
 
 const PATCHABLE_TASK_FIELDS = new Set([
-  'status', 'fraction', 'note', 'blocker', 'evidence', 'evidenceCount', 'lastEvidenceAt', 'progressConfidence'
+  'status', 'fraction', 'note', 'blocker', 'evidence', 'evidenceCount', 'lastEvidenceAt', 'progressConfidence',
+  'attestationPath'
 ]);
+
+// The state root is the ancestor of root/runs/<id>/run.json; attestations must
+// live inside it so completion evidence cannot point at arbitrary files.
+function stateRootOfRunPath(runPath) {
+  return path.resolve(path.dirname(runPath), '..', '..');
+}
 
 export async function updateTaskState(runPath, taskId, patch) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new TypeError('task patch must be an object');
@@ -160,7 +175,7 @@ export async function updateTaskState(runPath, taskId, patch) {
   if (unknown.length > 0) {
     throw new TypeError(`task patch cannot modify: ${unknown.join(', ')}`);
   }
-  return mutateRun(runPath, (state) => {
+  return mutateRun(runPath, async (state) => {
     if (state.status !== 'running') throw new Error(`Cannot update tasks in terminal run ${state.id}`);
     const index = state.tasks.findIndex((task) => task.id === taskId);
     if (index < 0) throw new Error(`Unknown task: ${taskId}`);
@@ -171,9 +186,28 @@ export async function updateTaskState(runPath, taskId, patch) {
     let fraction = patch.fraction === undefined ? current.fraction : normalizeFraction(patch.fraction);
     if (SUCCESS_TASK_STATUSES.has(status) || ['cancelled', 'skipped'].includes(status)) fraction = 1;
 
+    let attestationFields = {};
+    if (EVIDENCE_REQUIRED_STATUSES.has(status)) {
+      const attestationPath = patch.attestationPath ?? current.attestationPath;
+      if (typeof attestationPath !== 'string' || attestationPath.trim() === '') {
+        throw new Error(`Task ${taskId} cannot be recorded as ${status} without a passing attestation (provide attestationPath)`);
+      }
+      const attestation = assertPassingAttestation(await loadAndValidateAttestation(attestationPath, {
+        taskId,
+        runId: state.id,
+        stateRoot: stateRootOfRunPath(runPath)
+      }));
+      attestationFields = {
+        attestationPath: attestation.path,
+        attestationDigest: attestation.evidenceDigest,
+        attestationVerifiedAt: new Date().toISOString()
+      };
+    }
+
     state.tasks[index] = {
       ...current,
       ...patch,
+      ...attestationFields,
       status,
       fraction,
       updatedAt: new Date().toISOString()
@@ -186,11 +220,25 @@ export async function finishRun(runPath, status) {
   if (!TERMINAL_RUN_STATUSES.has(status)) {
     throw new Error(`Unsupported terminal run status: ${status}`);
   }
-  return mutateRun(runPath, (state) => {
+  return mutateRun(runPath, async (state) => {
     if (status === 'completed') {
       const unfinished = state.tasks.filter((task) => !SUCCESS_TASK_STATUSES.has(task.status));
       if (unfinished.length > 0) {
         throw new Error(`Cannot complete run with unfinished tasks: ${unfinished.map((task) => task.id).join(', ')}`);
+      }
+      for (const task of state.tasks) {
+        if (task.status === 'skipped') continue;
+        if (typeof task.attestationPath !== 'string' || typeof task.attestationDigest !== 'string') {
+          throw new Error(`Cannot complete run: task ${task.id} has no validated attestation metadata`);
+        }
+        const attestation = assertPassingAttestation(await loadAndValidateAttestation(task.attestationPath, {
+          taskId: task.id,
+          runId: state.id,
+          stateRoot: stateRootOfRunPath(runPath)
+        }));
+        if (attestation.evidenceDigest !== task.attestationDigest) {
+          throw new Error(`Cannot complete run: task ${task.id} attestation digest changed since it was recorded`);
+        }
       }
     }
     const now = new Date().toISOString();

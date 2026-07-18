@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -10,6 +10,29 @@ import {
   resolveActiveRun,
   updateTaskState
 } from '../src/state.js';
+import { sha256 } from '../src/verifier.js';
+
+async function writePassingAttestation(root, { taskId, runId }) {
+  const attestation = {
+    schemaVersion: 1,
+    verificationId: `${taskId}-verification`,
+    taskId,
+    runId,
+    status: 'pass',
+    issuedAt: new Date().toISOString(),
+    isolation: 'same-workspace',
+    taskHash: sha256({ taskId }),
+    claimHash: sha256({ claim: taskId }),
+    changeEvidence: { status: 'verified', actualChangedFiles: [] },
+    checks: [{ command: 'node --version', exitCode: 0, visibility: 'worker-visible' }]
+  };
+  attestation.evidenceDigest = sha256(attestation);
+  const dir = path.join(root, 'task-runs', runId, taskId);
+  await mkdir(dir, { recursive: true });
+  const filePath = path.join(dir, 'attestation.json');
+  await writeFile(filePath, JSON.stringify(attestation, null, 2));
+  return filePath;
+}
 
 test('run state is durable and progress-relevant fields survive updates', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-state-'));
@@ -52,9 +75,10 @@ test('rejects unsafe run ids and refuses to overwrite an unfinished active run',
 
 test('completed runs require successful terminal task states', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-state-complete-'));
-  const run = await createRun({ root, prompt: 'build it', tasks: [{ id: 'T1', status: 'running', fraction: 0.5 }] });
+  const run = await createRun({ root, prompt: 'build it', runId: 'RSC', tasks: [{ id: 'T1', status: 'running', fraction: 0.5 }] });
   await assert.rejects(() => finishRun(run.path, 'completed'), /unfinished tasks.*T1/i);
-  await updateTaskState(run.path, 'T1', { status: 'complete', fraction: 1 });
+  const attestationPath = await writePassingAttestation(root, { taskId: 'T1', runId: 'RSC' });
+  await updateTaskState(run.path, 'T1', { status: 'complete', fraction: 1, attestationPath });
   const finished = await finishRun(run.path, 'completed');
   assert.equal(finished.status, 'completed');
 });
@@ -85,13 +109,17 @@ test('concurrent updates to different tasks do not overwrite each other', async 
 
 test('task patches cannot rewrite identity or weight and terminal runs reject updates', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-state-patch-guard-'));
-  const run = await createRun({ root, prompt: 'guard', tasks: [{ id: 'T1', weight: 2 }, { id: 'T2', weight: 1 }] });
+  const run = await createRun({ root, prompt: 'guard', runId: 'RPG', tasks: [{ id: 'T1', weight: 2 }, { id: 'T2', weight: 1 }] });
   await assert.rejects(
     () => updateTaskState(run.path, 'T1', { status: 'running', id: 'T2', weight: -3 }),
     /cannot modify: id, weight/
   );
-  await updateTaskState(run.path, 'T1', { status: 'complete' });
-  await updateTaskState(run.path, 'T2', { status: 'complete' });
+  await updateTaskState(run.path, 'T1', {
+    status: 'complete', attestationPath: await writePassingAttestation(root, { taskId: 'T1', runId: 'RPG' })
+  });
+  await updateTaskState(run.path, 'T2', {
+    status: 'complete', attestationPath: await writePassingAttestation(root, { taskId: 'T2', runId: 'RPG' })
+  });
   await finishRun(run.path, 'completed');
   await assert.rejects(
     () => updateTaskState(run.path, 'T1', { status: 'running' }),

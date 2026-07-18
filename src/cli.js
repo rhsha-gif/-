@@ -62,7 +62,8 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  models    inspect (no model calls) | probe --live --yes --profile <id> (consumes allowance)\n\n` +
   `Run actions:\n` +
   `  start     --input <manifest.json>\n` +
-  `  task      [--run active|id|path] --task <id> --status <status> [--fraction <0..1>]\n` +
+  `  task      [--run active|id|path] --task <id> --status <status> [--fraction <0..1>] [--attestation <path>]\n` +
+  `            complete/accepted/done require a passing attestation bound to the task and run\n` +
   `  finish    [--run active|id|path] --status completed|partial|blocked|failed|cancelled\n` +
   `  show      [--run active|id|path]\n` +
   `  reflect   [--run active|id|path] --input <retrospective.json>\n` +
@@ -96,7 +97,7 @@ const COMMAND_FLAGS = Object.freeze({
   inventory: [...COMMON_FLAGS],
   lessons: [...COMMON_FLAGS, 'lint', 'query', 'limit'],
   progress: [...COMMON_FLAGS, 'tasks', 'run'],
-  run: [...COMMON_FLAGS, 'action', 'input', 'run', 'task', 'status', 'fraction', 'note', 'proposal', 'decision', 'comment'],
+  run: [...COMMON_FLAGS, 'action', 'input', 'run', 'task', 'status', 'fraction', 'note', 'proposal', 'decision', 'comment', 'attestation'],
   install: ['cwd', 'help', 'h', 'target', 'project', 'force-config'],
   doctor: [...COMMON_FLAGS, 'repair', 'subscription', 'surface'],
   usage: [...COMMON_FLAGS, 'action', 'pool', 'state', 'source', 'age-minutes'],
@@ -292,6 +293,7 @@ async function handleRunCommand({ flags, cwd, config }) {
       patch.fraction = fraction;
     }
     if (flags.note && flags.note !== true) patch.note = flags.note;
+    if (flags.attestation && flags.attestation !== true) patch.attestationPath = path.resolve(cwd, flags.attestation);
     return { action, run: await updateTaskState(run.path, requireFlag(flags, 'task'), patch), path: run.path };
   }
 
