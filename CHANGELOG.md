@@ -1,5 +1,86 @@
 # Changelog
 
+## 0.7.0-alpha.1 - 2026-07-18
+
+Subscription-first minimal sound core: the five structural invariants of the
+v0.7.0 design (priorities 1-5). Prompt-fallback, gate-floor, reliability,
+lifecycle, approval, and release-packaging work (priorities 6-11) is not in
+this alpha.
+
+### Subscription-local client/auth/quota plane
+
+- Added `subscription-local` as the default access profile; `explicit-api` is a
+  reserved fail-closed boundary. API keys, custom endpoints, cloud-provider
+  overrides, PAYG/credit fallback, and cloud delegation are denied by default.
+- Worker launches for claude/codex adapters are blocked when API credentials
+  would outrank subscription login (in `-p` mode a present `ANTHROPIC_API_KEY`
+  is always used, per current official docs), and automation credentials
+  (`CLAUDE_CODE_OAUTH_TOKEN`, `apiKeyHelper`) require an explicit
+  `access.allowAutomationCredential` policy.
+- Subscription workers now run with a sanitized full-replacement environment
+  (new executor `envMode: 'replace'`); API keys and unrelated secrets are no
+  longer inherited from the host process.
+- One `anthropic-subscription` pool covers interactive, native-subagent, and
+  `claude -p` transports per the current paused Agent SDK credit policy;
+  `openai-agentic` covers Codex CLI. Pool states are limited to
+  `unknown|green|yellow|red|exhausted` with recorded source and timestamp —
+  no invented percentages, no stale snapshots older than 60 minutes.
+- New commands: `aorch usage show|set`, `aorch models inspect` (no model
+  calls), `aorch models probe --live --yes` (explicitly confirmed, quota-
+  consuming), `aorch doctor --subscription`, and
+  `aorch doctor --surface codex-app` reporting
+  `strict|advisory|unsupported|unknown` from recorded evidence only.
+
+### Bootstrap-only host enforcement
+
+- Added a dependency-free PreToolUse policy runtime (vendored byte-identical
+  from `integrations/shared/hook-policy.mjs`): host product edits are denied,
+  only `.aorch/inbox/**` task envelopes are writable, host Bash is limited to
+  `aorch` plus read-only commands with no redirection/chaining/substitution or
+  environment injection, and protected control-plane files are always denied.
+- Native Agent invocations require a one-time hash-bound dispatch permit with
+  expiry and single consumption; only the managed `aorch-worker` agent is
+  installed, and the router-bypassing scout/reviewer native agents were
+  removed. The native-subagent transport itself remains deferred; `claude -p`
+  is the Anthropic execution path in this alpha.
+
+### Attestation-bound completion
+
+- `complete`/`accepted`/`done` task states now require a digest-verified
+  passing attestation bound to the task and run, validated inside the state
+  root on every recording; completed runs re-read and re-validate every
+  non-skipped task's attestation; runs cannot be created with pre-completed
+  tasks. `aorch run --action task` gains `--attestation`.
+
+### Immutable captured-content verification
+
+- Workspace capture now records the binary patch bytes and hash at capture
+  time, copies untracked/evidence files into an immutable snapshot directory,
+  and computes a canonical snapshot digest. The git-worktree verifier
+  materializes from captured content only and re-checks every materialized
+  fingerprint, so live-workspace mutation between capture and verification
+  fails closed. Attestations move to schemaVersion 2 with
+  `baseHead`/`patchSha256`/`snapshotDigest`/`files`, and the evidence digest
+  is computed over the redacted persisted content.
+
+### Hidden verification and sanitized environments
+
+- The private task envelope (hidden verifier commands, prepare commands,
+  protected scope, approvals) is split from the public worker envelope and
+  never reaches worker prompts. Worker changes touching
+  `verifierProtectedScope` fail before any check runs; write tasks require at
+  least one executable check unless explicitly `allowChangeEvidenceOnly` at
+  low risk; `verifierPrepareCommands` run in the isolated workspace before
+  checks; all checks execute with a sanitized replacement environment plus a
+  `verification.envAllowlist` that can never re-admit credentials.
+
+### Official-source record
+
+- Re-verified client/subscription facts on 2026-07-18 and recorded that Codex
+  now documents an official hooks framework while write-tool PreToolUse
+  coverage remains unproven, so `strict` claims on Codex surfaces still
+  require an authenticated fixture.
+
 ## 0.6.1 - 2026-07-17
 
 Bootstrap-only contract and prompt-boundary hardening release.

@@ -1,5 +1,13 @@
 > [!IMPORTANT]
-> **Implementation handoff:** the executable code in this archive is the v0.6.1 baseline. The target is v0.7.0 `subscription-local`, optimized for Codex in the ChatGPT desktop app and Claude Code CLI subscriptions. Read `CODEX_START_HERE.md`, `docs/SUBSCRIPTION-LOCAL.md`, and the v0.7 spec/plan before editing.
+> **현재 상태: v0.7.0-alpha.1 (핵심 불변식 단계).** v0.6.1 베이스라인 위에
+> v0.7.0 subscription-first 설계의 우선순위 1~5가 구현되어 있습니다:
+> 구독-local 인증/쿼터 평면, bootstrap-only host 강제(PreToolUse + dispatch
+> permit), attestation 결속 완료 상태, immutable snapshot 검증(attestation v2),
+> hidden verifier와 sanitized 환경. 우선순위 6~11(프롬프트 fallback, gate
+> floor, reliability, lifecycle, 승인, 릴리스 패키징)은 후속 단계입니다.
+> 상세: `docs/REVIEW-0.7.0.md` (구현/미구현/미검증 구분),
+> `docs/SMOKE-CHECKLIST.md` (로컬 인증 스모크 절차),
+> `docs/SUBSCRIPTION-LOCAL.md` (배포 프로필).
 
 # Adaptive Orchestrator
 
