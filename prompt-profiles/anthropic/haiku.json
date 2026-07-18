@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "id": "anthropic-claude-haiku-v1",
+  "provider": "anthropic",
+  "modelFamilies": [
+    "haiku"
+  ],
+  "roles": [
+    "executor",
+    "reviewer"
+  ],
+  "taskKinds": [
+    "exploration",
+    "research",
+    "log-analysis",
+    "documentation"
+  ],
+  "strategy": "xml",
+  "status": "active",
+  "verifiedAt": "2026-07-17",
+  "officialSources": [
+    {
+      "publisher": "Anthropic",
+      "document": "Claude prompting best practices",
+      "url": "https://platform.claude.com/docs/ko/build-with-claude/prompt-engineering/claude-prompting-best-practices",
+      "verifiedAt": "2026-07-17"
+    },
+    {
+      "publisher": "Anthropic",
+      "document": "Claude Code subagents",
+      "url": "https://code.claude.com/docs/en/subagents",
+      "verifiedAt": "2026-07-17"
+    }
+  ],
+  "rules": {
+    "detail": "concise",
+    "requiredSections": [
+      "role",
+      "objective",
+      "scope",
+      "verification",
+      "output"
+    ],
+    "includeMotivation": false,
+    "singleObjective": true,
+    "inspectBeforeClaiming": true,
+    "avoidOverengineering": true,
+    "structuredOutput": true
+  }
+}

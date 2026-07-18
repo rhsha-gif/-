@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { selectRoute } from '../src/router.js';
+import { selectRoute as selectRouteCore, selectRoutePlan as selectRoutePlanCore } from '../src/router.js';
 
 const baseRouting = {
   qualityTolerance: 0.005,
@@ -35,6 +35,21 @@ const task = {
   risk: 'standard',
   tags: []
 };
+
+function withProviderMetadata(catalog) {
+  if (Object.hasOwn(catalog, 'providers')) return catalog;
+  const providers = [...new Set((catalog.models ?? []).map((entry) => entry.provider))]
+    .map((id) => ({ id, enabled: true, trustTier: 'trusted', adapterMaturity: 'stable' }));
+  return { ...catalog, providers };
+}
+
+function selectRoute(args) {
+  return selectRouteCore({ ...args, catalog: withProviderMetadata(args.catalog) });
+}
+
+function selectRoutePlan(args) {
+  return selectRoutePlanCore({ ...args, catalog: withProviderMetadata(args.catalog) });
+}
 
 test('higher expected task outcome wins when no task-specific constraint excludes it', () => {
   const route = selectRoute({
@@ -389,4 +404,87 @@ test('a critical task whose catalog matches nothing reports generic ineligibilit
     catalog: { routing: baseRouting, models: [model({ id: 'only' })] },
     observations: []
   }), /No eligible route/i);
+});
+
+
+test('single-worker lane uses a separate delegated worker even when it matches the preferred host', () => {
+  const catalog = {
+    routing: baseRouting,
+    providers: [{ id: 'anthropic', trustTier: 'trusted', adapterMaturity: 'stable' }],
+    models: [model({ id: 'sonnet-host', model: 'sonnet' })]
+  };
+  const plan = selectRoutePlan({
+    task: { ...task, risk: 'low', complexity: 'low' }, catalog, observations: [],
+    host: { provider: 'anthropic', requestedModel: 'sonnet', resolvedModel: null, effectiveEffort: 'high', selectionMode: 'preferred', identityKnown: true },
+    lane: { lane: 'single-worker', budget: { maxExternalModelCalls: 1 } }, shadowMode: 'off'
+  });
+  assert.equal(plan.primary.execution, 'delegated');
+  assert.equal(plan.primary.provider, 'anthropic');
+  assert.equal(plan.primary.model, 'sonnet');
+  assert.equal(plan.lane, 'single-worker');
+});
+
+test('preferred host wins only inside the quality-equivalent final tier', () => {
+  const catalog = {
+    routing: { ...baseRouting, qualityTolerance: 0.02 },
+    providers: [
+      { id: 'anthropic', trustTier: 'trusted', adapterMaturity: 'stable' },
+      { id: 'openai', trustTier: 'trusted', adapterMaturity: 'stable' }
+    ],
+    models: [
+      model({ id: 'a-cheap', provider: 'openai', model: 'gpt-5.6-terra', quality: { implementation: 0.9 } }),
+      model({ id: 'z-host', provider: 'anthropic', model: 'sonnet', quality: { implementation: 0.9 } })
+    ]
+  };
+  const route = selectRoute({
+    task, catalog, observations: [],
+    host: { provider: 'anthropic', requestedModel: 'sonnet', resolvedModel: null, selectionMode: 'preferred' }
+  });
+  assert.equal(route.profileId, 'z-host');
+});
+
+test('pinned host policy blocks silent model switching', () => {
+  const catalog = {
+    routing: baseRouting,
+    providers: [{ id: 'openai', trustTier: 'trusted', adapterMaturity: 'stable' }],
+    models: [model({ id: 'terra', provider: 'openai', model: 'gpt-5.6-terra' })]
+  };
+  assert.throws(() => selectRoutePlan({
+    task, catalog, observations: [],
+    host: { provider: 'anthropic', requestedModel: 'sonnet', selectionMode: 'pinned', identityKnown: true },
+    lane: { lane: 'bundled', budget: {} }, shadowMode: 'off'
+  }), /pinned host.*eligible|eligible.*pinned host/i);
+});
+
+test('bootstrap-only host delegates non-direct work without preference', () => {
+  const catalog = {
+    routing: baseRouting,
+    providers: [
+      { id: 'anthropic', trustTier: 'trusted', adapterMaturity: 'stable' },
+      { id: 'openai', trustTier: 'trusted', adapterMaturity: 'stable' }
+    ],
+    models: [
+      model({ id: 'host', provider: 'anthropic', model: 'sonnet', quality: { implementation: 0.8 } }),
+      model({ id: 'worker', provider: 'openai', model: 'gpt-5.6-terra', quality: { implementation: 0.92 } })
+    ]
+  };
+  const plan = selectRoutePlan({
+    task, catalog, observations: [],
+    host: { provider: 'anthropic', requestedModel: 'sonnet', selectionMode: 'bootstrap-only', identityKnown: true },
+    lane: { lane: 'bundled', budget: {} }, shadowMode: 'off'
+  });
+  assert.equal(plan.primary.profileId, 'worker');
+  assert.equal(plan.primary.execution, 'delegated');
+});
+
+test('raw router use fails closed when a model references undeclared provider metadata', () => {
+  assert.throws(() => selectRoute({
+    task,
+    catalog: {
+      routing: baseRouting,
+      providers: [],
+      models: [model({ id: 'undeclared-provider-model', provider: 'missing-provider' })]
+    },
+    observations: []
+  }), /no eligible route/i);
 });

@@ -28,6 +28,9 @@ test('injects the root orchestration directive for every user prompt', () => {
   assert.match(context, /provider.*model.*reasoning effort.*skills.*hooks.*plugins/i);
   assert.doesNotMatch(context, /selection priority is lexicographic/i);
   assert.match(context, /adaptive-orchestrate/);
+  assert.match(context, /bootstrap-only/i);
+  assert.match(context, /single-worker/i);
+  assert.doesNotMatch(context, /current host context/i);
   assert.ok(!context.includes('Original prompt: fix it'));
 });
 

@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "id": "openai-codex-sol-v1",
+  "provider": "openai",
+  "modelFamilies": [
+    "gpt-5.6-sol"
+  ],
+  "roles": [
+    "planner",
+    "executor",
+    "reviewer"
+  ],
+  "taskKinds": [
+    "architecture",
+    "planning",
+    "implementation",
+    "debugging",
+    "testing",
+    "review",
+    "research",
+    "security",
+    "qa",
+    "risk-analysis"
+  ],
+  "strategy": "sections",
+  "status": "active",
+  "verifiedAt": "2026-07-17",
+  "officialSources": [
+    {
+      "publisher": "OpenAI",
+      "document": "OpenAI model catalog",
+      "url": "https://developers.openai.com/api/docs/models",
+      "verifiedAt": "2026-07-17"
+    },
+    {
+      "publisher": "OpenAI",
+      "document": "GPT-5.6 Sol model",
+      "url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+      "verifiedAt": "2026-07-17"
+    }
+  ],
+  "rules": {
+    "detail": "deep",
+    "requiredSections": [
+      "ROLE",
+      "OBJECTIVE",
+      "CONTEXT",
+      "INVARIANTS",
+      "FAILURE MODES",
+      "ALLOWED SCOPE",
+      "FORBIDDEN SCOPE",
+      "SUCCESS CRITERIA",
+      "VERIFICATION",
+      "FAILURE POLICY",
+      "OUTPUT"
+    ],
+    "preserveImplementationFreedom": true,
+    "inspectBeforeEditing": true,
+    "smallestCoherentChange": true,
+    "noUnrelatedCleanup": true,
+    "doNotWeakenTests": true,
+    "structuredOutput": true
+  }
+}

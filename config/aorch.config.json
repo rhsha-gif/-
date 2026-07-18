@@ -13,7 +13,9 @@
       "quality",
       "tokens",
       "latency"
-    ]
+    ],
+    "maxObservationAgeDays": 180,
+    "maxFutureSkewMinutes": 5
   },
   "providers": [
     {
@@ -79,6 +81,10 @@
             "standard"
           ]
         }
+      ],
+      "revision": "haiku",
+      "promptProfileIds": [
+        "anthropic-claude-haiku-v1"
       ]
     },
     {
@@ -134,6 +140,10 @@
             "high"
           ]
         }
+      ],
+      "revision": "sonnet",
+      "promptProfileIds": [
+        "anthropic-claude-sonnet-v1"
       ]
     },
     {
@@ -197,6 +207,10 @@
             "critical"
           ]
         }
+      ],
+      "revision": "opus",
+      "promptProfileIds": [
+        "anthropic-claude-opus-v1"
       ]
     },
     {
@@ -253,6 +267,10 @@
             "standard"
           ]
         }
+      ],
+      "revision": "gpt-5.6-luna",
+      "promptProfileIds": [
+        "openai-codex-luna-v1"
       ]
     },
     {
@@ -320,6 +338,10 @@
             "critical"
           ]
         }
+      ],
+      "revision": "gpt-5.6-terra",
+      "promptProfileIds": [
+        "openai-codex-terra-v1"
       ]
     },
     {
@@ -389,6 +411,10 @@
             "critical"
           ]
         }
+      ],
+      "revision": "gpt-5.6-sol",
+      "promptProfileIds": [
+        "openai-codex-sol-v1"
       ]
     }
   ],
@@ -479,7 +505,10 @@
       "standard": "git-worktree",
       "high": "git-worktree",
       "critical": "git-worktree"
-    }
+    },
+    "totalTimeoutMs": 1800000,
+    "maxOutputBytes": 8388608,
+    "maxChecks": 20
   },
   "controlPlane": {
     "providerTrustByRisk": {
@@ -518,6 +547,60 @@
         "trusted"
       ]
     },
-    "experimentalAdapterMaxRisk": "standard"
+    "experimentalAdapterMaxRisk": "standard",
+    "protectedFiles": [
+      ".aorch/config.json",
+      ".aorch/hooks/gate.mjs",
+      ".aorch/hooks/user-prompt-submit.mjs",
+      ".aorch/hooks/session-review.mjs",
+      ".claude/settings.json",
+      ".codex/hooks.json",
+      ".claude/skills/adaptive-orchestrate/SKILL.md",
+      ".claude/skills/post-run-reflection/SKILL.md",
+      ".agents/skills/adaptive-orchestrate/SKILL.md",
+      ".agents/skills/post-run-reflection/SKILL.md"
+    ]
+  },
+  "hostPolicy": {
+    "selectionMode": "preferred",
+    "routerEscalationThreshold": 6,
+    "executionMode": "bootstrap-only",
+    "allowHostProductEdits": false
+  },
+  "lanePolicy": {
+    "single-worker": {
+      "maxTasks": 1,
+      "maxExternalModelCalls": 1,
+      "maxLlmReviewers": 0
+    },
+    "bundled": {
+      "maxTasks": 2,
+      "maxExternalModelCalls": 1,
+      "maxLlmReviewers": 0
+    },
+    "orchestrated": {
+      "maxTasks": 24,
+      "maxExternalModelCalls": 12,
+      "maxLlmReviewers": 3
+    }
+  },
+  "shadowRouting": {
+    "mode": "record-only",
+    "execute": false
+  },
+  "promptCompilation": {
+    "maxChars": 40000,
+    "officialSourcesOnly": true,
+    "maxProfileAgeDays": 120,
+    "maxFutureSkewDays": 1
+  },
+  "execution": {
+    "workerTimeoutMs": 3600000,
+    "killGraceMs": 1000,
+    "maxOutputBytes": 10485760,
+    "maxReceiptBytes": 2097152
+  },
+  "orchestration": {
+    "maxTasksPerRun": 24
   }
 }

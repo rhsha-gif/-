@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "id": "openai-codex-luna-v1",
+  "provider": "openai",
+  "modelFamilies": [
+    "gpt-5.6-luna"
+  ],
+  "roles": [
+    "executor",
+    "reviewer"
+  ],
+  "taskKinds": [
+    "implementation",
+    "testing",
+    "log-analysis",
+    "documentation"
+  ],
+  "strategy": "sections",
+  "status": "active",
+  "verifiedAt": "2026-07-17",
+  "officialSources": [
+    {
+      "publisher": "OpenAI",
+      "document": "OpenAI model catalog",
+      "url": "https://developers.openai.com/api/docs/models",
+      "verifiedAt": "2026-07-17"
+    },
+    {
+      "publisher": "OpenAI",
+      "document": "GPT-5.6 Luna model",
+      "url": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+      "verifiedAt": "2026-07-17"
+    }
+  ],
+  "rules": {
+    "detail": "concise",
+    "requiredSections": [
+      "ROLE",
+      "TASK",
+      "SCOPE",
+      "RULES",
+      "SUCCESS CRITERIA",
+      "VERIFY",
+      "OUTPUT"
+    ],
+    "singleObjective": true,
+    "limitChoices": true,
+    "inspectBeforeEditing": true,
+    "smallestCoherentChange": true,
+    "structuredOutput": true
+  }
+}

@@ -57,3 +57,31 @@ test('marks a timed-out worker failed and terminates it promptly', async () => {
   // fired, not a machine-speed-dependent bound.
   assert.ok(result.durationMs < 3000, `worker lived for ${result.durationMs}ms`);
 });
+
+test('terminates a shell process group including long-lived descendants', { skip: process.platform === 'win32' }, async () => {
+  const result = await runCommand({
+    command: '/bin/sh',
+    args: ['-c', `${process.execPath} -e "setTimeout(() => {}, 60000)"`],
+    env: {},
+    stdin: null
+  }, { timeoutMs: 100, killGraceMs: 30 });
+
+  assert.equal(result.timedOut, true);
+  assert.equal(result.terminationReason, 'timeout');
+  assert.equal(result.status, 'failed');
+  assert.ok(result.durationMs < 3000, `process tree lived for ${result.durationMs}ms`);
+});
+
+test('bounds combined worker output and terminates an output flood', async () => {
+  const result = await runCommand({
+    command: process.execPath,
+    args: ['-e', 'for(;;){process.stdout.write("x".repeat(4096));process.stderr.write("y".repeat(4096));}'],
+    env: {},
+    stdin: null
+  }, { timeoutMs: 5000, killGraceMs: 30, maxOutputBytes: 16 * 1024 });
+
+  assert.equal(result.outputLimitExceeded, true);
+  assert.equal(result.terminationReason, 'output-limit');
+  assert.equal(result.status, 'failed');
+  assert.ok(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) <= 16 * 1024);
+});

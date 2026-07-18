@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "package": "adaptive-orchestrator-v0.7.0-subscription-first-codex-handoff",
+  "targetVersion": "0.7.0",
+  "deploymentProfile": "subscription-local",
+  "baseline": {
+    "version": "0.6.1",
+    "commit": "e6dacca8515e1854db927eb144489751452d98a8",
+    "testCommand": "npm test",
+    "testResult": {
+      "passed": 268,
+      "failed": 0
+    }
+  },
+  "userEnvironment": {
+    "primaryOpenAIHost": "codex-app",
+    "openAIWorkerTransport": "codex-cli",
+    "primaryAnthropicHost": "claude-code-cli",
+    "anthropicSameHostWorker": "claude-native-subagent",
+    "anthropicCrossHostWorker": "claude-print",
+    "billingPreference": "subscription",
+    "directApiUse": "explicit-exception-only",
+    "allowAutomaticApiFallback": false,
+    "allowAutomaticPaidCredits": false,
+    "allowAutomaticCloudDelegation": false
+  },
+  "usagePools": [
+    {
+      "id": "openai-agentic",
+      "surfaces": [
+        "codex-app",
+        "codex-cli"
+      ]
+    },
+    {
+      "id": "anthropic-subscription",
+      "surfaces": [
+        "claude-code-interactive",
+        "claude-native-subagent",
+        "claude-print"
+      ],
+      "policyVerifiedAt": "2026-07-17",
+      "note": "Anthropic's previously announced separate Agent SDK credit change is paused; claude -p still draws from subscription limits."
+    }
+  ],
+  "sourceCaveat": "No v0.6.2 source archive was provided; v0.6.2 input is a first-principles review only.",
+  "authoritativeDocuments": [
+    "AGENTS.md",
+    "CODEX_START_HERE.md",
+    "docs/SUBSCRIPTION-LOCAL.md",
+    "docs/official/CLIENT-SUBSCRIPTION-SOURCES.md",
+    "config/subscription-local.target.json",
+    "docs/superpowers/specs/2026-07-17-v0.7-minimal-sound-core-design.md",
+    "docs/superpowers/plans/2026-07-17-v0.7-minimal-sound-core.md",
+    "docs/reviews/REVIEW-2026-07-17-v0.6.2-FIRST-PRINCIPLES.md"
+  ],
+  "expectedTargetArtifacts": [
+    "adaptive-orchestrator-v0.7.0.zip",
+    "adaptive-orchestrator-0.7.0.tgz",
+    "adaptive-orchestrator-v0.7.0.sha256",
+    "adaptive-orchestrator-v0.7.0-release.json",
+    "docs/REVIEW-0.7.0.md"
+  ],
+  "surfaceEnforcement": {
+    "claude-code-cli": {
+      "target": "strict",
+      "evidenceRequired": true
+    },
+    "codex-app": {
+      "target": "verified-or-advisory",
+      "evidenceRequiredForStrict": true
+    },
+    "codex-cli-host": {
+      "target": "strict-if-supported",
+      "evidenceRequired": true
+    }
+  }
+}

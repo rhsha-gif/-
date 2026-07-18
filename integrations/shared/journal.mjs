@@ -60,12 +60,14 @@ function stableValue(value) {
 }
 
 function checksum(entry) {
-  return createHash('sha256').update(JSON.stringify(stableValue({
+  const protectedFields = {
     journalVersion: entry.journalVersion,
     sequence: entry.sequence,
     recordedAt: entry.recordedAt,
     payload: entry.payload
-  }))).digest('hex');
+  };
+  if (entry.journalVersion >= 2) protectedFields.previousChecksum = entry.previousChecksum ?? null;
+  return createHash('sha256').update(JSON.stringify(stableValue(protectedFields))).digest('hex');
 }
 
 async function acquire(lockPath, { staleMs = 30_000, timeoutMs = 2_000 } = {}) {
@@ -104,13 +106,37 @@ async function readJournalState(filePath) {
   try {
     const raw = await readFile(filePath, 'utf8');
     let count = 0;
-    for (const line of raw.split(/\r?\n/)) {
+    let previousChecksum = null;
+    let tornTail = false;
+    const lines = raw.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
       if (!line.trim()) continue;
-      try { JSON.parse(line); count += 1; } catch { /* torn tail; repaired by doctor */ }
+      let entry;
+      try { entry = JSON.parse(line); }
+      catch {
+        const hasLaterRecord = lines.slice(index + 1).some((candidate) => candidate.trim());
+        if (hasLaterRecord) throw new Error(`Lifecycle journal contains mid-journal invalid JSON at line ${index + 1}`);
+        tornTail = true;
+        continue;
+      }
+      const expectedSequence = count + 1;
+      if (![1, 2].includes(entry?.journalVersion) || !Object.hasOwn(entry, 'payload')) {
+        count += 1;
+        previousChecksum = null;
+        continue;
+      }
+      if (entry.sequence !== expectedSequence) throw new Error(`Lifecycle journal sequence mismatch at line ${index + 1}`);
+      if (entry.journalVersion >= 2 && (entry.previousChecksum ?? null) !== (previousChecksum ?? null)) {
+        throw new Error(`Lifecycle journal previous checksum mismatch at line ${index + 1}`);
+      }
+      if (entry.checksum !== checksum(entry)) throw new Error(`Lifecycle journal checksum mismatch at line ${index + 1}`);
+      count += 1;
+      previousChecksum = entry.checksum;
     }
-    return { count, endsWithNewline: raw.length === 0 || raw.endsWith('\n'), missing: false };
+    return { count, previousChecksum, endsWithNewline: !tornTail && (raw.length === 0 || raw.endsWith('\n')), missing: false };
   } catch (error) {
-    if (error.code === 'ENOENT') return { count: 0, endsWithNewline: true, missing: true };
+    if (error.code === 'ENOENT') return { count: 0, previousChecksum: null, endsWithNewline: true, missing: true };
     throw error;
   }
 }
@@ -132,9 +158,10 @@ export async function appendJournalRecord(filePath, payload) {
   try {
     const journal = await readJournalState(filePath);
     const entry = {
-      journalVersion: 1,
+      journalVersion: 2,
       sequence: journal.count + 1,
       recordedAt: new Date().toISOString(),
+      previousChecksum: journal.previousChecksum ?? null,
       // Hash what verification will parse back from disk: values with toJSON
       // (Date) would otherwise produce permanently checksum-invalid records.
       payload: payload === undefined ? null : JSON.parse(JSON.stringify(payload))

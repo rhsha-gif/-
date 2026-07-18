@@ -7,8 +7,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.js';
 import { readObservations, appendObservation } from './observations.js';
-import { selectRoute } from './router.js';
+import { selectRoutePlan } from './router.js';
 import { executeTask } from './task-runner.js';
+import { normalizeHostContext } from './host.js';
+import { resolveExecutionLane } from './lane.js';
+import { assertPromptProfileFresh, inspectPromptProfileHealth, loadPromptProfiles } from './prompt-profiles.js';
+import { assertCompiledPrompt } from './prompt-lint.js';
+import { selectCapabilities } from './capabilities.js';
+import { formatTraceSummary, readTrace, summarizeTrace } from './trace.js';
 import { discoverCapabilities, getInventory, mergeCapabilities } from './inventory.js';
 import { calculateProgress } from './progress.js';
 import {
@@ -31,10 +37,14 @@ import { inspectStateHealth, runDoctor } from './doctor.js';
 import { validateTask } from './task.js';
 import { validateReceipt } from './receipt.js';
 import { verifyTaskClaim } from './verifier.js';
+import { configuredProtectedFiles } from './control-plane.js';
 
 const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `Commands:\n` +
-  `  route     Select provider, model, and effort for a task JSON file\n` +
+  `  lane      Classify single-worker, bundled, or orchestrated execution\n` +
+  `  route     Select primary and optional record-only shadow routes\n` +
+  `  prompt    Compile or lint a provider-aware worker prompt\n` +
+  `  trace     Show host, executor, shadow, prompt, and verifier use\n` +
   `  exec      Route and execute one bounded task\n` +
   `  verify    Independently replay checks and attest a worker claim\n` +
   `  record    Append an independently reviewed model-performance observation\n` +
@@ -56,14 +66,25 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  --config <path>       Config JSON; defaults to .aorch/config.json or packaged config\n` +
   `  --cwd <path>          Project working directory\n` +
   `  --observations <path> Reviewed outcomes JSONL\n` +
-  `  --verification-timeout-ms <n> Independent verification timeout per command\n`;
+  `  --verification-timeout-ms <n> Independent verification timeout per command\n` +
+  `  --host-provider <id>          Current CLI host provider\n` +
+  `  --host-model <id>             Requested host model\n` +
+  `  --host-resolved-model <id>    Effective resolved host model\n` +
+  `  --host-effort <level>         Requested host reasoning effort\n` +
+  `  --host-effective-effort <n>   Effective host reasoning effort\n` +
+  `  --host-mode preferred|pinned|bootstrap-only\n` +
+  `  --shadow off|record-only      Record an alternative route without executing it\n`;
 
 const BOOLEAN_FLAGS = new Set(['dry-run', 'repair', 'force-config', 'lint', 'project-only', 'help', 'h']);
 
 const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
+const HOST_FLAGS = ['host-provider', 'host-model', 'host-resolved-model', 'host-effort', 'host-effective-effort', 'host-mode', 'host-source'];
 const COMMAND_FLAGS = Object.freeze({
-  route: [...COMMON_FLAGS, 'task', 'observations'],
-  exec: [...COMMON_FLAGS, 'task', 'observations', 'timeout-ms', 'verification-timeout-ms', 'dry-run'],
+  lane: [...COMMON_FLAGS, 'task', ...HOST_FLAGS],
+  route: [...COMMON_FLAGS, 'task', 'observations', 'shadow', ...HOST_FLAGS],
+  prompt: [...COMMON_FLAGS, 'action', 'task', 'input', 'observations', 'shadow', ...HOST_FLAGS],
+  trace: [...COMMON_FLAGS, 'file'],
+  exec: [...COMMON_FLAGS, 'task', 'observations', 'timeout-ms', 'verification-timeout-ms', 'dry-run', 'shadow', ...HOST_FLAGS],
   verify: [...COMMON_FLAGS, 'task', 'receipt', 'run-dir', 'isolation', 'verification-timeout-ms'],
   record: [...COMMON_FLAGS, 'input', 'observations'],
   inventory: [...COMMON_FLAGS],
@@ -151,7 +172,11 @@ function cleanRoute(route) {
     provider: route.provider,
     profileId: route.profileId,
     model: route.model,
+    modelRevision: route.modelRevision ?? route.model,
     effort: route.effort,
+    execution: route.execution ?? 'delegated',
+    execute: route.execute ?? true,
+    mode: route.mode ?? null,
     predictedQuality: route.quality,
     tokenIndex: route.tokenIndex,
     latencyIndex: route.latencyIndex,
@@ -159,6 +184,40 @@ function cleanRoute(route) {
     providerTrustTier: route.providerTrustTier,
     adapterMaturity: route.adapterMaturity,
     decision: route.decision
+  };
+}
+
+function hostFromFlags(flags, config) {
+  return normalizeHostContext({
+    provider: flags['host-provider'],
+    requestedModel: flags['host-model'],
+    resolvedModel: flags['host-resolved-model'],
+    requestedEffort: flags['host-effort'],
+    effectiveEffort: flags['host-effective-effort'],
+    selectionMode: flags['host-mode'],
+    source: flags['host-source']
+  }, process.env, config.hostPolicy ?? {});
+}
+
+function shadowModeFromFlags(flags, config) {
+  const value = flags.shadow === true ? null : (flags.shadow ?? config.shadowRouting?.mode ?? 'off');
+  if (!['off', 'record-only'].includes(value)) throw new Error('--shadow must be off or record-only');
+  return value;
+}
+
+function laneForTask(task, host, config, cwd) {
+  const protectedFiles = configuredProtectedFiles({ config, cwd, stateRoot: stateRoot(config, cwd) });
+  return resolveExecutionLane({ task, policy: config.lanePolicy, protectedFiles });
+}
+
+function cleanRoutePlan({ host, lane, routePlan }) {
+  const primary = cleanRoute(routePlan.primary);
+  return {
+    ...primary,
+    host,
+    lane,
+    primary,
+    shadow: routePlan.shadow ? cleanRoute(routePlan.shadow) : null
   };
 }
 
@@ -203,7 +262,8 @@ async function handleRunCommand({ flags, cwd, config }) {
       root,
       prompt: manifest.prompt,
       tasks: manifest.tasks ?? [],
-      runId: manifest.runId
+      runId: manifest.runId,
+      maxTasks: config.orchestration?.maxTasksPerRun ?? 24
     });
     return { action, run };
   }
@@ -282,11 +342,83 @@ async function main(argv = process.argv.slice(2)) {
     await discoverCapabilities({ cwd, includeUser: flags['project-only'] !== true })
   );
 
+  if (command === 'lane') {
+    const task = validateTask(await readJson(requireFlag(flags, 'task'), cwd));
+    const host = hostFromFlags(flags, config);
+    const lane = laneForTask(task, host, config, cwd);
+    process.stdout.write(`${JSON.stringify({ ...lane, host }, null, 2)}\n`);
+    return 0;
+  }
+
   if (command === 'route') {
     const task = validateTask(await readJson(requireFlag(flags, 'task'), cwd));
     const observations = await readObservations(resolveObservationPath(config, flags, cwd));
-    const route = selectRoute({ task, catalog: config, observations });
-    process.stdout.write(`${JSON.stringify(cleanRoute(route), null, 2)}\n`);
+    const host = hostFromFlags(flags, config);
+    const lane = laneForTask(task, host, config, cwd);
+    const routePlan = selectRoutePlan({
+      task, catalog: config, observations, host, lane, shadowMode: shadowModeFromFlags(flags, config)
+    });
+    process.stdout.write(`${JSON.stringify(cleanRoutePlan({ host, lane, routePlan }), null, 2)}\n`);
+    return 0;
+  }
+
+  if (command === 'prompt') {
+    const action = requireFlag(flags, 'action');
+    if (action === 'compile') {
+      const task = validateTask(await readJson(requireFlag(flags, 'task'), cwd), { forExecution: true });
+      const observations = await readObservations(resolveObservationPath(config, flags, cwd));
+      const host = hostFromFlags(flags, config);
+      const result = await executeTask({
+        task, config, observations, cwd, host, shadowMode: shadowModeFromFlags(flags, config), dryRun: true
+      });
+      process.stdout.write(`${JSON.stringify({
+        host: result.host, lane: result.lane, routePlan: {
+          primary: cleanRoute(result.routePlan.primary),
+          shadow: result.routePlan.shadow ? cleanRoute(result.routePlan.shadow) : null
+        },
+        directExecution: result.directExecution === true,
+        prompt: result.compiledPrompt ?? result.executionContract,
+        manifest: result.promptManifest,
+        commandSpec: result.commandSpec,
+        capabilities: result.capabilities
+      }, null, 2)}\n`);
+      return 0;
+    }
+    if (action === 'lint') {
+      const input = await readJson(requireFlag(flags, 'input'), cwd);
+      const task = validateTask(input.task, { forExecution: true });
+      const profiles = await loadPromptProfiles();
+      let profile = input.profileId ? profiles.find((entry) => entry.id === input.profileId) : null;
+      if (input.profileId && !profile) throw new Error(`Unknown prompt profile: ${input.profileId}`);
+      if (profile) {
+        profile = {
+          ...profile,
+          freshness: assertPromptProfileFresh(profile, {
+            maxAgeDays: config.promptCompilation?.maxProfileAgeDays ?? 120,
+            maxFutureSkewDays: config.promptCompilation?.maxFutureSkewDays ?? 1
+          })
+        };
+      }
+      const provider = input.provider ?? profile?.provider ?? hostFromFlags(flags, config).provider;
+      const capabilities = selectCapabilities({
+        requestedIds: input.capabilityIds ?? task.capabilityIds ?? [],
+        inventory: config.capabilities, provider, limits: config.capabilityLimits, task, policy: config.controlPlane ?? {}
+      });
+      const lane = input.lane ? { lane: input.lane } : laneForTask(task, hostFromFlags(flags, config), config, cwd);
+      const report = assertCompiledPrompt({
+        task, prompt: input.prompt, profile, capabilities, lane, maxChars: config.promptCompilation?.maxChars ?? 40_000
+      });
+      process.stdout.write(`${JSON.stringify({ status: 'pass', report }, null, 2)}\n`);
+      return 0;
+    }
+    throw new Error('prompt --action must be compile or lint');
+  }
+
+  if (command === 'trace') {
+    const filePath = path.resolve(cwd, requireFlag(flags, 'file'));
+    const events = await readTrace(filePath);
+    const summary = summarizeTrace(events);
+    process.stdout.write(`${JSON.stringify({ summary, formatted: formatTraceSummary(summary), events }, null, 2)}\n`);
     return 0;
   }
 
@@ -300,13 +432,20 @@ async function main(argv = process.argv.slice(2)) {
       config,
       observations,
       cwd,
+      host: hostFromFlags(flags, config),
+      shadowMode: shadowModeFromFlags(flags, config),
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
       verificationTimeoutMs,
       dryRun: flags['dry-run'] === true
     });
+    const common = {
+      host: result.host, lane: result.lane, route: cleanRoute(result.route),
+      shadow: result.shadow ? cleanRoute(result.shadow) : null, modelUse: result.modelUse,
+      promptManifest: result.promptManifest, tracePath: result.tracePath, runDir: result.runDir
+    };
     const output = flags['dry-run'] === true
-      ? { route: cleanRoute(result.route), capabilities: result.capabilities, commandSpec: result.commandSpec, runDir: result.runDir }
-      : { route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, attestation: result.attestation, attestationPath: result.attestationPath, runDir: result.runDir };
+      ? { ...common, directExecution: result.directExecution === true, executionContract: result.executionContract, capabilities: result.capabilities, commandSpec: result.commandSpec }
+      : { ...common, receipt: result.receipt, receiptPath: result.receiptPath, attestation: result.attestation, attestationPath: result.attestationPath };
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return 0;
   }
@@ -322,7 +461,10 @@ async function main(argv = process.argv.slice(2)) {
       : (task.verificationIsolation ?? config.verification?.isolationByRisk?.[task.risk] ?? 'same-workspace');
     const attestation = await verifyTaskClaim({
       task, receipt, cwd, runDir, isolationMode,
-      timeoutMs: numericFlag(flags, 'verification-timeout-ms') ?? config.verification?.commandTimeoutMs
+      timeoutMs: numericFlag(flags, 'verification-timeout-ms') ?? config.verification?.commandTimeoutMs,
+      totalTimeoutMs: config.verification?.totalTimeoutMs,
+      maxOutputBytes: config.verification?.maxOutputBytes,
+      maxChecks: config.verification?.maxChecks
     });
     process.stdout.write(`${JSON.stringify({ attestation, attestationPath: attestation.path, runDir }, null, 2)}\n`);
     return 0;
@@ -383,11 +525,15 @@ async function main(argv = process.argv.slice(2)) {
     const core = runDoctor(config);
     const state = await inspectStateHealth(root, { repair: flags.repair === true });
     const lessons = await lintLessons({ root });
+    const promptProfiles = inspectPromptProfileHealth(await loadPromptProfiles(), {
+      policy: config.promptCompilation ?? {}
+    });
     const result = {
       ...core,
       state,
       lessons,
-      status: core.status === 'pass' && state.status === 'pass' && lessons.status === 'pass' ? 'pass' : 'fail'
+      promptProfiles,
+      status: core.status === 'pass' && state.status === 'pass' && lessons.status === 'pass' && promptProfiles.status === 'pass' ? 'pass' : 'fail'
     };
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return result.status === 'pass' ? 0 : 1;

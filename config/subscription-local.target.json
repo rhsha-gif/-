@@ -1,0 +1,62 @@
+{
+  "_status": "target-v0.7-not-loaded-by-v0.6.1-baseline",
+  "version": 2,
+  "access": {
+    "profile": "subscription-local",
+    "localOnly": true,
+    "allowDirectApi": false,
+    "allowApiFallback": false,
+    "allowCloudDelegation": false,
+    "allowPaidCredits": false,
+    "overflowPolicy": "reroute-or-wait"
+  },
+  "surfaces": {
+    "openai": {
+      "host": "codex-app",
+      "workerTransport": "codex-cli",
+      "auth": "chatgpt-oauth",
+      "usagePool": "openai-agentic"
+    },
+    "anthropic": {
+      "host": "claude-code-cli",
+      "sameHostWorkerTransport": "claude-native-subagent",
+      "crossHostWorkerTransport": "claude-print",
+      "auth": "subscription-oauth",
+      "usagePool": "anthropic-subscription"
+    }
+  },
+  "usagePools": {
+    "openai-agentic": {
+      "state": "unknown",
+      "source": "none",
+      "updatedAt": null
+    },
+    "anthropic-subscription": {
+      "state": "unknown",
+      "source": "none",
+      "updatedAt": null
+    }
+  },
+  "modelAvailability": {
+    "defaultState": "unknown",
+    "liveProbeRequiresConfirmation": true,
+    "criticalExecutorRequiresAvailable": true
+  },
+  "surfaceEnforcement": {
+    "claude-code-cli": {
+      "required": "strict",
+      "status": "unknown",
+      "mechanism": "official-hooks-and-permit"
+    },
+    "codex-app": {
+      "required": "verified-or-advisory",
+      "status": "unknown",
+      "mechanism": "official-surface-probe"
+    },
+    "codex-cli-host": {
+      "required": "strict",
+      "status": "unknown",
+      "mechanism": "official-hooks-if-supported"
+    }
+  }
+}

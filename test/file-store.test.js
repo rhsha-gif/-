@@ -145,3 +145,38 @@ test('a very old lock is reclaimable even when its recorded pid appears alive', 
   const release = await acquireFileLock(lockPath, { timeoutMs: 2000 });
   await release();
 });
+
+test('journal v2 checksum chain detects record reordering and deletion', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-journal-chain-'));
+  const file = path.join(root, 'events.jsonl');
+  await appendJournalRecord(file, { index: 1 });
+  await appendJournalRecord(file, { index: 2 });
+  await appendJournalRecord(file, { index: 3 });
+  const lines = (await readFile(file, 'utf8')).trim().split('\n');
+  const first = JSON.parse(lines[0]);
+  const second = JSON.parse(lines[1]);
+  assert.equal(first.journalVersion, 2);
+  assert.equal(second.previousChecksum, first.checksum);
+
+  await writeFile(file, `${lines[0]}\n${lines[2]}\n${lines[1]}\n`);
+  await assert.rejects(() => readJournal(file), /sequence|previous checksum|chain/i);
+  const reorderedRepair = await repairJournal(file);
+  assert.equal(reorderedRepair.repaired, false);
+  assert.equal(reorderedRepair.requiresManualIntervention, true);
+
+  await writeFile(file, `${lines[0]}\n${lines[2]}\n`);
+  await assert.rejects(() => readJournal(file), /sequence|previous checksum|chain/i);
+});
+
+test('lifecycle journal appender refuses to extend a tampered checksum chain', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-hook-chain-'));
+  const file = path.join(root, 'lifecycle.jsonl');
+  const { appendJournalRecord: hookAppend } = await import('../integrations/shared/journal.mjs');
+  await hookAppend(file, { event: 1 });
+  await hookAppend(file, { event: 2 });
+  const lines = (await readFile(file, 'utf8')).trim().split('\n');
+  const second = JSON.parse(lines[1]);
+  second.previousChecksum = '0'.repeat(64);
+  await writeFile(file, `${lines[0]}\n${JSON.stringify(second)}\n`);
+  await assert.rejects(() => hookAppend(file, { event: 3 }), /checksum|chain|previous/i);
+});

@@ -68,9 +68,11 @@ export function activeRunPointerPath(root) {
   return path.join(root, ACTIVE_RUN_FILE);
 }
 
-export async function createRun({ root, prompt, tasks = [], runId = randomUUID(), activate = true }) {
+export async function createRun({ root, prompt, tasks = [], runId = randomUUID(), activate = true, maxTasks = 24 }) {
   if (typeof prompt !== 'string' || prompt.trim() === '') throw new TypeError('run prompt is required');
   if (!Array.isArray(tasks)) throw new TypeError('run tasks must be an array');
+  if (!Number.isInteger(maxTasks) || maxTasks < 1 || maxTasks > 100) throw new RangeError('run task budget must be an integer from 1 to 100');
+  if (tasks.length > maxTasks) throw new Error(`Run exceeds task budget: ${tasks.length} tasks; maximum is ${maxTasks}`);
   assertRunId(runId);
 
   const create = async () => {

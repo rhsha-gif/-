@@ -35,7 +35,7 @@ export function buildTaskPrompt({ task, route, capabilities = {}, receiptPath })
     `- Hooks: ${capabilityIds(capabilities.hooks).join(', ') || 'none'}\n\n` +
     `Before substantive work, invoke each listed skill through the provider's native skill mechanism. Use only listed plugins when their tools are needed. Listed hooks are pre-installed provider lifecycle policies; the wrapper exports their exact IDs through AORCH_SELECTED_HOOKS but does not hot-load arbitrary hooks. If a required capability is unavailable or inactive, return blocked rather than silently replacing it.\n\n` +
     `## Verification\n${bulletList(task.verificationCommands)}\n\n` +
-    `## Evidence contract\n` +
+    `## Output contract\n` +
     `Return a final JSON receipt matching the supplied schema; the wrapper will persist it to ${receiptPath}. Include status, files inspected, files changed, commands with exit codes, acceptance-criterion evidence, unresolved risks, and confidence.\n` +
     `Never report success without fresh verification evidence.`;
 }

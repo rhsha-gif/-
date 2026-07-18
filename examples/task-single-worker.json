@@ -1,0 +1,39 @@
+{
+  "id": "T-single-worker-guard",
+  "title": "Fix one local null guard through one bounded worker",
+  "objective": "Update the local parser guard so null input returns the documented error.",
+  "kind": "implementation",
+  "role": "executor",
+  "risk": "low",
+  "complexity": "low",
+  "write": true,
+  "weight": 1,
+  "allowedScope": [
+    "src/parser/guard.js",
+    "test/parser/guard.test.js"
+  ],
+  "forbiddenScope": [
+    "deployment/**"
+  ],
+  "acceptanceCriteria": [
+    "Null input returns the documented error.",
+    "Focused tests pass."
+  ],
+  "verificationCommands": [
+    "node --test test/parser/guard.test.js"
+  ],
+  "verifierCommands": [],
+  "signature": {
+    "ambiguity": "low",
+    "repositoryBreadth": "local",
+    "editBreadth": "few-files",
+    "contextVolume": "small",
+    "toolIntensity": "low",
+    "stateComplexity": "none",
+    "testCoverage": "good",
+    "externalIntegration": "none",
+    "language": "javascript",
+    "framework": "node"
+  },
+  "executionLane": "single-worker"
+}

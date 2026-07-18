@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Adaptive Orchestrator Prompt Manifest",
+  "type": "object",
+  "required": [
+    "version",
+    "promptId",
+    "taskId",
+    "role",
+    "taskKind",
+    "lane",
+    "execution",
+    "promptSha256",
+    "promptChars",
+    "generatedAt"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "promptId": {
+      "type": "string"
+    },
+    "taskId": {
+      "type": "string"
+    },
+    "provider": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "modelProfileId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "modelRevision": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "effort": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "role": {
+      "type": "string"
+    },
+    "taskKind": {
+      "type": "string"
+    },
+    "lane": {
+      "enum": [
+        "single-worker",
+        "bundled",
+        "orchestrated"
+      ]
+    },
+    "execution": {
+      "enum": [
+        "delegated"
+      ]
+    },
+    "promptProfileId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "promptProfileVerifiedAt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "officialSources": {
+      "type": "array"
+    },
+    "capabilityIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "promptSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "promptChars": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "generatedAt": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}
