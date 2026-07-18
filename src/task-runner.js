@@ -10,6 +10,7 @@ import { buildClaudeCommand } from './providers/claude-cli.js';
 import { buildCodexCommand } from './providers/codex-cli.js';
 import { buildGenericCommand } from './providers/generic-cli.js';
 import { runCommand } from './executor.js';
+import { inspectSubscriptionEnvironment, sanitizeSubscriptionWorkerEnv } from './subscription.js';
 import { formatProgressReport, ProgressReporter } from './progress.js';
 import { validateTask } from './task.js';
 import { validateReceipt } from './receipt.js';
@@ -165,7 +166,8 @@ export async function executeTask({
   lane = null,
   shadowMode = 'off',
   promptProfiles = null,
-  dryRun = false
+  dryRun = false,
+  env = process.env
 }) {
   task = validateTask(task, { forExecution: true });
   const protectedFiles = configuredProtectedFiles({ config, cwd, stateRoot });
@@ -263,6 +265,25 @@ export async function executeTask({
   });
   const prompt = compiled.prompt;
 
+  const subscriptionProvider = provider.adapter === 'claude'
+    ? 'anthropic'
+    : provider.adapter === 'codex' ? 'openai' : null;
+  if (subscriptionProvider) {
+    const inspection = inspectSubscriptionEnvironment({
+      env,
+      provider: subscriptionProvider,
+      policy: { allowAutomationCredential: config.access?.allowAutomationCredential === true }
+    });
+    if (inspection.status === 'blocked') {
+      const names = inspection.conflicts.map((conflict) => conflict.name).join(', ');
+      throw new Error(`subscription-local execution blocked: ${names} would take precedence over subscription login; unset before running subscription workers`);
+    }
+    if (inspection.status === 'policy-required') {
+      const names = inspection.automationCredentials.map((entry) => entry.name).join(', ');
+      throw new Error(`subscription-local execution requires an explicit policy for automation credentials (${names}); set access.allowAutomationCredential true to permit them`);
+    }
+  }
+
   let commandSpec;
   if (provider.adapter === 'claude') {
     commandSpec = buildClaudeCommand({
@@ -285,6 +306,15 @@ export async function executeTask({
     });
   } else {
     commandSpec = buildGenericCommand({ prompt, route, provider, write: task.write === true });
+  }
+  if (subscriptionProvider) {
+    // Subscription workers must not inherit API credentials or unrelated
+    // secrets from the host process; the spec becomes a full replacement env.
+    commandSpec.env = {
+      ...sanitizeSubscriptionWorkerEnv({ env, provider: subscriptionProvider }),
+      ...commandSpec.env
+    };
+    commandSpec.envMode = 'replace';
   }
   commandSpec.env = {
     ...commandSpec.env,

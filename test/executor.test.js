@@ -85,3 +85,21 @@ test('bounds combined worker output and terminates an output flood', async () =>
   assert.equal(result.status, 'failed');
   assert.ok(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) <= 16 * 1024);
 });
+
+test('envMode replace spawns the worker with only the provided environment', async () => {
+  const spec = {
+    command: process.execPath,
+    args: ['-e', 'process.stdout.write(`${process.env.FOO ?? "missing"}|${"LEAKY_SECRET" in process.env ? "leaked" : "clean"}`)'],
+    stdin: null,
+    env: { FOO: 'bar' },
+    envMode: 'replace'
+  };
+  process.env.LEAKY_SECRET = 'secret';
+  try {
+    const result = await runCommand(spec, { timeoutMs: 15000 });
+    assert.equal(result.status, 'complete');
+    assert.equal(result.stdout, 'bar|clean');
+  } finally {
+    delete process.env.LEAKY_SECRET;
+  }
+});

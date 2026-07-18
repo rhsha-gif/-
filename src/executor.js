@@ -105,7 +105,7 @@ export function runCommand(spec, {
     try {
       child = spawn(spec.command, spec.args, {
         cwd,
-        env: { ...process.env, ...(spec.env ?? {}) },
+        env: spec.envMode === 'replace' ? { ...(spec.env ?? {}) } : { ...process.env, ...(spec.env ?? {}) },
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: false,
         detached: process.platform !== 'win32',

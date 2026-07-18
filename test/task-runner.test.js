@@ -585,6 +585,7 @@ test('an explicit single-worker lane cannot bypass protected control-plane routi
   };
   const result = await executeTask({
     task: protectedTask, config, cwd, dryRun: true,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME },
     host: { provider: 'anthropic', resolvedModel: 'sonnet', effectiveEffort: 'high', selectionMode: 'preferred', identityKnown: true }
   });
   assert.equal(result.lane.lane, 'orchestrated');
@@ -617,8 +618,57 @@ test('runtime execution denies an explicit weak lane for high-risk work', async 
       acceptanceCriteria: ['Authentication state transitions remain safe.'], verificationCommands: ['node --version'], verifierCommands: [], capabilityIds: [],
       signature: { ambiguity: 'medium', repositoryBreadth: 'module', editBreadth: 'none', contextVolume: 'medium', toolIntensity: 'high', stateComplexity: 'complex', testCoverage: 'partial', externalIntegration: 'none' }
     },
-    config, cwd, dryRun: true
+    config, cwd, dryRun: true,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME }
   });
   assert.equal(result.lane.lane, 'orchestrated');
   assert.equal(result.lane.requestedLane, 'bundled');
+});
+
+function claudeAdapterConfig() {
+  return {
+    routing: { qualityTolerance: 0.01, tokenTolerance: 0.08 },
+    providers: [{ id: 'anthropic', adapter: 'claude', enabled: true, executable: 'claude' }],
+    models: [{
+      id: 'sonnet-fixture', provider: 'anthropic', model: 'sonnet', enabled: true,
+      roles: ['executor'], taskKinds: ['testing'], quality: { default: 0.9 },
+      tokenIndex: 1, latencyIndex: 1, maturity: 'stable',
+      efforts: [{ name: 'medium', qualityDelta: 0, tokenMultiplier: 1, latencyMultiplier: 1 }]
+    }],
+    capabilities: [], progress: { intervalMinutes: 30 }, paths: { stateDir: '.aorch' }
+  };
+}
+
+test('subscription workers refuse to start when API credentials would outrank subscription OAuth', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-subauth-'));
+  await assert.rejects(() => executeTask({
+    task, config: claudeAdapterConfig(), cwd, dryRun: true,
+    env: { PATH: process.env.PATH, HOME: '/home/u', ANTHROPIC_API_KEY: 'sk-secret' }
+  }), /ANTHROPIC_API_KEY/);
+});
+
+test('subscription worker command specs carry a sanitized replacement environment', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-subenv-'));
+  const result = await executeTask({
+    task, config: claudeAdapterConfig(), cwd, dryRun: true,
+    env: { PATH: process.env.PATH, HOME: '/home/u', GITHUB_TOKEN: 'secret', DATABASE_URL: 'postgres://x' }
+  });
+  assert.equal(result.commandSpec.envMode, 'replace');
+  assert.equal(result.commandSpec.env.PATH, process.env.PATH);
+  assert.equal(result.commandSpec.env.AORCH_WORKER, '1');
+  assert.ok(!('GITHUB_TOKEN' in result.commandSpec.env));
+  assert.ok(!('DATABASE_URL' in result.commandSpec.env));
+});
+
+test('automation credentials require an explicit access policy before subscription execution', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-subtoken-'));
+  const env = { PATH: process.env.PATH, HOME: '/home/u', CLAUDE_CODE_OAUTH_TOKEN: 'tok' };
+  await assert.rejects(
+    () => executeTask({ task, config: claudeAdapterConfig(), cwd, dryRun: true, env }),
+    /explicit|policy/i
+  );
+  const approvedConfig = claudeAdapterConfig();
+  approvedConfig.access = { profile: 'subscription-local', allowAutomationCredential: true };
+  const result = await executeTask({ task, config: approvedConfig, cwd, dryRun: true, env });
+  assert.equal(result.commandSpec.envMode, 'replace');
 });

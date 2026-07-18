@@ -265,11 +265,14 @@ test('prompt compile returns official-source delegated worker prompts for every 
       toolIntensity: 'medium', stateComplexity: 'none', testCoverage: 'unknown', externalIntegration: 'none'
     }
   }));
+  // The compile path runs the subscription credential inspection, so the CLI
+  // subprocess must not inherit proxy/API variables from the test host.
+  const subscriptionCleanEnv = { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR ?? os.tmpdir() };
   const delegated = spawnSync(process.execPath, [
     cli, 'prompt', '--action', 'compile', '--config', defaultConfig, '--task', delegatedPath,
     '--host-provider', 'anthropic', '--host-model', 'sonnet', '--host-resolved-model', 'sonnet',
     '--host-effort', 'high', '--host-mode', 'bootstrap-only'
-  ], { encoding: 'utf8' });
+  ], { encoding: 'utf8', env: subscriptionCleanEnv });
   assert.equal(delegated.status, 0, delegated.stderr);
   const delegatedOutput = JSON.parse(delegated.stdout);
   assert.match(delegatedOutput.prompt, /OBJECTIVE|<objective>/i);
@@ -293,7 +296,7 @@ test('prompt compile returns official-source delegated worker prompts for every 
     cli, 'prompt', '--action', 'compile', '--config', defaultConfig, '--task', singlePath,
     '--host-provider', 'anthropic', '--host-model', 'sonnet', '--host-resolved-model', 'sonnet',
     '--host-effort', 'high', '--host-mode', 'preferred'
-  ], { encoding: 'utf8' });
+  ], { encoding: 'utf8', env: subscriptionCleanEnv });
   assert.equal(single.status, 0, single.stderr);
   const singleOutput = JSON.parse(single.stdout);
   assert.equal(singleOutput.directExecution, false);

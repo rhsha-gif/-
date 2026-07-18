@@ -86,6 +86,13 @@ export function validateAccessProfile(input) {
   if (!OVERFLOW_POLICIES.includes(overflowPolicy)) {
     throw new Error(`access.overflowPolicy must be one of ${OVERFLOW_POLICIES.join(', ')}`);
   }
+  // Automation credentials (CLAUDE_CODE_OAUTH_TOKEN, apiKeyHelper) still bill
+  // the subscription, so allowing them is a policy choice, not a billing
+  // escape hatch. Default stays false: the interactive login is the norm.
+  const allowAutomationCredential = source.allowAutomationCredential ?? false;
+  if (typeof allowAutomationCredential !== 'boolean') {
+    throw new TypeError('access.allowAutomationCredential must be a boolean');
+  }
   return {
     profile,
     localOnly: true,
@@ -93,6 +100,7 @@ export function validateAccessProfile(input) {
     allowApiFallback: false,
     allowCloudDelegation: false,
     allowPaidCredits: false,
+    allowAutomationCredential,
     overflowPolicy
   };
 }
