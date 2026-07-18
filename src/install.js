@@ -70,7 +70,7 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
   const installed = [];
   const aorchDir = path.join(projectRoot, '.aorch');
   await mkdir(path.join(aorchDir, 'hooks'), { recursive: true });
-  for (const script of ['gate.mjs', 'journal.mjs', 'user-prompt-submit.mjs', 'session-review.mjs']) {
+  for (const script of ['gate.mjs', 'journal.mjs', 'user-prompt-submit.mjs', 'session-review.mjs', 'hook-policy.mjs', 'pre-tool-use.mjs']) {
     await copyFile(
       path.join(PACKAGE_ROOT, 'integrations/shared', script),
       path.join(aorchDir, 'hooks', script)

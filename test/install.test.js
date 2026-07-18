@@ -113,3 +113,26 @@ test('install refuses to run when an existing settings file is malformed, before
   );
   await assert.rejects(() => access(path.join(projectRoot, '.aorch')), /ENOENT/);
 });
+
+test('install places the PreToolUse policy runtime and only the managed worker agent', async () => {
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-install-policy-'));
+  await installProject({ projectRoot, target: 'both' });
+
+  const policy = await readFile(path.join(projectRoot, '.aorch/hooks/hook-policy.mjs'), 'utf8');
+  const packagePolicy = await readFile(new URL('../integrations/shared/hook-policy.mjs', import.meta.url), 'utf8');
+  assert.equal(policy, packagePolicy, 'installed policy must be byte-identical to the package runtime');
+  await readFile(path.join(projectRoot, '.aorch/hooks/pre-tool-use.mjs'), 'utf8');
+
+  const settings = JSON.parse(await readFile(path.join(projectRoot, '.claude/settings.json'), 'utf8'));
+  assert.ok(settings.hooks.PreToolUse?.length > 0, 'claude settings must register PreToolUse');
+  assert.match(settings.hooks.PreToolUse[0].matcher, /Edit\|Write/);
+
+  const codexHooks = JSON.parse(await readFile(path.join(projectRoot, '.codex/hooks.json'), 'utf8'));
+  assert.ok(codexHooks.hooks.PreToolUse?.length > 0, 'codex hooks must register PreToolUse');
+
+  const { readdir } = await import('node:fs/promises');
+  const claudeAgents = await readdir(path.join(projectRoot, '.claude/agents'));
+  assert.deepEqual(claudeAgents.sort(), ['aorch-worker.md'], 'only the managed permit-bound worker is installed');
+  const codexAgents = await readdir(path.join(projectRoot, '.codex/agents'));
+  assert.deepEqual(codexAgents.sort(), ['aorch-worker.toml']);
+});

@@ -23,6 +23,19 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|Task|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ROOT=\"$PWD\"; while [ ! -e \"$ROOT/.aorch/hooks/pre-tool-use.mjs\" ] && [ \"$ROOT\" != \"/\" ]; do ROOT=\"$(dirname \"$ROOT\")\"; done; if [ -e \"$ROOT/.aorch/hooks/pre-tool-use.mjs\" ]; then node \"$ROOT/.aorch/hooks/pre-tool-use.mjs\"; else echo \"aorch: no .aorch/hooks above $PWD\" >&2; fi",
+            "timeout": 10,
+            "statusMessage": "Enforcing bootstrap-only host policy"
+          }
+        ]
+      }
     ]
   }
 }
