@@ -1,5 +1,32 @@
 {
   "version": 1,
+  "access": {
+    "profile": "subscription-local",
+    "localOnly": true,
+    "allowDirectApi": false,
+    "allowApiFallback": false,
+    "allowCloudDelegation": false,
+    "allowPaidCredits": false,
+    "allowAutomationCredential": false,
+    "overflowPolicy": "reroute-or-wait"
+  },
+  "surfaces": {
+    "openai": {
+      "host": "codex-app",
+      "workerTransport": "codex-cli",
+      "auth": "chatgpt-oauth"
+    },
+    "anthropic": {
+      "host": "claude-code-cli",
+      "sameHostWorkerTransport": "claude-native-subagent",
+      "crossHostWorkerTransport": "claude-print",
+      "auth": "subscription-oauth"
+    }
+  },
+  "usagePools": {
+    "openai-agentic": "unknown",
+    "anthropic-subscription": "unknown"
+  },
   "routing": {
     "qualityTolerance": 0.01,
     "tokenTolerance": 0.08,
