@@ -1,4 +1,5 @@
 node_modules/
 .aorch/
+.release-harness/
 *.log
 .DS_Store
