@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node scripts/check-syntax.mjs && node --test"
+    "check": "node scripts/check-syntax.mjs && node --test",
+    "release:harness": "node scripts/release-harness.mjs"
   },
   "engines": {
     "node": ">=20"
