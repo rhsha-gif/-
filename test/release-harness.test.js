@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { runReleaseHarness, verifyReleaseManifest } from '../scripts/release-harness.mjs';
+import { DEFAULT_RELEASE_TIMEOUT_MS, runReleaseHarness, verifyReleaseManifest } from '../scripts/release-harness.mjs';
 
 function git(root, args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
@@ -60,6 +60,10 @@ test('keeps release-harness evidence as ignored output', async () => {
   const ignoreRules = await readFile(path.join(repositoryRoot, '.gitignore'), 'utf8');
 
   assert.match(ignoreRules, /^\.release-harness\/$/m);
+});
+
+test('defaults to a release timeout that accommodates the full check', () => {
+  assert.ok(DEFAULT_RELEASE_TIMEOUT_MS >= 30 * 60_000);
 });
 
 test('does not report a release with zero commands as passing', async (t) => {

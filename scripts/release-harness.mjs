@@ -4,6 +4,8 @@ import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+export const DEFAULT_RELEASE_TIMEOUT_MS = 30 * 60_000;
+
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
   if (value && typeof value === 'object') {
@@ -74,7 +76,7 @@ function terminateProcessTree(child) {
   return Promise.resolve();
 }
 
-function runArgv(argv, { cwd, timeoutMs = 120_000 }) {
+function runArgv(argv, { cwd, timeoutMs = DEFAULT_RELEASE_TIMEOUT_MS }) {
   if (!Array.isArray(argv) || argv.length === 0 || argv.some((value) => typeof value !== 'string')) {
     throw new TypeError('Commands must be non-empty argv arrays of strings');
   }
