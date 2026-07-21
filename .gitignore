@@ -1,5 +1,8 @@
 node_modules/
 .aorch/
 .release-harness/
+.omo/
+adaptive-orchestrator-v0.7.0-codex-handoff/
+reference/
 *.log
 .DS_Store
