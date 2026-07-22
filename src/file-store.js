@@ -170,7 +170,9 @@ export async function acquireFileLock(lockPath, {
       };
     } catch (error) {
       await handle?.close().catch(() => {});
-      if (error.code !== 'EEXIST') throw error;
+      const retryable = error.code === 'EEXIST'
+        || (process.platform === 'win32' && ['EBUSY', 'EPERM'].includes(error.code));
+      if (!retryable) throw error;
       try {
         const lock = await inspectLockFile(lockPath, staleMs, hardStaleMs);
         if (lock.stale) {
@@ -179,7 +181,9 @@ export async function acquireFileLock(lockPath, {
         }
       } catch (statError) {
         if (statError.code === 'ENOENT') continue;
-        throw statError;
+        if (!(process.platform === 'win32' && ['EBUSY', 'EPERM'].includes(statError.code))) {
+          throw statError;
+        }
       }
       if (Date.now() >= deadline) throw new Error(`Timed out acquiring file lock: ${lockPath}`);
       await sleep(retryMs);

@@ -90,7 +90,11 @@ async function terminateProcessTree(child, identityPromise) {
   };
 }
 
-function runArgv(argv, { cwd, timeoutMs = DEFAULT_RELEASE_TIMEOUT_MS }) {
+function runArgv(argv, {
+  cwd,
+  timeoutMs = DEFAULT_RELEASE_TIMEOUT_MS,
+  trackProcessTree = false
+}) {
   if (!Array.isArray(argv) || argv.length === 0 || argv.some((value) => typeof value !== 'string')) {
     throw new TypeError('Commands must be non-empty argv arrays of strings');
   }
@@ -103,7 +107,7 @@ function runArgv(argv, { cwd, timeoutMs = DEFAULT_RELEASE_TIMEOUT_MS }) {
       shell: false,
       windowsHide: true
     });
-    const identityPromise = process.platform === 'win32'
+    const identityPromise = process.platform === 'win32' && trackProcessTree
       ? captureWindowsProcessIdentity(child.pid)
       : Promise.resolve(null);
     let stdout = '';
@@ -124,7 +128,16 @@ function runArgv(argv, { cwd, timeoutMs = DEFAULT_RELEASE_TIMEOUT_MS }) {
     };
     const timeout = setTimeout(() => {
       timedOut = true;
-      void terminateProcessTree(child, identityPromise).then((evidence) => {
+      const cleanup = trackProcessTree
+        ? terminateProcessTree(child, identityPromise)
+        : Promise.resolve().then(() => {
+          try { child.kill('SIGKILL'); } catch {}
+          return {
+            method: 'root-process', attempted: true, completed: true,
+            captured: child.pid ? [{ pid: child.pid }] : [], survivors: [], errors: []
+          };
+        });
+      void cleanup.then((evidence) => {
         termination = evidence;
         child.stdout.destroy();
         child.stderr.destroy();
@@ -217,7 +230,11 @@ export async function runReleaseHarness({
   const results = [];
   let rejection = null;
   for (const entry of commands ?? []) {
-    const result = await runArgv(entry.argv, { cwd: resolvedRoot, timeoutMs: entry.timeoutMs ?? timeoutMs });
+    const result = await runArgv(entry.argv, {
+      cwd: resolvedRoot,
+      timeoutMs: entry.timeoutMs ?? timeoutMs,
+      trackProcessTree: true
+    });
     results.push({ name: entry.name, argv: entry.argv, sourceSha, toolVersions, ...result });
     if (!(await sourceIsFrozen(resolvedRoot, sourceSha))) {
       rejection = 'source-mutated-after-freeze';

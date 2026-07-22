@@ -57,7 +57,7 @@ function runHelper(args, { timeoutMs, identity = null } = {}) {
   });
 }
 
-export async function captureWindowsProcessIdentity(pid, { timeoutMs = 15_000 } = {}) {
+export async function captureWindowsProcessIdentity(pid, { timeoutMs = 30_000 } = {}) {
   if (process.platform !== 'win32' || !Number.isInteger(pid) || pid <= 0) return null;
   const result = await runHelper([
     '-RootPid', String(pid), '-Mode', 'Snapshot', '-TimeoutMs', String(Math.max(1, timeoutMs - 250))
