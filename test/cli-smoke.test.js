@@ -169,6 +169,9 @@ test('npm-style bin entrypoints execute the CLI entrypoint', async (t) => {
     const install = await runCli(process.execPath, [npmCli,
       'install',
       '--ignore-scripts',
+      '--offline',
+      '--no-audit',
+      '--no-fund',
       '--no-package-lock',
       '--no-save',
       packageSource
