@@ -9,6 +9,37 @@ $ErrorActionPreference = 'Stop'
 $startedAt = Get-Date
 $errors = [System.Collections.Generic.List[string]]::new()
 
+if ($Mode -eq 'Snapshot') {
+  try {
+    $process = Get-Process -Id $RootPid -ErrorAction SilentlyContinue
+    $identity = if ($null -eq $process) { $null } else { [pscustomobject]@{
+      pid = [int]$process.Id
+      creationDate = $process.StartTime.ToUniversalTime().Ticks.ToString()
+    }}
+    [pscustomobject]@{
+      method = 'windows-process-snapshot'
+      attempted = $false
+      completed = $null -ne $identity
+      identity = $identity
+      captured = @()
+      survivors = @()
+      errors = if ($null -eq $identity) { @('root process exited before identity capture') } else { @() }
+    } | ConvertTo-Json -Compress -Depth 4
+    return
+  } catch {
+    [pscustomobject]@{
+      method = 'windows-process-snapshot'
+      attempted = $false
+      completed = $false
+      identity = $null
+      captured = @()
+      survivors = @()
+      errors = @($_.Exception.Message)
+    } | ConvertTo-Json -Compress -Depth 4
+    exit 1
+  }
+}
+
 Add-Type -TypeDefinition @'
 using System;
 using System.Diagnostics;
@@ -121,22 +152,6 @@ function Find-ProcessRecord([int]$ProcessId) {
 
 try {
   $currentRoot = Find-ProcessRecord $RootPid
-  if ($Mode -eq 'Snapshot') {
-    [pscustomobject]@{
-      method = 'cim-snapshot'
-      attempted = $false
-      completed = $null -ne $currentRoot
-      identity = if ($null -eq $currentRoot) { $null } else { [pscustomobject]@{
-        pid = [int]$currentRoot.ProcessId
-        creationDate = [string]$currentRoot.CreationDate
-      }}
-      captured = @()
-      survivors = @()
-      errors = if ($null -eq $currentRoot) { @('root process exited before identity capture') } else { @() }
-    } | ConvertTo-Json -Compress -Depth 4
-    return
-  }
-
   if ($null -eq $currentRoot) {
     [pscustomobject]@{
       method = 'cim-snapshot'
