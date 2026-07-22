@@ -143,7 +143,7 @@ export async function acquireFileLock(lockPath, {
   staleMs = 30_000,
   hardStaleMs = HARD_STALE_LOCK_MS,
   retryMs = 20,
-  timeoutMs = 5_000
+  timeoutMs = process.platform === 'win32' ? 30_000 : 5_000
 } = {}) {
   await mkdir(path.dirname(lockPath), { recursive: true });
   const deadline = Date.now() + timeoutMs;
