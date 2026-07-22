@@ -124,7 +124,7 @@ provider adapter에는 `stable` 또는 `experimental` maturity를 지정합니�
 
 Windows test execution is serialized on Node.js versions that support `--test-concurrency`; Node.js 20.0-20.9 uses a per-file serial fallback. Timeout cleanup uses Windows PowerShell and built-in .NET/Win32 process APIs, with no additional npm runtime dependency.
 
-Release harness manifests use schema v2 and include bounded process-tree termination evidence. Schema v1 remains readable only when the caller explicitly requests `expectedSchemaVersion: 1`; release verification defaults to v2 to prevent schema downgrade. Verifier attestations also use schema v2 and bind the captured Git HEAD, patch, file fingerprints, and immutable workspace snapshot. Tracked monorepo subdirectories are supported without including unrelated siblings.
+Release harness manifests use schema v2 and include bounded process-tree termination evidence. Schema v1 remains readable only when the caller explicitly requests `expectedSchemaVersion: 1`; release verification defaults to v2 to prevent schema downgrade. For handoff across a writable evidence directory, retain the reported `evidenceDigest` separately and pass it back to `verifyReleaseManifest` as `evidenceDigest`; the manifest's unkeyed digest detects corruption, while the separately retained value supplies the trust anchor. Verifier attestations also use schema v2 and bind the captured Git HEAD, patch, file fingerprints, and immutable workspace snapshot. Tracked monorepo subdirectories are supported without including unrelated siblings.
 
 Deterministic A4 release evidence should be generated from a clean local NTFS clone outside synchronized folders, while ordinary Windows paths containing spaces and OneDrive checkouts remain supported.
 

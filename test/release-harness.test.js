@@ -156,6 +156,25 @@ test('rejects a source mutation after the source SHA is frozen', async (t) => {
   assert.match(git(root, ['status', '--porcelain=v1']), /source\.txt/);
 });
 
+test('rejects a tracked source mutation hidden by skip-worktree', async (t) => {
+  const root = await createRepository(t);
+  const result = await runReleaseHarness({
+    root,
+    runId: 'hidden-source-mutation-fixture',
+    commands: [{
+      name: 'hide-and-mutate-source',
+      argv: [process.execPath, '-e', [
+        "require('node:child_process').execFileSync('git', ['update-index', '--skip-worktree', 'source.txt'])",
+        "require('node:fs').writeFileSync('source.txt', 'hidden mutation\\n')"
+      ].join(';')]
+    }]
+  });
+
+  assert.equal(git(root, ['status', '--porcelain=v1']), '');
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.rejection, 'source-mutated-after-freeze');
+});
+
 test('rejects output path traversal and a symlinked evidence directory', async (t) => {
   const root = await createRepository(t);
   const outside = await mkdtemp(path.join(os.tmpdir(), 'a3 harness outside-'));
@@ -173,6 +192,39 @@ test('rejects output path traversal and a symlinked evidence directory', async (
     () => runReleaseHarness({ root, runId: 'symlink-fixture', commands: [] }),
     /symlink/i
   );
+});
+
+test('does not write through an evidence directory replaced by a command', async (t) => {
+  const root = await createRepository(t);
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'a3 harness swapped outside-'));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  const sourceSha = git(root, ['rev-parse', 'HEAD']);
+  const runId = 'swapped-evidence-fixture';
+  const evidenceDirectory = path.join(root, '.release-harness', sourceSha, runId);
+  const script = [
+    "const fs = require('node:fs')",
+    `fs.rmSync(${JSON.stringify(evidenceDirectory)}, { recursive: true, force: true })`,
+    `fs.symlinkSync(${JSON.stringify(outside)}, ${JSON.stringify(evidenceDirectory)}, process.platform === 'win32' ? 'junction' : 'dir')`
+  ].join(';');
+
+  let result = null;
+  let rejection = null;
+  try {
+    result = await runReleaseHarness({
+      root,
+      runId,
+      commands: [{ name: 'replace-evidence-directory', argv: [process.execPath, '-e', script] }]
+    });
+  } catch (error) {
+    rejection = error;
+  }
+
+  if (rejection) {
+    assert.match(rejection.message, /evidence directory changed/i);
+  } else {
+    assert.notEqual(result?.status, 'pass');
+  }
+  await assert.rejects(readFile(path.join(outside, 'manifest.json'), 'utf8'), { code: 'ENOENT' });
 });
 
 test('rejects a manifest bound to the wrong full source SHA', async (t) => {
@@ -262,6 +314,32 @@ test('rejects a digest-valid schema downgrade and inconsistent status', async (t
   await assert.rejects(
     verifyReleaseManifest(result.manifestPath, { sourceSha: result.sourceSha }),
     /status.*command evidence/i
+  );
+});
+
+test('rejects synchronized manifest tampering when bound to an external digest', async (t) => {
+  const root = await createRepository(t);
+  const result = await runReleaseHarness({
+    root,
+    runId: 'external-digest-fixture',
+    commands: [{ name: 'fails', argv: [process.execPath, '-e', 'process.exit(7)'] }]
+  });
+  const persisted = JSON.parse(await readFile(result.manifestPath, 'utf8'));
+  const tampered = signManifest({
+    ...persisted,
+    status: 'pass',
+    commands: persisted.commands.map((command) => ({
+      ...command, exitCode: 0, signal: null, timedOut: false
+    }))
+  });
+  await writeFile(result.manifestPath, `${JSON.stringify(tampered, null, 2)}\n`);
+
+  await assert.rejects(
+    verifyReleaseManifest(result.manifestPath, {
+      sourceSha: result.sourceSha,
+      evidenceDigest: result.evidenceDigest
+    }),
+    /external evidence digest/i
   );
 });
 

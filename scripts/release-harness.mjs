@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -170,12 +170,33 @@ async function git(root, args) {
   return result.stdout.trim();
 }
 
-async function sourceIsFrozen(root, sourceSha) {
+async function trackedSourceFingerprint(root) {
+  const files = (await git(root, ['ls-files', '-z'])).split('\0').filter(Boolean).sort();
+  const hash = createHash('sha256');
+  for (const relativePath of files) {
+    const absolutePath = path.join(root, relativePath);
+    hash.update(`${relativePath}\0`);
+    const file = await lstat(absolutePath);
+    if (file.isSymbolicLink()) {
+      hash.update(`link\0${await readlink(absolutePath)}\0`);
+    } else if (file.isFile()) {
+      const contents = await readFile(absolutePath);
+      hash.update(`file\0${contents.length}\0`);
+      hash.update(contents);
+    } else {
+      hash.update(`other\0${file.mode}\0`);
+    }
+  }
+  return hash.digest('hex');
+}
+
+async function sourceIsFrozen(root, sourceSha, sourceFingerprint) {
   const [currentSha, status] = await Promise.all([
     git(root, ['rev-parse', 'HEAD']),
     git(root, ['status', '--porcelain=v1', '--untracked-files=all'])
   ]);
-  return currentSha === sourceSha && status === '';
+  if (currentSha !== sourceSha || status !== '') return false;
+  return sourceFingerprint === undefined || await trackedSourceFingerprint(root) === sourceFingerprint;
 }
 
 async function resolveOutputDirectory(root, outputDirectory) {
@@ -209,6 +230,7 @@ export async function runReleaseHarness({
   if (!(await sourceIsFrozen(resolvedRoot, sourceSha))) {
     throw new Error('Source must be clean before the source SHA is frozen');
   }
+  const sourceFingerprint = await trackedSourceFingerprint(resolvedRoot);
   const toolVersions = {
     node: process.version,
     git: await git(resolvedRoot, ['--version'])
@@ -226,45 +248,61 @@ export async function runReleaseHarness({
     if (error.code === 'EEXIST') throw new Error(`Release evidence run directory already exists: ${runId}`);
     throw error;
   }
-
-  const results = [];
-  let rejection = null;
-  for (const entry of commands ?? []) {
-    const result = await runArgv(entry.argv, {
-      cwd: resolvedRoot,
-      timeoutMs: entry.timeoutMs ?? timeoutMs,
-      trackProcessTree: true
-    });
-    results.push({ name: entry.name, argv: entry.argv, sourceSha, toolVersions, ...result });
-    if (!(await sourceIsFrozen(resolvedRoot, sourceSha))) {
-      rejection = 'source-mutated-after-freeze';
-      break;
-    }
-    if (result.exitCode !== 0 || result.timedOut) break;
-  }
-
-  const manifest = {
-    schemaVersion: 2,
-    runId,
-    createdAt: new Date().toISOString(),
-    status: rejection
-      ? 'rejected'
-      : (results.length === 0 ? 'inconclusive' : (results.every((entry) => entry.exitCode === 0 && !entry.timedOut) ? 'pass' : 'fail')),
-    sourceSha,
-    toolVersions,
-    commands: results,
-    ...(rejection ? { rejection } : {})
-  };
-  manifest.evidenceDigest = evidenceDigest(manifest);
   const manifestPath = path.join(evidenceDirectory, 'manifest.json');
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  return { ...manifest, manifestPath };
+  const manifestHandle = await open(manifestPath, 'wx');
+
+  try {
+    const results = [];
+    let rejection = null;
+    for (const entry of commands ?? []) {
+      const result = await runArgv(entry.argv, {
+        cwd: resolvedRoot,
+        timeoutMs: entry.timeoutMs ?? timeoutMs,
+        trackProcessTree: true
+      });
+      results.push({ name: entry.name, argv: entry.argv, sourceSha, toolVersions, ...result });
+      if (!(await sourceIsFrozen(resolvedRoot, sourceSha, sourceFingerprint))) {
+        rejection = 'source-mutated-after-freeze';
+        break;
+      }
+      if (result.exitCode !== 0 || result.timedOut) break;
+    }
+
+    const manifest = {
+      schemaVersion: 2,
+      runId,
+      createdAt: new Date().toISOString(),
+      status: rejection
+        ? 'rejected'
+        : (results.length === 0 ? 'inconclusive' : (results.every((entry) => entry.exitCode === 0 && !entry.timedOut) ? 'pass' : 'fail')),
+      sourceSha,
+      toolVersions,
+      commands: results,
+      ...(rejection ? { rejection } : {})
+    };
+    manifest.evidenceDigest = evidenceDigest(manifest);
+    await manifestHandle.writeFile(`${JSON.stringify(manifest, null, 2)}\n`);
+    await manifestHandle.sync();
+    return { ...manifest, manifestPath };
+  } finally {
+    await manifestHandle.close();
+    let persistedManifestPath;
+    try {
+      persistedManifestPath = await realpath(manifestPath);
+    } catch {
+      throw new Error('Release evidence directory changed before manifest persistence');
+    }
+    if (path.relative(path.resolve(manifestPath), persistedManifestPath) !== '') {
+      throw new Error('Release evidence directory changed before manifest persistence');
+    }
+  }
 }
 
 export async function verifyReleaseManifest(manifestPath, {
   sourceSha,
   runId,
-  expectedSchemaVersion = 2
+  expectedSchemaVersion = 2,
+  evidenceDigest: expectedEvidenceDigest
 } = {}) {
   let manifest;
   try {
@@ -314,6 +352,9 @@ export async function verifyReleaseManifest(manifestPath, {
   const { evidenceDigest: declaredDigest, ...unsigned } = manifest;
   if (typeof declaredDigest !== 'string' || declaredDigest !== evidenceDigest(unsigned)) {
     throw new Error('Release manifest evidence digest is invalid');
+  }
+  if (expectedEvidenceDigest !== undefined && declaredDigest !== expectedEvidenceDigest) {
+    throw new Error('Release manifest does not match the external evidence digest');
   }
   return manifest;
 }
