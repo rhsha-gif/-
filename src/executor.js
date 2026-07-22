@@ -1,8 +1,37 @@
 import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const WINDOWS_TREE_KILLER = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)), '../scripts/windows-process-tree.ps1'
+);
 
 export function terminateWithEscalation(child, killGraceMs, schedule = setTimeout) {
   child.kill('SIGTERM');
   return schedule(() => child.kill('SIGKILL'), killGraceMs);
+}
+
+function terminateProcessTree(child, killGraceMs, schedule = setTimeout) {
+  if (process.platform !== 'win32' || !child.pid) {
+    return terminateWithEscalation(child, killGraceMs, schedule);
+  }
+  const killer = spawn('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', WINDOWS_TREE_KILLER,
+    '-RootPid', String(child.pid),
+    '-TimeoutMs', '30000'
+  ], {
+    shell: false,
+    stdio: 'ignore',
+    windowsHide: true
+  });
+  killer.once('error', () => child.kill('SIGKILL'));
+  return schedule(() => {
+    killer.kill('SIGKILL');
+    child.kill('SIGKILL');
+  }, 30_000);
 }
 
 export function runCommand(spec, {
@@ -23,6 +52,7 @@ export function runCommand(spec, {
       env: { ...process.env, ...(spec.env ?? {}) },
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
+      windowsVerbatimArguments: spec.windowsVerbatimArguments === true,
       signal
     });
     let stdout = '';
@@ -35,7 +65,7 @@ export function runCommand(spec, {
     };
     const timer = timeoutMs > 0 ? setTimeout(() => {
       timedOut = true;
-      killTimer = terminateWithEscalation(child, killGraceMs);
+      killTimer = terminateProcessTree(child, killGraceMs);
     }, timeoutMs) : null;
 
     child.stdout.on('data', (chunk) => {

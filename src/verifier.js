@@ -74,6 +74,11 @@ async function resolveGitPath(cwd, value) {
   catch { return resolved; }
 }
 
+function canonicalPath(value) {
+  const normalized = path.normalize(value);
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
 export async function inspectWorkspaceIsolation(cwd = process.cwd()) {
   try {
     const probe = await gitCommand(['rev-parse', '--is-inside-work-tree'], { cwd });
@@ -93,7 +98,7 @@ export async function inspectWorkspaceIsolation(cwd = process.cwd()) {
     const submodule = superprojectResult.exitCode === 0 && superprojectResult.stdout.trim() !== '';
     return {
       available: true,
-      linkedWorktree: !submodule && gitDir !== commonDir,
+      linkedWorktree: !submodule && canonicalPath(gitDir) !== canonicalPath(commonDir),
       submodule,
       gitDir,
       commonDir
@@ -106,9 +111,16 @@ export async function inspectWorkspaceIsolation(cwd = process.cwd()) {
 export async function captureWorkspaceState(cwd, { ignorePaths = [] } = {}) {
   const normalizedIgnore = ignorePaths.map(normalizePath).filter(Boolean);
   try {
-    const probe = await gitCommand(['rev-parse', '--is-inside-work-tree'], { cwd });
-    if (probe.exitCode !== 0 || probe.stdout.trim() !== 'true') {
+    const rootResult = await gitCommand(['rev-parse', '--show-toplevel'], { cwd });
+    if (rootResult.exitCode !== 0) {
       return { available: false, kind: 'none', reason: 'not a git worktree', entries: {} };
+    }
+    const [workspaceRoot, requestedRoot] = await Promise.all([
+      resolveGitPath(cwd, rootResult.stdout),
+      resolveGitPath(cwd, '.')
+    ]);
+    if (canonicalPath(workspaceRoot) !== canonicalPath(requestedRoot)) {
+      return { available: false, kind: 'none', reason: 'cwd is not the Git worktree root', entries: {} };
     }
     const headResult = await gitCommand(['rev-parse', 'HEAD'], { cwd });
     const head = headResult.exitCode === 0 ? headResult.stdout.trim() : null;
@@ -165,9 +177,10 @@ function buildShellCommand(command) {
   if (process.platform === 'win32') {
     return {
       command: process.env.ComSpec ?? 'cmd.exe',
-      args: ['/d', '/s', '/c', command],
+      args: ['/d', '/s', '/c', `"${command}"`],
       stdin: null,
-      env: { AORCH_WORKER: '1', AORCH_VERIFIER: '1' }
+      env: { AORCH_WORKER: '1', AORCH_VERIFIER: '1' },
+      windowsVerbatimArguments: true
     };
   }
   // Non-login shell: the child inherits the orchestrator's environment, and a

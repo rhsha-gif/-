@@ -6,6 +6,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { executeTask } from '../src/task-runner.js';
 
+const nodeExecutable = `"${process.execPath}"`;
+
 const task = {
   id: 'T-e2e',
   objective: 'Inspect the bounded task execution path',
@@ -98,7 +100,7 @@ test('dry-run builds the route and command without mutating project state', asyn
 test('rejects a worker success claim when independent verification fails', async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verification-fail-'));
   const workerPath = path.join(cwd, 'fake-worker.mjs');
-  const command = `${process.execPath} -e "process.exit(7)"`;
+  const command = `${nodeExecutable} -e "process.exit(7)"`;
   const receipt = {
     status: 'complete',
     summary: 'Claimed success.',

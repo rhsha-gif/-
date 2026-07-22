@@ -1,11 +1,28 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_RELEASE_TIMEOUT_MS, runReleaseHarness, verifyReleaseManifest } from '../scripts/release-harness.mjs';
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+  }
+  return value;
+}
+
+function signManifest(manifest) {
+  const { evidenceDigest: _discarded, ...unsigned } = manifest;
+  return {
+    ...unsigned,
+    evidenceDigest: createHash('sha256').update(JSON.stringify(stableValue(unsigned))).digest('hex')
+  };
+}
 
 function git(root, args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
@@ -41,6 +58,7 @@ test('records an argv run from a path with spaces with full source SHA and tool 
   });
 
   assert.equal(result.status, 'pass');
+  assert.equal(result.schemaVersion, 2);
   assert.equal(result.sourceSha, expectedSha);
   assert.match(result.sourceSha, /^[0-9a-f]{40,64}$/);
   assert.match(result.toolVersions.node, /^v\d+/);
@@ -194,6 +212,18 @@ test('rejects an evidence run ID collision and traversal', async (t) => {
   );
 });
 
+test('continues to verify a valid schema v1 manifest', async (t) => {
+  const root = await createRepository(t);
+  const result = await runReleaseHarness({ root, runId: 'schema-v1-fixture', commands: [] });
+  const legacy = signManifest({ ...result, schemaVersion: 1 });
+  delete legacy.manifestPath;
+  await writeFile(result.manifestPath, `${JSON.stringify(signManifest(legacy), null, 2)}\n`);
+
+  const verified = await verifyReleaseManifest(result.manifestPath, { sourceSha: result.sourceSha });
+
+  assert.equal(verified.schemaVersion, 1);
+});
+
 test('cleans up child-process descendants when a command times out', async (t) => {
   const root = await createRepository(t);
   let descendantPid = null;
@@ -209,25 +239,49 @@ test('cleans up child-process descendants when a command times out', async (t) =
       } catch {}
     }
   });
-  const parentCode = [
-    "const { spawn } = require('node:child_process');",
+  const fixturePath = path.join(root, 'nested-timeout.test.js');
+  const launcherPath = path.join(root, 'nested-timeout-launcher.mjs');
+  await writeFile(fixturePath, [
+    "import { spawn } from 'node:child_process';",
     "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { stdio: 'ignore' });",
-    'console.log(child.pid);',
-    'setInterval(() => {}, 1_000);'
-  ].join(' ');
+    "console.log('DESCENDANT_PID=' + child.pid);",
+    "setInterval(() => {}, 1_000);",
+    "await new Promise(() => {});"
+  ].join('\n'));
+  await writeFile(launcherPath, [
+    "import { spawn } from 'node:child_process';",
+    "const env = { ...process.env };",
+    "delete env.NODE_TEST_CONTEXT;",
+    "const child = spawn(process.execPath, ['--test', process.argv[2]], { env, stdio: 'inherit' });",
+    "child.once('exit', (code) => process.exitCode = code ?? 1);"
+  ].join('\n'));
+  git(root, ['add', 'nested-timeout.test.js', 'nested-timeout-launcher.mjs']);
+  git(root, ['commit', '--quiet', '--message', 'add nested timeout fixture']);
 
   const result = await runReleaseHarness({
     root,
     runId: 'descendant-cleanup-fixture',
     timeoutMs: 3_000,
-    commands: [{ name: 'spawns-descendant', argv: [process.execPath, '-e', parentCode] }]
+    commands: [{ name: 'spawns-descendant', argv: [process.execPath, launcherPath, fixturePath] }]
   });
-  descendantPid = Number(result.commands[0].stdout.trim());
+  descendantPid = Number(result.commands[0].stdout.match(/DESCENDANT_PID=(\d+)/)?.[1]);
   await new Promise((resolve) => setTimeout(resolve, 250));
 
-  assert.equal(result.status, 'fail');
+  assert.equal(result.status, 'fail', JSON.stringify(result.commands[0], null, 2));
   assert.equal(result.commands[0].timedOut, true);
+  assert.equal(result.commands[0].termination.attempted, true);
+  assert.equal(result.commands[0].termination.completed, true);
+  assert.deepEqual(result.commands[0].termination.survivors, []);
+  assert.ok(result.commands[0].termination.captured.some((entry) => entry.pid === descendantPid));
   assert.ok(Number.isInteger(descendantPid) && descendantPid > 0);
   assert.throws(() => process.kill(descendantPid, 0), { code: 'ESRCH' });
   descendantReaped = true;
+
+  const persisted = JSON.parse(await readFile(result.manifestPath, 'utf8'));
+  delete persisted.commands[0].termination;
+  await writeFile(result.manifestPath, `${JSON.stringify(signManifest(persisted), null, 2)}\n`);
+  await assert.rejects(
+    verifyReleaseManifest(result.manifestPath, { sourceSha: result.sourceSha }),
+    /termination evidence/i
+  );
 });

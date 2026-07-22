@@ -7,8 +7,8 @@
     "aorch": "./src/cli.js"
   },
   "scripts": {
-    "test": "node --test",
-    "check": "node scripts/check-syntax.mjs && node --test",
+    "test": "node scripts/run-tests.mjs",
+    "check": "node scripts/check-syntax.mjs && node scripts/run-tests.mjs",
     "release:harness": "node scripts/release-harness.mjs"
   },
   "engines": {

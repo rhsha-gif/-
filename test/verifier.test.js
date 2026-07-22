@@ -1,16 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { captureWorkspaceState, inspectWorkspaceIsolation, verifyTaskClaim } from '../src/verifier.js';
+
+const nodeExecutable = `"${process.execPath}"`;
 
 const baseTask = {
   id: 'T-verify', objective: 'Verify a worker claim', kind: 'testing', role: 'executor',
   risk: 'low', complexity: 'low', write: false, allowedScope: [], forbiddenScope: [],
   acceptanceCriteria: ['claim is independently verified'],
   verificationCommands: ['node --version'],
-  verifierCommands: [`${process.execPath} -e "process.exit(0)"`]
+  verifierCommands: [`${nodeExecutable} -e "process.exit(0)"`]
 };
 
 const receipt = {
@@ -42,7 +44,7 @@ test('verifier issues a separate hashed attestation for visible and hidden check
 test('verifier persists a failed attestation before rejecting a false claim', async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-fail-'));
   const runDir = path.join(cwd, '.aorch/task-runs/R/T-verify');
-  const failingTask = { ...baseTask, verifierCommands: [`${process.execPath} -e "process.exit(7)"`] };
+  const failingTask = { ...baseTask, verifierCommands: [`${nodeExecutable} -e "process.exit(7)"`] };
   await assert.rejects(() => verifyTaskClaim({
     task: failingTask, receipt, cwd, runDir, timeoutMs: 5000, isolationMode: 'same-workspace'
   }), /verifier check failed/i);
@@ -87,6 +89,26 @@ test('write claims fail closed when Git change evidence is unavailable', async (
   }), /write-task claims require before\/after workspace snapshots/i);
 });
 
+test('workspace snapshots do not escape cwd into an ancestor repository', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-ancestor-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+  await writeFile(path.join(root, 'tracked.txt'), 'baseline\n');
+  spawnSync('git', ['add', '.'], { cwd: root });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd: root });
+  const nested = path.join(root, 'nested-task-root');
+  await mkdir(nested);
+
+  const state = await captureWorkspaceState(nested);
+
+  assert.equal(state.available, false);
+  assert.match(state.reason, /worktree root/i);
+});
+
 test('bounded workers cannot change Git HEAD to hide committed changes', async (t) => {
   const { spawnSync } = await import('node:child_process');
   if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
@@ -127,7 +149,7 @@ test('git-worktree verifier replays the post-worker tree in an isolated workspac
   const before = await captureWorkspaceState(cwd);
   await writeFile(path.join(cwd, 'tracked.txt'), 'after\n');
   const after = await captureWorkspaceState(cwd);
-  const command = `${process.execPath} -e "const fs=require('fs');if(fs.readFileSync('tracked.txt','utf8')!=='after\\n')process.exit(7)"`;
+  const command = `${nodeExecutable} -e "const fs=require('fs');const text=fs.readFileSync('tracked.txt','utf8').replace(/\\r\\n/g,'\\n');if(text!=='after\\n')process.exit(7)"`;
   const task = {
     ...baseTask,
     write: true,
@@ -216,7 +238,7 @@ test('a verification command exceeding the timeout fails the attestation', async
   const runDir = path.join(cwd, '.aorch/task-runs/R/T-timeout');
   const hangingTask = {
     ...baseTask,
-    verificationCommands: [`${process.execPath} -e "setTimeout(() => {}, 60000)"`],
+    verificationCommands: [`${nodeExecutable} -e "setTimeout(() => {}, 60000)"`],
     verifierCommands: []
   };
   await assert.rejects(() => verifyTaskClaim({
@@ -252,13 +274,13 @@ test('untracked files are replayed into the isolated worktree for verification',
       ...baseTask,
       write: true,
       allowedScope: ['generated/**'],
-      verificationCommands: [`${process.execPath} -e "require('node:fs').accessSync('generated/deep/artifact.txt')"`],
+      verificationCommands: [`${nodeExecutable} -e "require('node:fs').accessSync('generated/deep/artifact.txt')"`],
       verifierCommands: []
     },
     receipt: {
       ...receipt,
       filesChanged: ['generated/deep/artifact.txt'],
-      commands: [{ command: `${process.execPath} -e "require('node:fs').accessSync('generated/deep/artifact.txt')"`, exitCode: 0, outcome: 'exists' }]
+      commands: [{ command: `${nodeExecutable} -e "require('node:fs').accessSync('generated/deep/artifact.txt')"`, exitCode: 0, outcome: 'exists' }]
     },
     cwd, runDir: path.join(cwd, '.aorch/run'),
     beforeState: before, afterState: after,

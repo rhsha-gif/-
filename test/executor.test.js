@@ -52,7 +52,8 @@ test('marks a timed-out worker failed and terminates it promptly', async () => {
   }, { timeoutMs: 100, killGraceMs: 30 });
   assert.equal(result.timedOut, true);
   assert.equal(result.status, 'failed');
-  assert.ok(['SIGTERM', 'SIGKILL'].includes(result.signal));
+  if (process.platform === 'win32') assert.equal(result.signal, null);
+  else assert.ok(['SIGTERM', 'SIGKILL'].includes(result.signal));
   // Wide margin below the 5s natural exit: this asserts the kill escalation
   // fired, not a machine-speed-dependent bound.
   assert.ok(result.durationMs < 3000, `worker lived for ${result.durationMs}ms`);
