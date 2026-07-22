@@ -49,7 +49,6 @@ public static class AorchProcessInfo {
   public sealed class ProcessPair {
     public int ProcessId;
     public int ParentProcessId;
-    public string CreationDate;
   }
 
   [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
@@ -118,16 +117,9 @@ public static class AorchProcessInfo {
       entry.dwSize = (uint)Marshal.SizeOf(entry);
       if (Process32First(snapshot, ref entry)) {
         do {
-          string creationDate = null;
-          try {
-            using (var process = Process.GetProcessById((int)entry.th32ProcessID)) {
-              creationDate = process.StartTime.ToUniversalTime().Ticks.ToString();
-            }
-          } catch {}
           result.Add(new ProcessPair {
             ProcessId = (int)entry.th32ProcessID,
-            ParentProcessId = (int)entry.th32ParentProcessID,
-            CreationDate = creationDate
+            ParentProcessId = (int)entry.th32ParentProcessID
           });
           entry.dwSize = (uint)Marshal.SizeOf(entry);
         } while (Process32Next(snapshot, ref entry));
@@ -185,6 +177,7 @@ try {
     exit 1
   }
 
+  $snapshotStartedAtTicks = [DateTime]::UtcNow.Ticks
   $all = @([AorchProcessInfo]::Snapshot())
   $byParent = @{}
   foreach ($process in $all) {
@@ -206,9 +199,11 @@ try {
   while ($queue.Count -gt 0) {
     $item = $queue.Dequeue()
     $process = Find-ProcessRecord $item.ProcessId
-    if ($null -ne $process `
-        -and [int]$process.ParentProcessId -eq [int]$item.ParentProcessId `
-        -and [string]$process.CreationDate -eq [string]$item.CreationDate) {
+    $identityMatches = $null -ne $process `
+      -and [int]$process.ParentProcessId -eq [int]$item.ParentProcessId `
+      -and (($item.Depth -eq 0 -and [string]$process.CreationDate -eq [string]$item.CreationDate) `
+        -or ($item.Depth -gt 0 -and [long]$process.CreationDate -le $snapshotStartedAtTicks))
+    if ($identityMatches) {
       $captured.Add([pscustomobject]@{
         pid = [int]$process.ProcessId
         parentPid = [int]$process.ParentProcessId
@@ -217,14 +212,12 @@ try {
       })
       if ($byParent.ContainsKey([int]$item.ProcessId)) {
         foreach ($child in $byParent[[int]$item.ProcessId]) {
-          if (-not [string]::IsNullOrWhiteSpace([string]$child.CreationDate)) {
-            $queue.Enqueue([pscustomobject]@{
-              ProcessId = [int]$child.ProcessId
-              ParentProcessId = [int]$child.ParentProcessId
-              CreationDate = [string]$child.CreationDate
-              Depth = $item.Depth + 1
-            })
-          }
+          $queue.Enqueue([pscustomobject]@{
+            ProcessId = [int]$child.ProcessId
+            ParentProcessId = [int]$child.ParentProcessId
+            CreationDate = $null
+            Depth = $item.Depth + 1
+          })
         }
       }
     }
