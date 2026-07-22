@@ -113,15 +113,23 @@ test('preserves completed evidence when a later argv command times out', async (
   const result = await runReleaseHarness({
     root,
     runId: 'partial-timeout-fixture',
-    timeoutMs: 1_000,
+    timeoutMs: 10_000,
     commands: [
       { name: 'completed', argv: [process.execPath, '-e', 'process.exit(0)'] },
-      { name: 'timeout', argv: [process.execPath, '-e', 'setTimeout(() => process.exit(0), 4_000)'] }
+      {
+        name: 'timeout',
+        argv: [process.execPath, '-e', 'setTimeout(() => process.exit(0), 4_000)'],
+        timeoutMs: 1_000
+      }
     ]
   });
 
   assert.equal(result.status, 'fail');
-  assert.equal(result.commands.length, 2);
+  assert.equal(result.commands.length, 2, JSON.stringify({
+    status: result.status,
+    rejection: result.rejection,
+    commands: result.commands
+  }));
   assert.equal(result.commands[0].exitCode, 0);
   assert.equal(result.commands[0].timedOut, false);
   assert.equal(result.commands[1].timedOut, true);
