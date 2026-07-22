@@ -47,3 +47,34 @@ test('Windows cleanup removes descendants bound to the captured root identity', 
   assert.ok(result.captured.some((entry) => entry.pid === descendantPid));
   assert.throws(() => process.kill(descendantPid, 0), { code: 'ESRCH' });
 });
+
+test('Windows cleanup removes a captured root descendant after the root exits', async (t) => {
+  if (process.platform !== 'win32') return t.skip('Windows-specific process identity contract');
+  const root = spawn(process.execPath, ['-e', [
+    "const {spawn}=require('node:child_process')",
+    "const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',detached:true});child.unref()",
+    "console.log(child.pid)",
+    "process.stdin.resume();process.stdin.once('data',()=>process.exit(0))"
+  ].join(';')], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+  let output = '';
+  root.stdout.setEncoding('utf8');
+  root.stdout.on('data', (chunk) => { output += chunk; });
+  const rootClosed = new Promise((resolve, reject) => {
+    root.once('error', reject);
+    root.once('close', resolve);
+  });
+  const identity = await captureWindowsProcessIdentity(root.pid);
+  assert.ok(identity?.creationDate);
+  root.stdin.end('exit');
+  await rootClosed;
+  const descendantPid = Number(output.trim());
+  assert.ok(Number.isInteger(descendantPid) && descendantPid > 0);
+  t.after(() => { try { process.kill(descendantPid, 'SIGKILL'); } catch {} });
+
+  const result = await terminateWindowsProcessTree(identity);
+
+  assert.equal(result.completed, true, JSON.stringify(result));
+  assert.deepEqual(result.survivors, []);
+  assert.ok(result.captured.some((entry) => entry.pid === descendantPid));
+  assert.throws(() => process.kill(descendantPid, 0), { code: 'ESRCH' });
+});

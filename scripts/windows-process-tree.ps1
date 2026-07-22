@@ -152,19 +152,8 @@ function Find-ProcessRecord([int]$ProcessId) {
 
 try {
   $currentRoot = Find-ProcessRecord $RootPid
-  if ($null -eq $currentRoot) {
-    [pscustomobject]@{
-      method = 'cim-snapshot'
-      attempted = $true
-      completed = $true
-      identity = $null
-      captured = @()
-      survivors = @()
-      errors = @()
-    } | ConvertTo-Json -Compress -Depth 4
-    return
-  }
-  if ([string]::IsNullOrWhiteSpace($ExpectedCreationDate) -or [string]$currentRoot.CreationDate -ne $ExpectedCreationDate) {
+  $rootCreationTicks = 0L
+  if ($null -ne $currentRoot -and [string]$currentRoot.CreationDate -ne $ExpectedCreationDate) {
     [pscustomobject]@{
       method = 'cim-snapshot'
       attempted = $false
@@ -175,6 +164,10 @@ try {
       errors = @('root process identity mismatch; refusing to terminate')
     } | ConvertTo-Json -Compress -Depth 4
     exit 1
+  }
+  if ([string]::IsNullOrWhiteSpace($ExpectedCreationDate) `
+      -or -not [long]::TryParse($ExpectedCreationDate, [ref]$rootCreationTicks)) {
+    throw 'captured root process identity is invalid'
   }
 
   $snapshotStartedAtTicks = [DateTime]::UtcNow.Ticks
@@ -190,19 +183,37 @@ try {
 
   $captured = [System.Collections.Generic.List[object]]::new()
   $queue = [System.Collections.Generic.Queue[object]]::new()
-  $queue.Enqueue([pscustomobject]@{
-    ProcessId = $RootPid
-    ParentProcessId = $currentRoot.ParentProcessId
-    CreationDate = $ExpectedCreationDate
-    Depth = 0
-  })
+  if ($null -ne $currentRoot) {
+    $queue.Enqueue([pscustomobject]@{
+      ProcessId = $RootPid
+      ParentProcessId = $currentRoot.ParentProcessId
+      CreationDate = $ExpectedCreationDate
+      ParentCreationDate = $null
+      Depth = 0
+    })
+  } elseif ($byParent.ContainsKey($RootPid)) {
+    # Windows retains a child's recorded parent PID after the parent exits. Seed
+    # traversal from those direct children, while the captured root creation
+    # time prevents an older process generation from being mistaken for ours.
+    foreach ($child in $byParent[$RootPid]) {
+      $queue.Enqueue([pscustomobject]@{
+        ProcessId = [int]$child.ProcessId
+        ParentProcessId = [int]$child.ParentProcessId
+        CreationDate = $null
+        ParentCreationDate = $ExpectedCreationDate
+        Depth = 1
+      })
+    }
+  }
   while ($queue.Count -gt 0) {
     $item = $queue.Dequeue()
     $process = Find-ProcessRecord $item.ProcessId
     $identityMatches = $null -ne $process `
       -and [int]$process.ParentProcessId -eq [int]$item.ParentProcessId `
       -and (($item.Depth -eq 0 -and [string]$process.CreationDate -eq [string]$item.CreationDate) `
-        -or ($item.Depth -gt 0 -and [long]$process.CreationDate -le $snapshotStartedAtTicks))
+        -or ($item.Depth -gt 0 `
+          -and [long]$process.CreationDate -ge [long]$item.ParentCreationDate `
+          -and [long]$process.CreationDate -le $snapshotStartedAtTicks))
     if ($identityMatches) {
       $captured.Add([pscustomobject]@{
         pid = [int]$process.ProcessId
@@ -216,6 +227,7 @@ try {
             ProcessId = [int]$child.ProcessId
             ParentProcessId = [int]$child.ParentProcessId
             CreationDate = $null
+            ParentCreationDate = [string]$process.CreationDate
             Depth = $item.Depth + 1
           })
         }
@@ -230,9 +242,14 @@ try {
       break
     }
     try {
-      $current = Find-ProcessRecord $entry.pid
-      if ($null -ne $current -and [string]$current.CreationDate -eq $entry.creationDate) {
-        Stop-Process -Id $entry.pid -Force -ErrorAction Stop
+      $liveProcess = Get-Process -Id $entry.pid -ErrorAction SilentlyContinue
+      $current = if ($null -eq $liveProcess) { $null } else { Get-ProcessRecord $liveProcess }
+      if ($null -ne $current `
+          -and [string]$current.CreationDate -eq $entry.creationDate `
+          -and [int]$current.ParentProcessId -eq [int]$entry.parentPid) {
+        # Kill through the same Process instance whose handle supplied the
+        # verified identity, avoiding a second PID-only process lookup.
+        $liveProcess.Kill()
       }
     } catch {
       $errors.Add("pid $($entry.pid): $($_.Exception.Message)")

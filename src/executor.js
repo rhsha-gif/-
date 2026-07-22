@@ -75,7 +75,6 @@ async function terminateTrackedChild(entry, child) {
   const deadline = Date.now() + 30_000;
   const identity = await entry.identityPromise;
   if (!identity) {
-    killRoot(child);
     return {
       method: 'cim-snapshot', attempted: false, completed: false, identity: null,
       captured: [], survivors: [], errors: ['root process identity was not captured']
@@ -84,7 +83,6 @@ async function terminateTrackedChild(entry, child) {
   const termination = await terminateWindowsProcessTree(identity, {
     timeoutMs: Math.max(1, deadline - Date.now())
   });
-  if (!termination.completed) killRoot(child);
   return termination;
 }
 

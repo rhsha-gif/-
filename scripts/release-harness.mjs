@@ -61,7 +61,6 @@ async function terminateProcessTree(child, identityPromise) {
     const deadline = Date.now() + TERMINATION_TIMEOUT_MS;
     const identity = await identityPromise;
     if (!identity) {
-      child.kill('SIGKILL');
       return {
         method: 'cim-snapshot', attempted: false, completed: false, identity: null,
         captured: [], survivors: [], errors: ['root process identity was not captured']
@@ -70,7 +69,6 @@ async function terminateProcessTree(child, identityPromise) {
     const result = await terminateWindowsProcessTree(identity, {
       timeoutMs: Math.max(1, deadline - Date.now())
     });
-    if (!result.completed) child.kill('SIGKILL');
     return result;
   }
   const captured = [{ pid: child.pid }];
@@ -332,12 +330,15 @@ export async function verifyReleaseManifest(manifestPath, {
     if (JSON.stringify(stableValue(command.toolVersions)) !== JSON.stringify(stableValue(manifest.toolVersions))) {
       throw new Error('Release command evidence is not bound to the manifest tool versions');
     }
-    if (manifest.schemaVersion === 2 && command.timedOut) {
+    if (manifest.schemaVersion === 2 && (command.timedOut || command.termination !== undefined)) {
       const termination = command.termination;
-      if (!termination || termination.attempted !== true || typeof termination.completed !== 'boolean'
+      if (!termination || typeof termination.attempted !== 'boolean' || typeof termination.completed !== 'boolean'
         || !Array.isArray(termination.captured) || !Array.isArray(termination.survivors)
         || !Array.isArray(termination.errors)) {
-        throw new Error('Release command timeout requires termination evidence');
+        throw new Error('Release command cleanup requires termination evidence');
+      }
+      if (command.timedOut && termination.attempted !== true) {
+        throw new Error('Release command timeout requires attempted termination evidence');
       }
     }
   }

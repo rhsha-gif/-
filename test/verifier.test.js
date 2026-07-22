@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { captureWorkspaceState, inspectWorkspaceIsolation, verifyTaskClaim } from '../src/verifier.js';
@@ -54,6 +54,27 @@ test('verifier persists a failed attestation before rejecting a false claim', as
   assert.equal(failed.checks.at(-1).exitCode, 7);
 });
 
+test('verifier refuses a preplanted evidence-directory reparse point', async (t) => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-reparse-'));
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-outside-'));
+  t.after(() => Promise.all([
+    rm(cwd, { recursive: true, force: true }),
+    rm(outside, { recursive: true, force: true })
+  ]));
+  const runDir = path.join(cwd, '.aorch/task-runs/R/T-verify');
+  await mkdir(runDir, { recursive: true });
+  await symlink(outside, path.join(runDir, 'verifier'), process.platform === 'win32' ? 'junction' : 'dir');
+
+  await assert.rejects(() => verifyTaskClaim({
+    task: baseTask,
+    receipt,
+    cwd,
+    runDir,
+    timeoutMs: 5000,
+    isolationMode: 'same-workspace'
+  }), /symlink|reparse point/i);
+});
+
 test('verifier detects actual git changes omitted from a worker claim', async (t) => {
   const { spawnSync } = await import('node:child_process');
   if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
@@ -73,6 +94,34 @@ test('verifier detects actual git changes omitted from a worker claim', async (t
     receipt: { ...receipt, filesChanged: [] }, cwd, runDir: path.join(cwd, '.aorch/run'),
     beforeState: before, afterState: after, isolationMode: 'same-workspace'
   }), /worker claim does not match actual changes/i);
+});
+
+test('verifier detects tracked mutations hidden with skip-worktree', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-skip-worktree-'));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  spawnSync('git', ['init', '-q'], { cwd });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd });
+  await writeFile(path.join(cwd, 'tracked.txt'), 'before\n');
+  spawnSync('git', ['add', '.'], { cwd });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd });
+  const before = await captureWorkspaceState(cwd);
+  spawnSync('git', ['update-index', '--skip-worktree', 'tracked.txt'], { cwd });
+  await writeFile(path.join(cwd, 'tracked.txt'), 'hidden mutation\n');
+  assert.equal(spawnSync('git', ['status', '--porcelain=v1'], { cwd, encoding: 'utf8' }).stdout, '');
+  const after = await captureWorkspaceState(cwd);
+
+  await assert.rejects(() => verifyTaskClaim({
+    task: baseTask,
+    receipt,
+    cwd,
+    runDir: path.join(cwd, '.aorch/run'),
+    beforeState: before,
+    afterState: after,
+    isolationMode: 'same-workspace'
+  }), /worker claim does not match actual changes|read-only worker changed files/i);
 });
 
 test('write claims fail closed when Git change evidence is unavailable', async () => {

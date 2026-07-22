@@ -59,6 +59,13 @@ function parsePorcelain(raw) {
   return entries;
 }
 
+function parseTrackedFiles(raw) {
+  return raw.split('\0').filter(Boolean).map((record) => ({
+    indexFlag: record.slice(0, 1),
+    path: normalizePath(record.slice(2))
+  }));
+}
+
 async function gitCommand(args, { cwd, stdin = null, timeoutMs = 10000 } = {}) {
   return runCommand({
     command: 'git',
@@ -135,18 +142,37 @@ export async function captureWorkspaceState(cwd, { ignorePaths = [], snapshotDir
     }
     const headResult = await gitCommand(['rev-parse', 'HEAD'], { cwd });
     const head = headResult.exitCode === 0 ? headResult.stdout.trim() : null;
-    const statusResult = await gitCommand(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.'], { cwd });
-    if (statusResult.exitCode !== 0) {
-      return { available: false, kind: 'git', reason: statusResult.stderr.trim() || 'git status failed', entries: {} };
+    const [statusResult, trackedResult] = await Promise.all([
+      gitCommand(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.'], { cwd }),
+      gitCommand(['ls-files', '-v', '-z', '--', '.'], { cwd })
+    ]);
+    if (statusResult.exitCode !== 0 || trackedResult.exitCode !== 0) {
+      return {
+        available: false,
+        kind: 'git',
+        reason: statusResult.stderr.trim() || trackedResult.stderr.trim() || 'git workspace inventory failed',
+        entries: {}
+      };
     }
     const entries = {};
-    for (const entry of parsePorcelain(statusResult.stdout)) {
+    const scopedPathFor = (filePath) => {
       const prefix = relativeCwd ? `${relativeCwd}/` : '';
-      const scopedPath = prefix && entry.path.startsWith(prefix)
-        ? entry.path.slice(prefix.length)
-        : entry.path;
+      return prefix && filePath.startsWith(prefix) ? filePath.slice(prefix.length) : filePath;
+    };
+    for (const tracked of parseTrackedFiles(trackedResult.stdout)) {
+      const scopedPath = scopedPathFor(tracked.path);
       if (!scopedPath || ignored(scopedPath, normalizedIgnore)) continue;
       entries[scopedPath] = {
+        status: '  ',
+        indexFlag: tracked.indexFlag,
+        fingerprint: await fileFingerprint(path.join(cwd, scopedPath))
+      };
+    }
+    for (const entry of parsePorcelain(statusResult.stdout)) {
+      const scopedPath = scopedPathFor(entry.path);
+      if (!scopedPath || ignored(scopedPath, normalizedIgnore)) continue;
+      entries[scopedPath] = {
+        ...entries[scopedPath],
         status: entry.status,
         fingerprint: await fileFingerprint(path.join(cwd, scopedPath))
       };
@@ -370,8 +396,17 @@ export async function verifyTaskClaim({
 }) {
   if (!runDir) throw new TypeError('runDir is required');
   const verificationId = randomUUID();
-  const evidenceDir = path.join(runDir, 'verifier', verificationId);
-  await mkdir(evidenceDir, { recursive: true });
+  const verifierRoot = path.join(runDir, 'verifier');
+  await mkdir(verifierRoot, { recursive: true });
+  const [resolvedVerifierRoot, canonicalVerifierRoot] = await Promise.all([
+    realpath(verifierRoot),
+    Promise.resolve(path.resolve(verifierRoot))
+  ]);
+  if (canonicalPath(resolvedVerifierRoot) !== canonicalPath(canonicalVerifierRoot)) {
+    throw new Error('Verifier evidence directory contains a symlink or reparse point');
+  }
+  const evidenceDir = path.join(verifierRoot, verificationId);
+  await mkdir(evidenceDir);
 
   let changeEvidence;
   try {
