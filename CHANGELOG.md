@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Serialize Windows test execution, with a Node.js 20.0-20.9 per-file fallback, and bound every CLI smoke invocation to 30 seconds.
-- Validate npm CLI entrypoints through a packed tarball and the Windows `.cmd` shim without mutating the frozen source checkout.
+- Validate npm CLI entrypoints through an isolated package snapshot and the Windows `.cmd` shim without mutating the frozen source checkout.
 - Bind process-tree cleanup to PID creation identity, record bounded termination evidence in release manifest schema v2, and keep schema v1 verification behind an explicit opt-in.
 - Preserve verifier inputs in immutable workspace snapshots, normalize linked-worktree paths on Windows, and support tracked monorepo subdirectories.
 

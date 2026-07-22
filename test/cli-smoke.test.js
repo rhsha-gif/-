@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -162,19 +162,16 @@ test('npm-style bin entrypoints execute the CLI entrypoint', async (t) => {
   if (process.platform === 'win32') {
     const dir = await makeTempDir(t, 'aorch-bin-project-');
     await writeFile(path.join(dir, 'package.json'), JSON.stringify({ private: true }));
-    const packed = await runCli(process.execPath, [npmCli,
-      'pack', root,
-      '--json',
-      '--pack-destination', dir
-    ], { cwd: dir });
-    assertCliSucceeded(packed);
-    const tarball = path.join(dir, JSON.parse(packed.stdout)[0].filename);
+    const packageSource = path.join(dir, 'package-source');
+    await mkdir(packageSource);
+    await cp(path.join(root, 'package.json'), path.join(packageSource, 'package.json'));
+    await cp(path.join(root, 'src'), path.join(packageSource, 'src'), { recursive: true });
     const install = await runCli(process.execPath, [npmCli,
       'install',
       '--ignore-scripts',
       '--no-package-lock',
       '--no-save',
-      tarball
+      packageSource
     ], { cwd: dir });
     assertCliSucceeded(install);
 
