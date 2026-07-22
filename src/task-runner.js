@@ -114,6 +114,7 @@ export async function executeTask({
     AORCH_SELECTED_HOOKS: capabilities.hooks.map((entry) => entry.id).join(','),
     AORCH_TASK_ID: task.id
   };
+  commandSpec.trackProcessTree = true;
 
   if (dryRun) return { task, route, capabilities, provider, commandSpec, receiptPath, runDir };
 
@@ -149,7 +150,10 @@ export async function executeTask({
       { task }
     );
     await atomicWriteJson(receiptPath, receipt);
-    const afterState = await captureWorkspaceState(cwd, { ignorePaths: ignoredPaths });
+    const afterState = await captureWorkspaceState(cwd, {
+      ignorePaths: ignoredPaths,
+      snapshotDir: path.join(runDir, 'workspace-snapshot')
+    });
 
     let attestation = null;
     if (receipt.status !== 'complete' && beforeState.available && afterState.available) {

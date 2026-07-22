@@ -32,7 +32,7 @@ test('verifier issues a separate hashed attestation for visible and hidden check
   });
 
   assert.equal(attestation.status, 'pass');
-  assert.equal(attestation.schemaVersion, 1);
+  assert.equal(attestation.schemaVersion, 2);
   assert.equal(attestation.checks.length, 2);
   assert.equal(attestation.checks.filter((entry) => entry.visibility === 'hidden').length, 1);
   assert.match(attestation.claimHash, /^[a-f0-9]{64}$/);
@@ -107,6 +107,29 @@ test('workspace snapshots do not escape cwd into an ancestor repository', async 
 
   assert.equal(state.available, false);
   assert.match(state.reason, /worktree root/i);
+});
+
+test('workspace snapshots preserve a tracked nested project without scanning unrelated siblings', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-monorepo-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+  const nested = path.join(root, 'packages', 'app');
+  await mkdir(nested, { recursive: true });
+  await writeFile(path.join(nested, 'tracked.txt'), 'before\n');
+  await writeFile(path.join(root, 'sibling.txt'), 'untouched\n');
+  spawnSync('git', ['add', '.'], { cwd: root });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd: root });
+  await writeFile(path.join(nested, 'tracked.txt'), 'after\n');
+
+  const state = await captureWorkspaceState(nested);
+
+  assert.equal(state.available, true);
+  assert.equal(state.relativeCwd, 'packages/app');
+  assert.deepEqual(Object.keys(state.entries), ['tracked.txt']);
 });
 
 test('bounded workers cannot change Git HEAD to hide committed changes', async (t) => {
@@ -288,4 +311,65 @@ test('untracked files are replayed into the isolated worktree for verification',
   });
   assert.equal(attestation.status, 'pass');
   assert.equal(attestation.isolation, 'git-worktree');
+});
+
+test('verifier replays captured content when the live workspace mutates after capture', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-toctou-'));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  spawnSync('git', ['init', '-q'], { cwd });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd });
+  await writeFile(path.join(cwd, 'tracked.txt'), 'before\n');
+  spawnSync('git', ['add', '.'], { cwd });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd });
+  const before = await captureWorkspaceState(cwd);
+  await writeFile(path.join(cwd, 'tracked.txt'), 'after\n');
+  const after = await captureWorkspaceState(cwd, { snapshotDir: path.join(cwd, '.aorch/snapshot') });
+  await writeFile(path.join(cwd, 'tracked.txt'), 'tampered\n');
+  const command = `${nodeExecutable} -e "const fs=require('fs');const text=fs.readFileSync('tracked.txt','utf8').replace(/\\r\\n/g,'\\n');if(text!=='after\\n')process.exit(7)"`;
+  const task = {
+    ...baseTask, write: true, allowedScope: ['tracked.txt'],
+    acceptanceCriteria: ['captured content is verified'], verificationCommands: [command], verifierCommands: []
+  };
+  const claim = {
+    ...receipt, filesChanged: ['tracked.txt'], commands: [{ command, exitCode: 0, outcome: 'claimed pass' }],
+    criteria: [{ criterion: 'captured content is verified', status: 'pass', evidence: 'worker claim' }]
+  };
+
+  const attestation = await verifyTaskClaim({
+    task, receipt: claim, cwd, runDir: path.join(cwd, '.aorch/run'),
+    beforeState: before, afterState: after, isolationMode: 'git-worktree'
+  });
+
+  assert.equal(attestation.status, 'pass');
+  assert.equal(attestation.schemaVersion, 2);
+  assert.equal(attestation.patchSha256, after.patchSha256);
+  assert.equal(attestation.snapshotDigest, after.snapshotDigest);
+});
+
+test('a tampered untracked snapshot fails closed on fingerprint mismatch', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-snapshot-'));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  spawnSync('git', ['init', '-q'], { cwd });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd });
+  await writeFile(path.join(cwd, 'tracked.txt'), 'baseline\n');
+  spawnSync('git', ['add', '.'], { cwd });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd });
+  const before = await captureWorkspaceState(cwd);
+  await writeFile(path.join(cwd, 'generated.txt'), 'captured\n');
+  const snapshotDir = path.join(cwd, '.aorch/snapshot');
+  const after = await captureWorkspaceState(cwd, { snapshotDir });
+  await writeFile(path.join(snapshotDir, 'generated.txt'), 'tampered\n');
+  const task = { ...baseTask, write: true, allowedScope: ['generated.txt'] };
+  const claim = { ...receipt, filesChanged: ['generated.txt'] };
+
+  await assert.rejects(() => verifyTaskClaim({
+    task, receipt: claim, cwd, runDir: path.join(cwd, '.aorch/run'),
+    beforeState: before, afterState: after, isolationMode: 'git-worktree'
+  }), /fingerprint mismatch/i);
 });

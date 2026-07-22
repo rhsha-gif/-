@@ -120,6 +120,14 @@ provider adapter에는 `stable` 또는 `experimental` maturity를 지정합니�
 
 각 provider CLI는 사전에 로그인되어 있어야 합니다. 이 패키지는 API key를 저장하거나 전달하지 않습니다. `aorch doctor`는 실행 파일과 로컬 catalog/state를 검사하지만, 계정별 모델 entitlement를 원격 호출 없이 검증했다고 주장하지 않습니다.
 
+### Windows verification notes
+
+Windows test execution is serialized on Node.js versions that support `--test-concurrency`; Node.js 20.0-20.9 uses a per-file serial fallback. Timeout cleanup uses Windows PowerShell and built-in .NET/Win32 process APIs, with no additional npm runtime dependency.
+
+Release harness manifests use schema v2 and include bounded process-tree termination evidence. Schema v1 remains readable only when the caller explicitly requests `expectedSchemaVersion: 1`; release verification defaults to v2 to prevent schema downgrade. Verifier attestations also use schema v2 and bind the captured Git HEAD, patch, file fingerprints, and immutable workspace snapshot. Tracked monorepo subdirectories are supported without including unrelated siblings.
+
+Deterministic A4 release evidence should be generated from a clean local NTFS clone outside synchronized folders, while ordinary Windows paths containing spaces and OneDrive checkouts remain supported.
+
 ## 설치
 
 소스에서 설치:

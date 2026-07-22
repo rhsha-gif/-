@@ -192,7 +192,10 @@ test('does not reuse a stale generic evidence filename', async (t) => {
   assert.notEqual(result.manifestPath, genericPath);
   assert.equal(await readFile(genericPath, 'utf8'), stale);
   await assert.rejects(
-    () => verifyReleaseManifest(genericPath, { sourceSha: result.sourceSha }),
+    () => verifyReleaseManifest(genericPath, {
+      sourceSha: result.sourceSha,
+      expectedSchemaVersion: 1
+    }),
     /source SHA/i
   );
 });
@@ -219,9 +222,39 @@ test('continues to verify a valid schema v1 manifest', async (t) => {
   delete legacy.manifestPath;
   await writeFile(result.manifestPath, `${JSON.stringify(signManifest(legacy), null, 2)}\n`);
 
-  const verified = await verifyReleaseManifest(result.manifestPath, { sourceSha: result.sourceSha });
+  await assert.rejects(
+    verifyReleaseManifest(result.manifestPath, { sourceSha: result.sourceSha }),
+    /schema version.*expected/i
+  );
+  const verified = await verifyReleaseManifest(result.manifestPath, {
+    sourceSha: result.sourceSha,
+    expectedSchemaVersion: 1
+  });
 
   assert.equal(verified.schemaVersion, 1);
+});
+
+test('rejects a digest-valid schema downgrade and inconsistent status', async (t) => {
+  const root = await createRepository(t);
+  const result = await runReleaseHarness({
+    root,
+    runId: 'schema-downgrade-fixture',
+    commands: [{ name: 'fails', argv: [process.execPath, '-e', 'process.exit(7)'] }]
+  });
+  const persisted = JSON.parse(await readFile(result.manifestPath, 'utf8'));
+  const downgraded = signManifest({ ...persisted, schemaVersion: 1 });
+  await writeFile(result.manifestPath, `${JSON.stringify(downgraded, null, 2)}\n`);
+  await assert.rejects(
+    verifyReleaseManifest(result.manifestPath, { sourceSha: result.sourceSha }),
+    /schema version.*expected/i
+  );
+
+  const inconsistent = signManifest({ ...persisted, status: 'pass' });
+  await writeFile(result.manifestPath, `${JSON.stringify(inconsistent, null, 2)}\n`);
+  await assert.rejects(
+    verifyReleaseManifest(result.manifestPath, { sourceSha: result.sourceSha }),
+    /status.*command evidence/i
+  );
 });
 
 test('cleans up child-process descendants when a command times out', async (t) => {

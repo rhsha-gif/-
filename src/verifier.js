@@ -74,6 +74,13 @@ async function resolveGitPath(cwd, value) {
   catch { return resolved; }
 }
 
+function sortedFileList(entries) {
+  return Object.keys(entries).sort().map((filePath) => ({
+    path: filePath,
+    fingerprint: entries[filePath].fingerprint
+  }));
+}
+
 function canonicalPath(value) {
   const normalized = path.normalize(value);
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
@@ -108,7 +115,7 @@ export async function inspectWorkspaceIsolation(cwd = process.cwd()) {
   }
 }
 
-export async function captureWorkspaceState(cwd, { ignorePaths = [] } = {}) {
+export async function captureWorkspaceState(cwd, { ignorePaths = [], snapshotDir } = {}) {
   const normalizedIgnore = ignorePaths.map(normalizePath).filter(Boolean);
   try {
     const rootResult = await gitCommand(['rev-parse', '--show-toplevel'], { cwd });
@@ -119,24 +126,61 @@ export async function captureWorkspaceState(cwd, { ignorePaths = [] } = {}) {
       resolveGitPath(cwd, rootResult.stdout),
       resolveGitPath(cwd, '.')
     ]);
-    if (canonicalPath(workspaceRoot) !== canonicalPath(requestedRoot)) {
-      return { available: false, kind: 'none', reason: 'cwd is not the Git worktree root', entries: {} };
+    const relativeCwd = normalizePath(path.relative(workspaceRoot, requestedRoot));
+    if (relativeCwd) {
+      const tracked = await gitCommand(['ls-files', '--', '.'], { cwd });
+      if (tracked.exitCode !== 0 || tracked.stdout.trim() === '') {
+        return { available: false, kind: 'none', reason: 'cwd is not a tracked Git worktree root', entries: {} };
+      }
     }
     const headResult = await gitCommand(['rev-parse', 'HEAD'], { cwd });
     const head = headResult.exitCode === 0 ? headResult.stdout.trim() : null;
-    const statusResult = await gitCommand(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd });
+    const statusResult = await gitCommand(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.'], { cwd });
     if (statusResult.exitCode !== 0) {
       return { available: false, kind: 'git', reason: statusResult.stderr.trim() || 'git status failed', entries: {} };
     }
     const entries = {};
     for (const entry of parsePorcelain(statusResult.stdout)) {
-      if (!entry.path || ignored(entry.path, normalizedIgnore)) continue;
-      entries[entry.path] = {
+      const prefix = relativeCwd ? `${relativeCwd}/` : '';
+      const scopedPath = prefix && entry.path.startsWith(prefix)
+        ? entry.path.slice(prefix.length)
+        : entry.path;
+      if (!scopedPath || ignored(scopedPath, normalizedIgnore)) continue;
+      entries[scopedPath] = {
         status: entry.status,
-        fingerprint: await fileFingerprint(path.join(cwd, entry.path))
+        fingerprint: await fileFingerprint(path.join(cwd, scopedPath))
       };
     }
-    return { available: true, kind: 'git', head, entries };
+    const patchResult = head
+      ? await gitCommand(['diff', '--binary', 'HEAD', '--', '.'], { cwd, timeoutMs: 30000 })
+      : { exitCode: 0, stdout: '', stderr: '' };
+    if (patchResult.exitCode !== 0) {
+      return { available: false, kind: 'git', reason: patchResult.stderr.trim() || 'git diff failed', entries: {} };
+    }
+    let snapshotRoot = null;
+    if (snapshotDir) {
+      snapshotRoot = path.resolve(snapshotDir);
+      await mkdir(snapshotRoot, { recursive: true });
+      for (const [filePath, entry] of Object.entries(entries)) {
+        if (entry.status.endsWith(':source') || entry.fingerprint === 'missing') continue;
+        const target = path.join(snapshotRoot, filePath);
+        await mkdir(path.dirname(target), { recursive: true });
+        await cp(path.join(cwd, filePath), target, { recursive: true, force: true });
+      }
+    }
+    const state = {
+      available: true,
+      kind: 'git',
+      head,
+      entries,
+      workspaceRoot,
+      relativeCwd,
+      patch: patchResult.stdout,
+      patchSha256: sha256(patchResult.stdout),
+      snapshotRoot
+    };
+    state.snapshotDigest = sha256({ head, patchSha256: state.patchSha256, files: sortedFileList(entries) });
+    return state;
   } catch (error) {
     return { available: false, kind: 'none', reason: error.message, entries: {} };
   }
@@ -180,7 +224,8 @@ function buildShellCommand(command) {
       args: ['/d', '/s', '/c', `"${command}"`],
       stdin: null,
       env: { AORCH_WORKER: '1', AORCH_VERIFIER: '1' },
-      windowsVerbatimArguments: true
+      windowsVerbatimArguments: true,
+      trackProcessTree: true
     };
   }
   // Non-login shell: the child inherits the orchestrator's environment, and a
@@ -190,17 +235,28 @@ function buildShellCommand(command) {
     command: '/bin/sh',
     args: ['-c', command],
     stdin: null,
-    env: { AORCH_WORKER: '1', AORCH_VERIFIER: '1' }
+    env: { AORCH_WORKER: '1', AORCH_VERIFIER: '1' },
+    trackProcessTree: true
   };
 }
 
-async function copyUntrackedFiles({ sourceRoot, targetRoot, state }) {
+async function copyCapturedFiles({ sourceRoot, targetRoot, state }) {
   for (const [filePath, entry] of Object.entries(state?.entries ?? {})) {
-    if (entry.status !== '??') continue;
+    if (entry.status.endsWith(':source') || entry.fingerprint === 'missing') continue;
     const source = path.join(sourceRoot, filePath);
     const target = path.join(targetRoot, filePath);
     await mkdir(path.dirname(target), { recursive: true });
     await cp(source, target, { recursive: true, force: true });
+  }
+}
+
+async function assertMaterializedFingerprints({ targetRoot, state }) {
+  for (const [filePath, entry] of Object.entries(state?.entries ?? {})) {
+    if (entry.status.endsWith(':source')) continue;
+    const actual = await fileFingerprint(path.join(targetRoot, filePath));
+    if (actual !== entry.fingerprint) {
+      throw new Error(`Materialized content fingerprint mismatch for ${filePath}: workspace changed between capture and verification`);
+    }
   }
 }
 
@@ -211,36 +267,46 @@ async function prepareVerificationWorkspace({ cwd, state, isolationMode }) {
   if (!state?.available || state.kind !== 'git' || !state.head) {
     throw new Error('git-worktree verification requires a Git repository with a committed HEAD');
   }
+  if (typeof state.patch !== 'string' || state.patchSha256 !== sha256(state.patch)) {
+    throw new Error('git-worktree verification requires intact captured patch bytes');
+  }
 
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-verifier-'));
   const worktree = path.join(tempRoot, 'worktree');
   let added = false;
   try {
-    const add = await gitCommand(['worktree', 'add', '--detach', worktree, state.head], { cwd, timeoutMs: 30000 });
+    const repositoryRoot = state.workspaceRoot ?? cwd;
+    const add = await gitCommand(['worktree', 'add', '--detach', worktree, state.head], {
+      cwd: repositoryRoot, timeoutMs: 30000
+    });
     if (add.exitCode !== 0) throw new Error(add.stderr.trim() || 'git worktree add failed');
     added = true;
 
-    const patch = await gitCommand(['diff', '--binary', 'HEAD'], { cwd, timeoutMs: 30000 });
-    if (patch.exitCode !== 0) throw new Error(patch.stderr.trim() || 'git diff failed');
-    if (patch.stdout.length > 0) {
+    if (state.patch.length > 0) {
       const apply = await gitCommand(['apply', '--binary', '--whitespace=nowarn', '-'], {
         cwd: worktree,
-        stdin: patch.stdout,
+        stdin: state.patch,
         timeoutMs: 30000
       });
       if (apply.exitCode !== 0) throw new Error(apply.stderr.trim() || 'git apply failed');
     }
-    await copyUntrackedFiles({ sourceRoot: cwd, targetRoot: worktree, state });
+    const verificationCwd = path.join(worktree, state.relativeCwd ?? '');
+    await copyCapturedFiles({ sourceRoot: state.snapshotRoot ?? cwd, targetRoot: verificationCwd, state });
+    await assertMaterializedFingerprints({ targetRoot: verificationCwd, state });
     return {
-      cwd: worktree,
+      cwd: verificationCwd,
       isolation: 'git-worktree',
       cleanup: async () => {
-        await gitCommand(['worktree', 'remove', '--force', worktree], { cwd, timeoutMs: 30000 }).catch(() => {});
+        await gitCommand(['worktree', 'remove', '--force', worktree], {
+          cwd: repositoryRoot, timeoutMs: 30000
+        }).catch(() => {});
         await rm(tempRoot, { recursive: true, force: true });
       }
     };
   } catch (error) {
-    if (added) await gitCommand(['worktree', 'remove', '--force', worktree], { cwd, timeoutMs: 30000 }).catch(() => {});
+    if (added) await gitCommand(['worktree', 'remove', '--force', worktree], {
+      cwd: state.workspaceRoot ?? cwd, timeoutMs: 30000
+    }).catch(() => {});
     await rm(tempRoot, { recursive: true, force: true });
     throw error;
   }
@@ -282,6 +348,15 @@ export class VerificationError extends Error {
   }
 }
 
+function snapshotBinding(state) {
+  return {
+    baseHead: state?.head ?? null,
+    patchSha256: state?.patchSha256 ?? null,
+    snapshotDigest: state?.snapshotDigest ?? null,
+    files: state?.entries ? sortedFileList(state.entries) : []
+  };
+}
+
 export async function verifyTaskClaim({
   task,
   receipt,
@@ -303,7 +378,7 @@ export async function verifyTaskClaim({
     changeEvidence = validateClaimedChanges({ task, receipt, beforeState, afterState });
   } catch (error) {
     const attestation = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       verificationId,
       taskId: task.id,
       runId: task.runId ?? null,
@@ -312,6 +387,7 @@ export async function verifyTaskClaim({
       isolation: 'not-started',
       taskHash: sha256(task),
       claimHash: sha256(receipt),
+      ...snapshotBinding(afterState),
       changeEvidence: { status: 'mismatch', actualChangedFiles: changedPathsBetween(beforeState, afterState) ?? [] },
       checks: [],
       failure: error.message
@@ -323,13 +399,15 @@ export async function verifyTaskClaim({
     throw new VerificationError(`Independent verification failed: ${error.message}`, { ...attestation, path: attestationPath });
   }
 
-  const workspaceState = afterState ?? await captureWorkspaceState(cwd);
+  const workspaceState = afterState ?? await captureWorkspaceState(cwd, {
+    snapshotDir: path.join(evidenceDir, 'snapshot')
+  });
   let workspace;
   try {
     workspace = await prepareVerificationWorkspace({ cwd, state: workspaceState, isolationMode });
   } catch (error) {
     const attestation = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       verificationId,
       taskId: task.id,
       runId: task.runId ?? null,
@@ -338,6 +416,7 @@ export async function verifyTaskClaim({
       isolation: isolationMode,
       taskHash: sha256(task),
       claimHash: sha256(receipt),
+      ...snapshotBinding(workspaceState),
       changeEvidence,
       checks: [],
       failure: error.message
@@ -361,7 +440,7 @@ export async function verifyTaskClaim({
     // unverified claim into apparent evidence.
     const inconclusive = !failed && results.length === 0 && changeEvidence.status !== 'verified';
     const attestation = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       verificationId,
       taskId: task.id,
       runId: task.runId ?? null,
@@ -370,6 +449,7 @@ export async function verifyTaskClaim({
       isolation: workspace.isolation,
       taskHash: sha256(task),
       claimHash: sha256(receipt),
+      ...snapshotBinding(workspaceState),
       changeEvidence,
       checks: results,
       ...(failed ? { failure: `Verifier check failed: ${failed.command}` } : {})

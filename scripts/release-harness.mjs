@@ -2,11 +2,14 @@ import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
+import {
+  captureWindowsProcessIdentity,
+  terminateWindowsProcessTree
+} from '../src/windows-process-tree.js';
 
 export const DEFAULT_RELEASE_TIMEOUT_MS = 30 * 60_000;
 const TERMINATION_TIMEOUT_MS = 30_000;
-const WINDOWS_PROCESS_TREE_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'windows-process-tree.ps1');
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -43,7 +46,7 @@ function defaultReleaseCommands() {
   }];
 }
 
-function terminateProcessTree(child) {
+async function terminateProcessTree(child, identityPromise) {
   if (!child.pid) {
     return Promise.resolve({
       method: process.platform === 'win32' ? 'cim-snapshot' : 'process-group',
@@ -55,60 +58,20 @@ function terminateProcessTree(child) {
     });
   }
   if (process.platform === 'win32') {
-    return new Promise((resolve) => {
-      let stdout = '';
-      let stderr = '';
-      let finished = false;
-      const finish = (value) => {
-        if (finished) return;
-        finished = true;
-        clearTimeout(deadline);
-        resolve(value);
+    const deadline = Date.now() + TERMINATION_TIMEOUT_MS;
+    const identity = await identityPromise;
+    if (!identity) {
+      child.kill('SIGKILL');
+      return {
+        method: 'cim-snapshot', attempted: false, completed: false, identity: null,
+        captured: [], survivors: [], errors: ['root process identity was not captured']
       };
-      const killer = spawn('powershell.exe', [
-        '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-        '-File', WINDOWS_PROCESS_TREE_SCRIPT,
-        '-RootPid', String(child.pid),
-        '-TimeoutMs', String(TERMINATION_TIMEOUT_MS - 1_000)
-      ], {
-        shell: false,
-        windowsHide: true
-      });
-      killer.stdout.setEncoding('utf8');
-      killer.stderr.setEncoding('utf8');
-      killer.stdout.on('data', (chunk) => { stdout += chunk; });
-      killer.stderr.on('data', (chunk) => { stderr += chunk; });
-      const deadline = setTimeout(() => {
-        killer.kill('SIGKILL');
-        child.kill('SIGKILL');
-        finish({
-          method: 'cim-snapshot', attempted: true, completed: false,
-          captured: [], survivors: [], errors: ['cleanup deadline exceeded']
-        });
-      }, TERMINATION_TIMEOUT_MS);
-      killer.once('error', (error) => {
-        child.kill('SIGKILL');
-        finish({
-          method: 'cim-snapshot', attempted: true, completed: false,
-          captured: [], survivors: [], errors: [error.message]
-        });
-      });
-      killer.once('close', (exitCode) => {
-        try {
-          const value = JSON.parse(stdout.trim());
-          if (stderr.trim()) value.errors = [...(value.errors ?? []), stderr.trim()];
-          if (exitCode !== 0) value.completed = false;
-          finish(value);
-        } catch (error) {
-          child.kill('SIGKILL');
-          finish({
-            method: 'cim-snapshot', attempted: true, completed: false,
-            captured: [], survivors: [],
-            errors: [`cleanup evidence was invalid: ${error.message}`, ...(stderr.trim() ? [stderr.trim()] : [])]
-          });
-        }
-      });
+    }
+    const result = await terminateWindowsProcessTree(identity, {
+      timeoutMs: Math.max(1, deadline - Date.now())
     });
+    if (!result.completed) child.kill('SIGKILL');
+    return result;
   }
   const captured = [{ pid: child.pid }];
   const errors = [];
@@ -121,10 +84,10 @@ function terminateProcessTree(child) {
       errors.push(error.message, fallbackError.message);
     }
   }
-  return Promise.resolve({
+  return {
     method: 'process-group', attempted: true, completed: errors.length === 0,
     captured, survivors: [], errors
-  });
+  };
 }
 
 function runArgv(argv, { cwd, timeoutMs = DEFAULT_RELEASE_TIMEOUT_MS }) {
@@ -140,6 +103,9 @@ function runArgv(argv, { cwd, timeoutMs = DEFAULT_RELEASE_TIMEOUT_MS }) {
       shell: false,
       windowsHide: true
     });
+    const identityPromise = process.platform === 'win32'
+      ? captureWindowsProcessIdentity(child.pid)
+      : Promise.resolve(null);
     let stdout = '';
     let stderr = '';
     let timedOut = false;
@@ -158,7 +124,7 @@ function runArgv(argv, { cwd, timeoutMs = DEFAULT_RELEASE_TIMEOUT_MS }) {
     };
     const timeout = setTimeout(() => {
       timedOut = true;
-      void terminateProcessTree(child).then((evidence) => {
+      void terminateProcessTree(child, identityPromise).then((evidence) => {
         termination = evidence;
         child.stdout.destroy();
         child.stderr.destroy();
@@ -278,7 +244,11 @@ export async function runReleaseHarness({
   return { ...manifest, manifestPath };
 }
 
-export async function verifyReleaseManifest(manifestPath, { sourceSha, runId } = {}) {
+export async function verifyReleaseManifest(manifestPath, {
+  sourceSha,
+  runId,
+  expectedSchemaVersion = 2
+} = {}) {
   let manifest;
   try {
     manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -287,6 +257,9 @@ export async function verifyReleaseManifest(manifestPath, { sourceSha, runId } =
   }
   if (manifest?.schemaVersion !== 1 && manifest?.schemaVersion !== 2) {
     throw new Error('Release manifest schema version is not supported');
+  }
+  if (manifest.schemaVersion !== expectedSchemaVersion) {
+    throw new Error(`Release manifest schema version does not match expected schema ${expectedSchemaVersion}`);
   }
   if (!isFullGitSha(manifest.sourceSha)) throw new Error('Release manifest requires a full source SHA');
   if (sourceSha !== undefined && manifest.sourceSha !== sourceSha) {
@@ -312,6 +285,14 @@ export async function verifyReleaseManifest(manifestPath, { sourceSha, runId } =
         throw new Error('Release command timeout requires termination evidence');
       }
     }
+  }
+  const expectedStatus = manifest.rejection
+    ? 'rejected'
+    : (manifest.commands.length === 0
+        ? 'inconclusive'
+        : (manifest.commands.every((entry) => entry.exitCode === 0 && !entry.timedOut) ? 'pass' : 'fail'));
+  if (manifest.status !== expectedStatus) {
+    throw new Error('Release manifest status does not match command evidence');
   }
   const { evidenceDigest: declaredDigest, ...unsigned } = manifest;
   if (typeof declaredDigest !== 'string' || declaredDigest !== evidenceDigest(unsigned)) {

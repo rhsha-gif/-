@@ -1,37 +1,91 @@
 import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const WINDOWS_TREE_KILLER = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)), '../scripts/windows-process-tree.ps1'
-);
+import {
+  captureWindowsProcessIdentity,
+  terminateWindowsProcessTree,
+  terminateWindowsProcessTreeSync
+} from './windows-process-tree.js';
 
 export function terminateWithEscalation(child, killGraceMs, schedule = setTimeout) {
-  child.kill('SIGTERM');
-  return schedule(() => child.kill('SIGKILL'), killGraceMs);
+  try { child.kill('SIGTERM'); } catch {}
+  return schedule(() => {
+    try { child.kill('SIGKILL'); } catch {}
+  }, killGraceMs);
 }
 
-function terminateProcessTree(child, killGraceMs, schedule = setTimeout) {
-  if (process.platform !== 'win32' || !child.pid) {
-    return terminateWithEscalation(child, killGraceMs, schedule);
+const liveChildren = new Set();
+const signalHandlers = new Map();
+let handlersInstalled = false;
+
+function killRoot(child) {
+  try { child.kill('SIGKILL'); } catch {}
+}
+
+function reapAllChildren() {
+  for (const entry of liveChildren) {
+    if (process.platform === 'win32' && entry.identity) {
+      terminateWindowsProcessTreeSync(entry.identity);
+    } else {
+      killRoot(entry.child);
+    }
   }
-  const killer = spawn('powershell.exe', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-ExecutionPolicy', 'Bypass',
-    '-File', WINDOWS_TREE_KILLER,
-    '-RootPid', String(child.pid),
-    '-TimeoutMs', '30000'
-  ], {
-    shell: false,
-    stdio: 'ignore',
-    windowsHide: true
+}
+
+function ensureCleanupHandlers() {
+  if (handlersInstalled) return;
+  handlersInstalled = true;
+  process.on('exit', reapAllChildren);
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    const handler = () => {
+      reapAllChildren();
+      process.removeListener(signal, handler);
+      if (process.platform === 'win32') process.exit(1);
+      else process.kill(process.pid, signal);
+    };
+    signalHandlers.set(signal, handler);
+    process.on(signal, handler);
+  }
+}
+
+function registerChild(child, trackProcessTree) {
+  if (!trackProcessTree) return null;
+  const entry = { child, identity: null, identityPromise: Promise.resolve(null) };
+  if (process.platform === 'win32') {
+    entry.identityPromise = captureWindowsProcessIdentity(child.pid).then((identity) => {
+      entry.identity = identity;
+      return identity;
+    });
+  }
+  liveChildren.add(entry);
+  ensureCleanupHandlers();
+  return entry;
+}
+
+function unregisterChild(entry) {
+  if (!entry) return;
+  liveChildren.delete(entry);
+  if (liveChildren.size === 0 && handlersInstalled) {
+    handlersInstalled = false;
+    process.removeListener('exit', reapAllChildren);
+    for (const [signal, handler] of signalHandlers) process.removeListener(signal, handler);
+    signalHandlers.clear();
+  }
+}
+
+async function terminateTrackedChild(entry, child) {
+  const deadline = Date.now() + 30_000;
+  const identity = await entry.identityPromise;
+  if (!identity) {
+    killRoot(child);
+    return {
+      method: 'cim-snapshot', attempted: false, completed: false, identity: null,
+      captured: [], survivors: [], errors: ['root process identity was not captured']
+    };
+  }
+  const termination = await terminateWindowsProcessTree(identity, {
+    timeoutMs: Math.max(1, deadline - Date.now())
   });
-  killer.once('error', () => child.kill('SIGKILL'));
-  return schedule(() => {
-    killer.kill('SIGKILL');
-    child.kill('SIGKILL');
-  }, 30_000);
+  if (!termination.completed) killRoot(child);
+  return termination;
 }
 
 export function runCommand(spec, {
@@ -55,17 +109,54 @@ export function runCommand(spec, {
       windowsVerbatimArguments: spec.windowsVerbatimArguments === true,
       signal
     });
+    const tracked = registerChild(child, spec.trackProcessTree === true);
     let stdout = '';
     let stderr = '';
     let timedOut = false;
     let killTimer = null;
+    let settled = false;
+    let outcome = null;
+    let termination = null;
     const clearTimers = () => {
       if (timer) clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
     };
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      unregisterChild(tracked);
+      callback(value);
+    };
+    const finish = () => {
+      if (!outcome && !termination) return;
+      const endedAt = new Date();
+      settle(resolve, {
+        status: outcome?.code === 0 && !timedOut ? 'complete' : 'failed',
+        exitCode: outcome?.code ?? null,
+        signal: outcome?.signal ?? null,
+        timedOut,
+        stdout,
+        stderr,
+        startedAt: startedAt.toISOString(),
+        endedAt: endedAt.toISOString(),
+        durationMs: endedAt.getTime() - startedAt.getTime(),
+        ...(termination ? { termination } : {})
+      });
+    };
     const timer = timeoutMs > 0 ? setTimeout(() => {
       timedOut = true;
-      killTimer = terminateProcessTree(child, killGraceMs);
+      if (process.platform === 'win32' && tracked) {
+        void terminateTrackedChild(tracked, child).then((value) => {
+          termination = value;
+          child.stdout.destroy();
+          child.stderr.destroy();
+          child.unref();
+          finish();
+        });
+      } else {
+        killTimer = terminateWithEscalation(child, killGraceMs);
+      }
     }, timeoutMs) : null;
 
     child.stdout.on('data', (chunk) => {
@@ -79,29 +170,16 @@ export function runCommand(spec, {
       onStderr?.(text);
     });
     child.on('error', (error) => {
-      clearTimers();
-      reject(error);
+      settle(reject, error);
     });
     child.stdin.on('error', (error) => {
       if (error.code !== 'EPIPE' && error.code !== 'ERR_STREAM_DESTROYED') {
-        clearTimers();
-        reject(error);
+        settle(reject, error);
       }
     });
     child.on('close', (code, closeSignal) => {
-      clearTimers();
-      const endedAt = new Date();
-      resolve({
-        status: code === 0 && !timedOut ? 'complete' : 'failed',
-        exitCode: code,
-        signal: closeSignal,
-        timedOut,
-        stdout,
-        stderr,
-        startedAt: startedAt.toISOString(),
-        endedAt: endedAt.toISOString(),
-        durationMs: endedAt.getTime() - startedAt.getTime()
-      });
+      outcome = { code, signal: closeSignal };
+      if (!timedOut || process.platform !== 'win32' || !tracked) finish();
     });
 
     if (spec.stdin !== null && spec.stdin !== undefined) child.stdin.end(spec.stdin);

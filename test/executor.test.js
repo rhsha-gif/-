@@ -46,15 +46,39 @@ test('termination escalation sends SIGTERM and then SIGKILL after the grace peri
 test('marks a timed-out worker failed and terminates it promptly', async () => {
   const result = await runCommand({
     command: process.execPath,
-    args: ['-e', 'process.on("SIGTERM", () => {}); setTimeout(() => process.exit(0), 5000)'],
+    args: ['-e', 'process.on("SIGTERM", () => {}); setTimeout(() => process.exit(0), 60000)'],
     env: {},
-    stdin: null
+    stdin: null,
+    trackProcessTree: true
   }, { timeoutMs: 100, killGraceMs: 30 });
   assert.equal(result.timedOut, true);
   assert.equal(result.status, 'failed');
   if (process.platform === 'win32') assert.equal(result.signal, null);
   else assert.ok(['SIGTERM', 'SIGKILL'].includes(result.signal));
-  // Wide margin below the 5s natural exit: this asserts the kill escalation
-  // fired, not a machine-speed-dependent bound.
-  assert.ok(result.durationMs < 3000, `worker lived for ${result.durationMs}ms`);
+  assert.ok(result.durationMs < 30_000, `worker lived for ${result.durationMs}ms`);
+  if (process.platform === 'win32') {
+    assert.equal(result.termination.completed, true, JSON.stringify(result.termination));
+    assert.deepEqual(result.termination.survivors, []);
+  }
+});
+
+test('a tracked worker is reaped when the orchestrator exits', async (t) => {
+  const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { spawnSync } = await import('node:child_process');
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-exit-reap-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const pidPath = path.join(dir, 'pid.txt');
+  const workerCode = `require('node:fs').writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); setInterval(() => {}, 1000)`;
+  const helper = `
+    import { runCommand } from ${JSON.stringify(new URL('../src/executor.js', import.meta.url).href)};
+    runCommand({ command: process.execPath, args: ['-e', ${JSON.stringify(workerCode)}], stdin: null, trackProcessTree: true }, { timeoutMs: 60000 });
+    setTimeout(() => process.exit(0), 1200);
+  `;
+  const runner = spawnSync(process.execPath, ['--input-type=module', '-e', helper], { encoding: 'utf8' });
+  assert.equal(runner.status, 0, runner.stderr);
+  const workerPid = Number(await readFile(pidPath, 'utf8'));
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.throws(() => process.kill(workerPid, 0), { code: 'ESRCH' });
 });

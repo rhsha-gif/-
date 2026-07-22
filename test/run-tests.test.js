@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildTestInvocations, supportsTestConcurrency } from '../scripts/run-tests.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runner = path.join(root, 'scripts/run-tests.mjs');
@@ -85,4 +86,19 @@ test('run-tests turns a failing test run into a nonzero exit', async (t) => {
   const result = await runTests([fixture]);
 
   assert.notEqual(result.status, 0, diagnostics(result));
+});
+
+test('Windows runtimes without --test-concurrency run test files one at a time', () => {
+  assert.equal(supportsTestConcurrency('20.9.0'), false);
+  assert.equal(supportsTestConcurrency('20.10.0'), true);
+  const invocations = buildTestInvocations(['--test-name-pattern=selected'], {
+    platform: 'win32',
+    supportsConcurrency: false,
+    discoveredFiles: ['test/a.test.js', 'test/b.test.js']
+  });
+
+  assert.deepEqual(invocations, [
+    ['--test', '--test-name-pattern=selected', 'test/a.test.js'],
+    ['--test', '--test-name-pattern=selected', 'test/b.test.js']
+  ]);
 });

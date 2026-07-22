@@ -25,7 +25,22 @@ function spawnCommand(command, args) {
   return { command: commandLine, args: [], shell: true };
 }
 
-function runCli(command, args, { cwd = root } = {}) {
+function runCli(command, args, {
+  cwd = root,
+  timeoutMs = CLI_TIMEOUT_MS,
+  terminate = (child) => {
+    if (process.platform === 'win32' && child.pid) {
+      const killer = spawn('taskkill.exe', ['/pid', String(child.pid), '/T', '/F'], {
+        shell: false,
+        stdio: 'ignore',
+        windowsHide: true
+      });
+      killer.once('error', () => child.kill('SIGKILL'));
+    } else {
+      child.kill('SIGKILL');
+    }
+  }
+} = {}) {
   return new Promise((resolve) => {
     const invocation = spawnCommand(command, args);
     const child = spawn(invocation.command, invocation.args, {
@@ -59,17 +74,12 @@ function runCli(command, args, { cwd = root } = {}) {
     child.once('close', finish);
     timeout = setTimeout(() => {
       timedOut = true;
-      if (process.platform === 'win32' && child.pid) {
-        const killer = spawn('taskkill.exe', ['/pid', String(child.pid), '/T', '/F'], {
-          shell: false,
-          stdio: 'ignore',
-          windowsHide: true
-        });
-        killer.once('error', () => child.kill('SIGKILL'));
-      } else {
-        child.kill('SIGKILL');
-      }
-    }, CLI_TIMEOUT_MS);
+      terminate(child);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.unref();
+      finish(null, null);
+    }, timeoutMs);
   });
 }
 
@@ -124,16 +134,47 @@ test('help exposes the intentionally small command surface', async () => {
   assert.match(result.stdout, /lessons/);
 });
 
+test('CLI timeout diagnostics settle even when process-tree termination does not', async (t) => {
+  let pid;
+  t.after(() => {
+    if (!pid) return;
+    try {
+      if (process.platform === 'win32') {
+        const killer = spawn('taskkill.exe', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+        killer.unref();
+      } else {
+        process.kill(pid, 'SIGKILL');
+      }
+    } catch {}
+  });
+  const started = Date.now();
+  const result = await runCli(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    timeoutMs: 100,
+    terminate: (child) => { pid = child.pid; }
+  });
+
+  assert.equal(result.timedOut, true, diagnostics(result));
+  assert.ok(Date.now() - started < 2_000, diagnostics(result));
+  assert.match(diagnostics(result), /pid: \d+/);
+});
+
 test('npm-style bin entrypoints execute the CLI entrypoint', async (t) => {
   if (process.platform === 'win32') {
     const dir = await makeTempDir(t, 'aorch-bin-project-');
     await writeFile(path.join(dir, 'package.json'), JSON.stringify({ private: true }));
+    const packed = await runCli(process.execPath, [npmCli,
+      'pack', root,
+      '--json',
+      '--pack-destination', dir
+    ], { cwd: dir });
+    assertCliSucceeded(packed);
+    const tarball = path.join(dir, JSON.parse(packed.stdout)[0].filename);
     const install = await runCli(process.execPath, [npmCli,
       'install',
       '--ignore-scripts',
       '--no-package-lock',
       '--no-save',
-      root
+      tarball
     ], { cwd: dir });
     assertCliSucceeded(install);
 
