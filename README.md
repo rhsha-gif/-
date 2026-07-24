@@ -105,7 +105,6 @@ blast-radius 통제이지 worker 불신이 아닙니다.
 
 - **테스트 실행 완료 게이트** — "테스트를 돌려라, LLM에게 묻지 마라." task가 선언한 `verificationCommands`를 워크스페이스에서 실제로 실행하고 하나라도 실패하면 완료를 거절하는 게이트. 조사한 어떤 라우터도 verify를 테스트 실행으로 하지 않기 때문에 이 프로젝트의 차별점으로 남겨 둔 항목입니다.
 - **claimed diff vs actual diff 대조** — worker가 주장한 변경 파일이 실제 Git diff와 일치하는지, read-only 작업이 파일을 건드리지 않았는지, bounded worker가 `HEAD`를 바꾸지 않았는지 확인하는 값싼 변경 가드.
-- **receipt 영속화** — 현재 워커 프롬프트는 wrapper가 receipt를 `.aorch/task-runs/.../receipt.json`에 저장한다고 안내하지만 실제로 저장하지 않습니다. Codex adapter만 `worker-output.json`을 남깁니다.
 - **run lifecycle과 진행률** — durable run state, weighted progress, `Stop` hook의 미완료 run 차단. `Stop` hook은 아직 `.aorch/active-run.json`을 읽지만 그 포인터를 쓰는 코드가 없어 사실상 항상 통과합니다. 프루닝 이전 설치에서 넘어온 stale 포인터가 남아 있다면 세션 종료를 풀 명령이 없으니 그 파일을 지우세요.
 - **Codex 위임과 크로스 fallback** — 현재 라우팅은 Claude 티어 사이에서만 실측·검증됐습니다.
 
@@ -381,8 +380,11 @@ aorch install    프로젝트 로컬 Claude Code / Codex 통합 설치
 ├─ hooks/
 └─ task-runs/
    └─ <run-id>/<task-id>/
-      └─ worker-output.json   (Codex adapter만)
+      ├─ receipt.json           워커가 반환한 receipt
+      └─ worker-output.json     (Codex adapter만)
 ```
+
+`receipt.json`은 워커가 정상 종료(exit 0)했을 때만 남습니다. 실패한 워커가 receipt를 출력했더라도 저장하지 않습니다.
 
 JSON 파일은 atomic하게 씁니다(임시 파일 → rename). 관측 기록은 plain append-only JSONL입니다. 별도 service나 DB는 필요하지 않습니다.
 
