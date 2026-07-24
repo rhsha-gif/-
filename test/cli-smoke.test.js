@@ -36,6 +36,10 @@ test('classify emits a route for a boilerplate objective', () => {
   assert.ok(out.route.provider, 'route.provider should be a non-empty string');
   assert.ok(out.route.model, 'route.model should be a non-empty string');
   assert.ok(out.route.effort, 'route.effort should be a non-empty string');
+  // Proves the downshift actually happens: a low-complexity task must land
+  // on the cheapest in-tier Claude model, not the highest-quality one.
+  assert.equal(out.route.provider, 'anthropic');
+  assert.match(out.route.model, /haiku/);
 });
 
 test('help exposes the intentionally small command surface', () => {

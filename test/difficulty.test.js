@@ -16,6 +16,16 @@ test('architecture/security objective upshifts to high complexity', () => {
   assert.equal(r.minimumQuality, 0.88);
 });
 
+test('low/standard complexity emits tokens-first routing priorities to downshift', () => {
+  const r = classifyDifficulty({ objective: 'Format this JSON file and fix indentation' });
+  assert.equal(r.routingPriorities[0], 'tokens');
+});
+
+test('high complexity emits quality-first routing priorities', () => {
+  const r = classifyDifficulty({ objective: 'Design the authentication architecture and threat model' });
+  assert.equal(r.routingPriorities[0], 'quality');
+});
+
 test('explicit kind is respected over inference', () => {
   const r = classifyDifficulty({ objective: 'anything', kind: 'testing' });
   assert.equal(r.kind, 'testing');

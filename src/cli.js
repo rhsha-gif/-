@@ -186,7 +186,11 @@ async function main(argv = process.argv.slice(2)) {
       risk: flags.risk ?? 'standard',
       kind: classification.kind,
       complexity: classification.complexity,
-      minimumQuality: classification.minimumQuality
+      minimumQuality: classification.minimumQuality,
+      // arm1 is Claude-only: Codex delegation is a separately-gated later
+      // arm, and a Claude Code subagent's model cannot be a Codex model.
+      allowedProviders: ['anthropic'],
+      routingPriorities: classification.routingPriorities
     });
     const route = selectRoute({ task, catalog: config, observations: [] });
     process.stdout.write(`${JSON.stringify({

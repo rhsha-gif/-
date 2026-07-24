@@ -15,6 +15,15 @@ const KIND_RULES = [
 
 const FLOOR_BY_COMPLEXITY = Object.freeze({ low: 0.72, standard: 0.8, high: 0.88 });
 const COMPLEXITY_RANK = Object.freeze({ low: 0, standard: 1, high: 2 });
+// selectRoute is quality-first by default; minimumQuality is only a hard
+// floor filter, not a reordering. Low/standard work downshifts to the
+// cheapest tier that still clears the floor; high-complexity work keeps
+// quality as the primary tiebreak.
+const PRIORITIES_BY_COMPLEXITY = Object.freeze({
+  low: Object.freeze(['tokens', 'quality', 'latency']),
+  standard: Object.freeze(['tokens', 'quality', 'latency']),
+  high: Object.freeze(['quality', 'tokens', 'latency'])
+});
 
 export function classifyDifficulty({ objective, kind, tokenEstimate, longContextThreshold = 60000 } = {}) {
   if (typeof objective !== 'string' || objective.trim() === '') {
@@ -39,6 +48,7 @@ export function classifyDifficulty({ objective, kind, tokenEstimate, longContext
     complexity,
     minimumQuality: FLOOR_BY_COMPLEXITY[complexity],
     tokenEstimate: tokens,
-    signals
+    signals,
+    routingPriorities: [...PRIORITIES_BY_COMPLEXITY[complexity]]
   };
 }
