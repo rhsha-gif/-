@@ -6,14 +6,14 @@ test('boilerplate/format objective downshifts to low complexity', () => {
   const r = classifyDifficulty({ objective: 'Format this JSON file and fix indentation' });
   assert.equal(r.complexity, 'low');
   assert.equal(r.kind, 'documentation');
-  assert.ok(r.minimumQuality >= 0.7, 'quality floor preserved');
+  assert.equal(r.minimumQuality, 0.72);
 });
 
 test('architecture/security objective upshifts to high complexity', () => {
   const r = classifyDifficulty({ objective: 'Design the authentication architecture and threat model' });
   assert.equal(r.complexity, 'high');
   assert.ok(['architecture', 'security'].includes(r.kind));
-  assert.ok(r.minimumQuality >= 0.85, 'high complexity raises the floor');
+  assert.equal(r.minimumQuality, 0.88);
 });
 
 test('explicit kind is respected over inference', () => {
@@ -30,4 +30,15 @@ test('long context forces at least standard complexity', () => {
 test('token estimate is derived from objective length when absent', () => {
   const r = classifyDifficulty({ objective: 'x'.repeat(400) });
   assert.equal(r.tokenEstimate, 100); // 400 chars / 4
+});
+
+test('empty or missing objective throws', () => {
+  assert.throws(() => classifyDifficulty({ objective: '' }), TypeError);
+  assert.throws(() => classifyDifficulty({}), TypeError);
+});
+
+test('stem keywords match inflected forms', () => {
+  assert.equal(classifyDifficulty({ objective: 'patch this vulnerability' }).complexity, 'high');
+  assert.equal(classifyDifficulty({ objective: 'make the service scalable' }).complexity, 'high');
+  assert.equal(classifyDifficulty({ objective: 'fix the indentation' }).complexity, 'low');
 });

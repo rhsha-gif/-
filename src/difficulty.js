@@ -5,10 +5,10 @@
 // limit savings WITH a minimum quality bar).
 
 const KIND_RULES = [
-  { kind: 'security', complexity: 'high', re: /\b(security|threat model|auth|vulnerab|exploit|crypto)\b/i },
-  { kind: 'architecture', complexity: 'high', re: /\b(architect|system design|design the|scalab)\b/i },
+  { kind: 'security', complexity: 'high', re: /\b(security|threat model|auth|vulnerab\w*|exploit|crypto)\b/i },
+  { kind: 'architecture', complexity: 'high', re: /\b(architect|system design|design the|scalab\w*)\b/i },
   { kind: 'debugging', complexity: 'high', re: /\b(race condition|deadlock|heisenbug|root cause|debug)\b/i },
-  { kind: 'documentation', complexity: 'low', re: /\b(format|indent|docstring|comment|readme|rename|typo|boilerplate)\b/i },
+  { kind: 'documentation', complexity: 'low', re: /\b(format|indent\w*|docstring|comment|readme|rename|typo|boilerplate)\b/i },
   { kind: 'testing', complexity: 'standard', re: /\b(test|spec|coverage|regression)\b/i },
   { kind: 'implementation', complexity: 'standard', re: /\b(implement|add|refactor|extract|wire|build)\b/i }
 ];
