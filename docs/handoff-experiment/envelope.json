@@ -1,0 +1,19 @@
+{
+  "id": "T-thin-exec-tests",
+  "title": "Regression tests for the thin executeTask",
+  "objective": "Add focused regression tests for the pruned executeTask: the dry-run path returns a route and command spec without running a worker, and a write task is refused when the workspace is not isolated.",
+  "kind": "test",
+  "role": "executor",
+  "risk": "standard",
+  "complexity": "standard",
+  "write": true,
+  "allowedScope": ["test/task-runner.test.js"],
+  "forbiddenScope": ["src/**", "docs/**", "integrations/**"],
+  "acceptanceCriteria": [
+    "A dry-run of executeTask returns route, capabilities, and commandSpec without spawning a worker.",
+    "A write task with risk >= high is refused when cwd is not a linked worktree.",
+    "A write task at standard risk without allowInPlaceWrite is refused in-place.",
+    "node --test passes with the new file included."
+  ],
+  "verificationCommands": ["node --test"]
+}
