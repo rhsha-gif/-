@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { realpathSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,58 +17,41 @@ import {
   resolveActiveRun,
   updateTaskState
 } from './state.js';
-import {
-  appendUserFeedback,
-  decideProposal,
-  lintLessons,
-  loadLessons,
-  loadRetrospective,
-  saveRetrospective
-} from './learning.js';
 import { installProject } from './install.js';
 import { inspectStateHealth, runDoctor } from './doctor.js';
 import { validateTask } from './task.js';
-import { validateReceipt } from './receipt.js';
-import { verifyTaskClaim } from './verifier.js';
 
 const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `Commands:\n` +
   `  route     Select provider, model, and effort for a task JSON file\n` +
   `  exec      Route and execute one bounded task\n` +
-  `  verify    Independently replay checks and attest a worker claim\n` +
   `  record    Append an independently reviewed model-performance observation\n` +
   `  inventory Print configured providers, models, skills, plugins, and hooks\n` +
   `  progress  Calculate weighted estimated progress from a run state file\n` +
-  `  lessons   Show advisory prevention rules; add --lint to inspect memory governance\n` +
-  `  run       Manage run lifecycle, reflection, feedback, and proposal consent\n` +
+  `  run       Manage run lifecycle (start, task, finish, show)\n` +
   `  install   Install project-local Claude Code and/or Codex integration\n` +
-  `  doctor    Validate config, CLIs, and durable state; add --repair to repair JSONL tails and stale locks\n\n` +
+  `  doctor    Validate config, CLIs, and durable state\n\n` +
   `Run actions:\n` +
   `  start     --input <manifest.json>\n` +
   `  task      [--run active|id|path] --task <id> --status <status> [--fraction <0..1>]\n` +
   `  finish    [--run active|id|path] --status completed|partial|blocked|failed|cancelled\n` +
-  `  show      [--run active|id|path]\n` +
-  `  reflect   [--run active|id|path] --input <retrospective.json>\n` +
-  `  feedback  [--run active|id|path] --input <feedback.json>\n` +
-  `  decide    [--run active|id|path] --proposal <id> --decision approved|rejected\n\n` +
+  `  show      [--run active|id|path]\n\n` +
   `Common options:\n` +
   `  --config <path>       Config JSON; defaults to .aorch/config.json or packaged config\n` +
   `  --cwd <path>          Project working directory\n` +
   `  --observations <path> Reviewed outcomes JSONL\n` +
   `  --verification-timeout-ms <n> Independent verification timeout per command\n`;
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'repair', 'force-config', 'lint', 'project-only', 'help', 'h']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'repair', 'force-config', 'project-only', 'help', 'h']);
 
 const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
 const COMMAND_FLAGS = Object.freeze({
   route: [...COMMON_FLAGS, 'task', 'observations'],
   exec: [...COMMON_FLAGS, 'task', 'observations', 'timeout-ms', 'verification-timeout-ms', 'dry-run'],
-  verify: [...COMMON_FLAGS, 'task', 'receipt', 'run-dir', 'isolation', 'verification-timeout-ms'],
   record: [...COMMON_FLAGS, 'input', 'observations'],
   inventory: [...COMMON_FLAGS],
-  lessons: [...COMMON_FLAGS, 'lint', 'query', 'limit'],
   progress: [...COMMON_FLAGS, 'tasks', 'run'],
-  run: [...COMMON_FLAGS, 'action', 'input', 'run', 'task', 'status', 'fraction', 'note', 'proposal', 'decision', 'comment'],
+  run: [...COMMON_FLAGS, 'action', 'input', 'run', 'task', 'status', 'fraction', 'note'],
   install: ['cwd', 'help', 'h', 'target', 'project', 'force-config'],
   doctor: [...COMMON_FLAGS, 'repair']
 });
@@ -156,7 +138,6 @@ function cleanRoute(route) {
     tokenIndex: route.tokenIndex,
     latencyIndex: route.latencyIndex,
     maturity: route.maturity,
-    providerTrustTier: route.providerTrustTier,
     adapterMaturity: route.adapterMaturity,
     decision: route.decision
   };
@@ -228,30 +209,7 @@ async function handleRunCommand({ flags, cwd, config }) {
   }
 
   if (action === 'show') {
-    return { action, run, retrospective: run.reviewStatus === 'complete' ? await loadRetrospective({ root, runId: run.id }) : null };
-  }
-
-  if (action === 'reflect') {
-    const input = await readJson(requireFlag(flags, 'input'), cwd);
-    return { action, retrospective: await saveRetrospective({ root, runPath: run.path, input }) };
-  }
-
-  if (action === 'feedback') {
-    const feedback = await readJson(requireFlag(flags, 'input'), cwd);
-    return { action, retrospective: await appendUserFeedback({ root, runId: run.id, feedback }) };
-  }
-
-  if (action === 'decide') {
-    return {
-      action,
-      retrospective: await decideProposal({
-        root,
-        runId: run.id,
-        proposalId: requireFlag(flags, 'proposal'),
-        decision: requireFlag(flags, 'decision'),
-        comment: flags.comment && flags.comment !== true ? flags.comment : ''
-      })
-    };
+    return { action, run };
   }
 
   throw new Error(`Unknown run action: ${action}`);
@@ -306,25 +264,8 @@ async function main(argv = process.argv.slice(2)) {
     });
     const output = flags['dry-run'] === true
       ? { route: cleanRoute(result.route), capabilities: result.capabilities, commandSpec: result.commandSpec, runDir: result.runDir }
-      : { route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, attestation: result.attestation, attestationPath: result.attestationPath, runDir: result.runDir };
+      : { route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, verification: result.verification, runDir: result.runDir };
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
-    return 0;
-  }
-
-  if (command === 'verify') {
-    const task = validateTask(await readJson(requireFlag(flags, 'task'), cwd), { forExecution: true });
-    const receipt = validateReceipt(await readJson(requireFlag(flags, 'receipt'), cwd), { task });
-    const runDir = flags['run-dir'] && flags['run-dir'] !== true
-      ? path.resolve(cwd, flags['run-dir'])
-      : path.join(stateRoot(config, cwd), 'manual-verifications', randomUUID(), task.id);
-    const isolationMode = flags.isolation && flags.isolation !== true
-      ? flags.isolation
-      : (task.verificationIsolation ?? config.verification?.isolationByRisk?.[task.risk] ?? 'same-workspace');
-    const attestation = await verifyTaskClaim({
-      task, receipt, cwd, runDir, isolationMode,
-      timeoutMs: numericFlag(flags, 'verification-timeout-ms') ?? config.verification?.commandTimeoutMs
-    });
-    process.stdout.write(`${JSON.stringify({ attestation, attestationPath: attestation.path, runDir }, null, 2)}\n`);
     return 0;
   }
 
@@ -337,24 +278,6 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === 'inventory') {
     process.stdout.write(`${JSON.stringify(getInventory(config), null, 2)}\n`);
-    return 0;
-  }
-
-  if (command === 'lessons') {
-    const root = stateRoot(config, cwd);
-    if (flags.lint === true) {
-      const result = await lintLessons({ root });
-      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-      return result.status === 'pass' ? 0 : 1;
-    }
-    const limit = flags.limit && flags.limit !== true ? Number(flags.limit) : 10;
-    if (!Number.isInteger(limit) || limit < 0 || limit > 50) throw new RangeError('--limit must be an integer from 0 to 50');
-    const lessons = await loadLessons({
-      root,
-      query: flags.query && flags.query !== true ? flags.query : '',
-      limit
-    });
-    process.stdout.write(`${JSON.stringify(lessons, null, 2)}\n`);
     return 0;
   }
 
@@ -382,12 +305,10 @@ async function main(argv = process.argv.slice(2)) {
     const root = stateRoot(config, cwd);
     const core = runDoctor(config);
     const state = await inspectStateHealth(root, { repair: flags.repair === true });
-    const lessons = await lintLessons({ root });
     const result = {
       ...core,
       state,
-      lessons,
-      status: core.status === 'pass' && state.status === 'pass' && lessons.status === 'pass' ? 'pass' : 'fail'
+      status: core.status === 'pass' && state.status === 'pass' ? 'pass' : 'fail'
     };
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return result.status === 'pass' ? 0 : 1;

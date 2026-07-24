@@ -1,6 +1,4 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
-const RISK_TIERS = new Set(['low', 'standard', 'high', 'critical']);
-const COMPLEXITIES = new Set(['low', 'standard', 'high', 'critical']);
 
 function clamp01(value) {
   return Math.min(1, Math.max(0, value));
@@ -10,18 +8,24 @@ export function normalizeObservation(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new TypeError('observation must be an object');
   }
-  for (const field of ['provider', 'profileId', 'model', 'effort', 'taskKind', 'role']) {
+  // The matched route identity is four dimensions only: provider, model,
+  // effort, and task kind. Any finer stratification (profile, role, risk,
+  // complexity) fragments a solo user's evidence so no cell ever accumulates
+  // enough samples to move off the prior. Those fields are kept as optional
+  // metadata but never gate matching.
+  for (const field of ['provider', 'model', 'effort', 'taskKind']) {
     if (typeof input[field] !== 'string' || input[field].trim() === '') {
       throw new TypeError(`observation.${field} must be a non-empty string`);
+    }
+  }
+  for (const field of ['profileId', 'role']) {
+    if (input[field] !== undefined && (typeof input[field] !== 'string' || input[field].trim() === '')) {
+      throw new TypeError(`observation.${field} must be a non-empty string when provided`);
     }
   }
   if (input.reviewed !== undefined && typeof input.reviewed !== 'boolean') {
     throw new TypeError('observation.reviewed must be a boolean');
   }
-  const risk = input.risk ?? 'standard';
-  if (!RISK_TIERS.has(risk)) throw new Error('observation.risk must be low, standard, high, or critical');
-  const complexity = input.complexity ?? 'standard';
-  if (!COMPLEXITIES.has(complexity)) throw new Error('observation.complexity must be low, standard, high, or critical');
   if (input.metadata !== undefined && (!input.metadata || typeof input.metadata !== 'object' || Array.isArray(input.metadata))) {
     throw new TypeError('observation.metadata must be an object');
   }
@@ -35,13 +39,11 @@ export function normalizeObservation(input) {
   }
   return {
     provider: input.provider,
-    profileId: input.profileId,
     model: input.model,
     effort: input.effort,
     taskKind: input.taskKind,
-    role: input.role,
-    risk,
-    complexity,
+    ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
+    ...(input.role === undefined ? {} : { role: input.role }),
     quality,
     recordedAt: recordedAt.toISOString(),
     reviewed: input.reviewed !== false,
@@ -52,13 +54,9 @@ export function normalizeObservation(input) {
 function sameRoute(observation, route, task) {
   return observation.reviewed !== false
     && observation.provider === route.provider
-    && observation.profileId === route.profileId
     && observation.model === route.model
     && observation.effort === route.effort
-    && observation.taskKind === task.kind
-    && observation.role === task.role
-    && observation.risk === (task.risk ?? 'standard')
-    && observation.complexity === (task.complexity ?? 'standard');
+    && observation.taskKind === task.kind;
 }
 
 export function estimateRouteQuality({

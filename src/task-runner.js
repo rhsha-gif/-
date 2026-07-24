@@ -13,7 +13,7 @@ import { runCommand } from './executor.js';
 import { formatProgressReport, ProgressReporter } from './progress.js';
 import { validateTask } from './task.js';
 import { validateReceipt } from './receipt.js';
-import { captureWorkspaceState, inspectWorkspaceIsolation, validateClaimedChanges, verifyTaskClaim } from './verifier.js';
+import { captureWorkspaceState, inspectWorkspaceIsolation, validateClaimedChanges, runVerificationGate } from './verifier.js';
 import { atomicWriteJson, atomicWriteText } from './file-store.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -125,9 +125,6 @@ export async function executeTask({
   const commandTimeoutMs = verificationTimeoutMs
     ?? config.verification?.commandTimeoutMs
     ?? 15 * 60 * 1000;
-  const isolationMode = task.verificationIsolation
-    ?? config.verification?.isolationByRisk?.[task.risk]
-    ?? 'same-workspace';
   let progressFraction = 0.1;
   const reporter = new ProgressReporter({ onReport: onProgress, intervalMs });
   reporter.start(() => [{ id: task.id, weight: task.weight ?? 1, status: 'running', fraction: progressFraction }]);
@@ -151,26 +148,19 @@ export async function executeTask({
     await atomicWriteJson(receiptPath, receipt);
     const afterState = await captureWorkspaceState(cwd, { ignorePaths: ignoredPaths });
 
-    let attestation = null;
-    if (receipt.status !== 'complete' && beforeState.available && afterState.available) {
-      // A partial or blocked claim is still a claim: the worker must not hide
-      // workspace mutations behind a non-complete status, especially for
-      // in-place writes where nothing else would compare claim to evidence.
-      validateClaimedChanges({ task, receipt, beforeState, afterState });
-    }
-    if (receipt.status === 'complete') {
-      const totalChecks = task.verificationCommands.length + task.verifierCommands.length;
-      attestation = await verifyTaskClaim({
-        task,
-        receipt,
+    // Cheap claim-versus-reality guard for every claim: a non-complete status
+    // must not hide workspace mutations, and a write task must own its diff.
+    validateClaimedChanges({ task, receipt, beforeState, afterState });
+
+    let verification = null;
+    if (receipt.status === 'complete' && task.verificationCommands.length > 0) {
+      const totalChecks = task.verificationCommands.length;
+      verification = await runVerificationGate({
+        commands: task.verificationCommands,
         cwd,
-        runDir,
-        beforeState,
-        afterState,
         timeoutMs: commandTimeoutMs,
-        isolationMode,
         onStep: (completed) => {
-          progressFraction = totalChecks > 0 ? 0.7 + (0.29 * completed / totalChecks) : 0.99;
+          progressFraction = 0.7 + (0.29 * completed / totalChecks);
           reporter.meaningfulUpdate();
         }
       });
@@ -185,14 +175,18 @@ export async function executeTask({
           ? 'partial'
           : 'failed';
     const confidenceValue = Number(receipt.confidence ?? 0.5);
-    // An inconclusive attestation means nothing independent stands behind the
-    // claim; never report high confidence on the worker's word alone.
-    const finalConfidence = finalPhase !== 'complete' || attestation?.status === 'inconclusive'
+    // A complete claim with no verification command run has nothing independent
+    // behind it, so cap confidence at medium; a passing gate lets the worker's
+    // stated confidence stand.
+    const verified = verification?.status === 'pass';
+    const finalConfidence = finalPhase !== 'complete'
       ? 'low'
-      : (confidenceValue >= 0.8 ? 'high' : confidenceValue >= 0.5 ? 'medium' : 'low');
+      : !verified
+        ? 'medium'
+        : (confidenceValue >= 0.8 ? 'high' : confidenceValue >= 0.5 ? 'medium' : 'low');
     const evidenceCount = (receipt.commands?.length ?? 0)
       + (receipt.criteria?.length ?? 0)
-      + (attestation?.checks?.length ?? 0);
+      + (verification?.checks?.length ?? 0);
     onProgress({
       percent: finalPercent,
       label: 'estimated',
@@ -209,8 +203,7 @@ export async function executeTask({
       route,
       capabilities,
       receipt,
-      attestation,
-      attestationPath: attestation?.path ?? null,
+      verification,
       result,
       receiptPath,
       runDir

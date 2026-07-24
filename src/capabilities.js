@@ -1,30 +1,13 @@
 const DEFAULT_LIMITS = Object.freeze({ skills: 3, plugins: 2, hooks: 3 });
 const TYPE_TO_BUCKET = Object.freeze({ skill: 'skills', plugin: 'plugins', hook: 'hooks' });
-const DEFAULT_TRUST_BY_RISK = Object.freeze({
-  low: ['trusted', 'reviewed', 'untrusted'],
-  standard: ['trusted', 'reviewed'],
-  high: ['trusted', 'reviewed'],
-  critical: ['trusted']
-});
 
 function isCompatible(capability, provider) {
   const providers = capability.providers ?? ['*'];
   return providers.includes('*') || providers.includes(provider);
 }
 
-export function isCapabilityAllowedForTask(capability, task = {}, policy = {}) {
-  const risk = task.risk ?? 'standard';
-  const trustTier = capability.trustTier ?? 'reviewed';
-  const allowed = policy.capabilityTrustByRisk?.[risk] ?? DEFAULT_TRUST_BY_RISK[risk] ?? DEFAULT_TRUST_BY_RISK.standard;
-  if (!allowed.includes(trustTier)) return false;
-  if (trustTier === 'untrusted') {
-    return task.allowUntrustedCapabilities === true && task.write !== true && risk === 'low';
-  }
-  return true;
-}
-
 export function selectCapabilities({
-  requestedIds = [], inventory = [], provider, limits = DEFAULT_LIMITS, task = {}, policy = {}
+  requestedIds = [], inventory = [], provider, limits = DEFAULT_LIMITS
 }) {
   const byId = new Map();
   const ambiguousIds = new Set();
@@ -45,19 +28,6 @@ export function selectCapabilities({
     if (capability.enabled === false) throw new Error(`Capability is disabled: ${id}`);
     if (!isCompatible(capability, provider)) {
       throw new Error(`Capability ${id} is not compatible with provider ${provider}`);
-    }
-    if (!isCapabilityAllowedForTask(capability, task, policy)) {
-      const trustTier = capability.trustTier ?? 'reviewed';
-      if (trustTier === 'untrusted') {
-        if (task.allowUntrustedCapabilities !== true) {
-          throw new Error(`Untrusted capability ${id} requires explicit low-risk read-only opt-in`);
-        }
-        if (task.write === true) {
-          throw new Error(`Untrusted capability ${id} is not allowed on a write task`);
-        }
-        throw new Error(`Untrusted capability ${id} is only allowed on low-risk tasks, not ${task.risk ?? 'standard'}`);
-      }
-      throw new Error(`Capability ${id} trust tier ${trustTier} is not allowed for ${task.risk ?? 'standard'} risk`);
     }
 
     const bucket = TYPE_TO_BUCKET[capability.type];

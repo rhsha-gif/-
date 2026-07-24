@@ -79,9 +79,6 @@ export async function createRun({ root, prompt, tasks = [], runId = randomUUID()
       if (active?.status === 'running') {
         throw new Error(`Active run ${active.id} is still running; resume or finish it before starting another run`);
       }
-      if (active && active.reviewStatus !== 'complete') {
-        throw new Error(`Active run ${active.id} requires post-run reflection before starting another run`);
-      }
     }
 
     const normalizedTasks = tasks.map(normalizeTask);
@@ -101,7 +98,6 @@ export async function createRun({ root, prompt, tasks = [], runId = randomUUID()
         id: runId,
         prompt: prompt.trim(),
         status: 'running',
-        reviewStatus: 'not-ready',
         createdAt: now,
         updatedAt: now,
         tasks: normalizedTasks,
@@ -192,21 +188,7 @@ export async function finishRun(runPath, status) {
       }
     }
     const now = new Date().toISOString();
-    return { ...state, status, reviewStatus: 'pending', finishedAt: now };
-  });
-}
-
-export async function markRunReviewed(runPath, reflectionPath) {
-  return mutateRun(runPath, (state) => {
-    if (!TERMINAL_RUN_STATUSES.has(state.status)) {
-      throw new Error('A running orchestration cannot be marked reviewed');
-    }
-    return {
-      ...state,
-      reviewStatus: 'complete',
-      reflectionPath: path.resolve(reflectionPath),
-      reviewedAt: new Date().toISOString()
-    };
+    return { ...state, status, finishedAt: now };
   });
 }
 

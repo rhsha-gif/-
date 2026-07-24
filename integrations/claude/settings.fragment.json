@@ -19,18 +19,7 @@
             "type": "command",
             "command": "node \"${CLAUDE_PROJECT_DIR}/.aorch/hooks/session-review.mjs\"",
             "timeout": 30,
-            "statusMessage": "Checking post-run reflection"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.aorch/hooks/session-review.mjs\"",
-            "timeout": 5
+            "statusMessage": "Checking active orchestration run"
           }
         ]
       }

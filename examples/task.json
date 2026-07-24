@@ -26,9 +26,5 @@
   ],
   "verificationCommands": [
     "npm test"
-  ],
-  "verifierCommands": [
-    "npm run check"
-  ],
-  "verificationIsolation": "git-worktree"
+  ]
 }

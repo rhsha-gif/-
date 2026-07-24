@@ -119,34 +119,11 @@ test('effort profiles can declare supported task complexities', () => {
   assert.throws(() => validateConfig(config), /complexities/i);
 });
 
-test('provider and capability trust metadata are validated and normalized', () => {
+test('control-plane validates the experimental adapter risk ceiling', () => {
   const config = minimalConfig();
-  config.providers[0].trustTier = 'trusted';
-  config.providers[0].adapterMaturity = 'stable';
-  config.capabilities = [{ id: 'safe-skill', type: 'skill', providers: ['newco'], enabled: true, trustTier: 'reviewed' }];
-  const validated = validateConfig(config);
-  assert.equal(validated.providers[0].trustTier, 'trusted');
-  assert.equal(validated.providers[0].adapterMaturity, 'stable');
-  assert.equal(validated.capabilities[0].trustTier, 'reviewed');
-
-  config.providers[0].trustTier = 'root';
-  assert.throws(() => validateConfig(config), /trustTier/i);
-});
-
-test('control-plane trust policy rejects unsupported risk tiers and trust values', () => {
-  const config = minimalConfig();
-  config.controlPlane = {
-    providerTrustByRisk: { low: ['trusted'], standard: ['trusted'], high: ['trusted'], critical: ['trusted'] },
-    capabilityTrustByRisk: { low: ['trusted'], standard: ['trusted'], high: ['trusted'], critical: ['trusted'] },
-    experimentalAdapterMaxRisk: 'standard'
-  };
+  config.controlPlane = { experimentalAdapterMaxRisk: 'standard' };
   assert.equal(validateConfig(config).controlPlane.experimentalAdapterMaxRisk, 'standard');
-  config.controlPlane.providerTrustByRisk.critical = ['mystery'];
-  assert.throws(() => validateConfig(config), /providerTrustByRisk/i);
+  config.controlPlane.experimentalAdapterMaxRisk = 'mystery';
+  assert.throws(() => validateConfig(config), /experimentalAdapterMaxRisk/i);
 });
 
-test('standard-risk verification defaults to an isolated Git worktree', () => {
-  const validated = validateConfig(minimalConfig());
-  assert.equal(validated.verification.isolationByRisk.standard, 'git-worktree');
-  assert.equal(validated.verification.isolationByRisk.low, 'same-workspace');
-});

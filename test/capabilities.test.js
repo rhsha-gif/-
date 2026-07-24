@@ -35,45 +35,12 @@ test('enforces small context limits', () => {
   }), /skill limit/);
 });
 
-test('untrusted capabilities require explicit low-risk read-only opt-in', () => {
-  const risky = [{ id: 'untrusted-plugin', type: 'plugin', providers: ['openai'], enabled: true, trustTier: 'untrusted' }];
-  assert.throws(() => selectCapabilities({
-    requestedIds: ['untrusted-plugin'], inventory: risky, provider: 'openai',
-    task: { risk: 'low', write: false }
-  }), /untrusted/i);
-
-  const selected = selectCapabilities({
-    requestedIds: ['untrusted-plugin'], inventory: risky, provider: 'openai',
-    task: { risk: 'low', write: false, allowUntrustedCapabilities: true }
-  });
-  assert.equal(selected.plugins[0].id, 'untrusted-plugin');
-
-  assert.throws(() => selectCapabilities({
-    requestedIds: ['untrusted-plugin'], inventory: risky, provider: 'openai',
-    task: { risk: 'standard', write: false, allowUntrustedCapabilities: true }
-  }), /only allowed on low-risk tasks/i);
-
-  assert.throws(() => selectCapabilities({
-    requestedIds: ['untrusted-plugin'], inventory: risky, provider: 'openai',
-    task: { risk: 'low', write: true, allowUntrustedCapabilities: true }
-  }), /not allowed on a write task/i);
-});
-
-test('critical tasks accept only trusted capabilities', () => {
-  const reviewed = [{ id: 'reviewed-skill', type: 'skill', providers: ['openai'], enabled: true, trustTier: 'reviewed' }];
-  assert.throws(() => selectCapabilities({
-    requestedIds: ['reviewed-skill'], inventory: reviewed, provider: 'openai',
-    task: { risk: 'critical', write: true }
-  }), /trust tier/i);
-});
-
 test('ambiguous capability IDs fail closed instead of allowing type shadowing', () => {
   const ambiguous = [
-    { id: 'review', type: 'skill', providers: ['openai'], enabled: true, trustTier: 'trusted' },
-    { id: 'review', type: 'plugin', providers: ['openai'], enabled: true, trustTier: 'untrusted' }
+    { id: 'review', type: 'skill', providers: ['openai'], enabled: true },
+    { id: 'review', type: 'plugin', providers: ['openai'], enabled: true }
   ];
   assert.throws(() => selectCapabilities({
-    requestedIds: ['review'], inventory: ambiguous, provider: 'openai',
-    task: { risk: 'low', write: false, allowUntrustedCapabilities: true }
+    requestedIds: ['review'], inventory: ambiguous, provider: 'openai'
   }), /ambiguous capability id/i);
 });

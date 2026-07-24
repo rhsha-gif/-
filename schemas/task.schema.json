@@ -102,27 +102,8 @@
         "critical"
       ]
     },
-    "allowUntrustedCapabilities": {
-      "type": "boolean"
-    },
-    "allowUntrustedProviders": {
-      "type": "boolean"
-    },
     "allowInPlaceWrite": {
       "type": "boolean"
-    },
-    "verifierCommands": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "verificationIsolation": {
-      "type": "string",
-      "enum": [
-        "same-workspace",
-        "git-worktree"
-      ]
     }
   },
   "required": [

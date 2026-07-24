@@ -1,24 +1,16 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import {
-  access,
   mkdir,
   open,
   readFile,
-  readdir,
   rename,
   stat,
   unlink
 } from 'node:fs/promises';
 import path from 'node:path';
 
-const JOURNAL_VERSION = 1;
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function exists(filePath) {
-  try { await access(filePath); return true; } catch { return false; }
 }
 
 function processIsAlive(pid) {
@@ -81,27 +73,6 @@ async function reclaimStaleLock(lockPath, inspected) {
     return;
   }
   await rename(reclaimPath, lockPath).catch(() => unlink(reclaimPath).catch(() => {}));
-}
-
-function stableValue(value) {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
-  }
-  return value;
-}
-
-function stableJson(value) {
-  return JSON.stringify(stableValue(value));
-}
-
-function journalChecksum(entry) {
-  return createHash('sha256').update(stableJson({
-    journalVersion: entry.journalVersion,
-    sequence: entry.sequence,
-    recordedAt: entry.recordedAt,
-    payload: entry.payload
-  })).digest('hex');
 }
 
 async function syncDirectory(directory) {
@@ -193,65 +164,29 @@ export async function withFileLock(lockPath, callback, options = {}) {
   finally { await release(); }
 }
 
-function parseJournalLine(line, lineNumber, expectedSequence) {
-  let parsed;
-  try { parsed = JSON.parse(line); }
-  catch (error) {
-    return { issue: { line: lineNumber, type: 'invalid-json', message: error.message } };
-  }
-
-  if (parsed?.journalVersion !== JOURNAL_VERSION || !Object.hasOwn(parsed, 'payload')) {
-    return {
-      entry: {
-        journalVersion: 0,
-        sequence: expectedSequence,
-        recordedAt: parsed?.recordedAt ?? null,
-        payload: parsed,
-        checksum: null,
-        legacy: true,
-        rawLine: line
-      }
-    };
-  }
-
-  if (!Number.isInteger(parsed.sequence) || parsed.sequence !== expectedSequence) {
-    return { issue: { line: lineNumber, type: 'sequence', message: `Expected sequence ${expectedSequence}, received ${parsed.sequence}` } };
-  }
-  const expectedChecksum = journalChecksum(parsed);
-  if (typeof parsed.checksum !== 'string' || parsed.checksum !== expectedChecksum) {
-    return { issue: { line: lineNumber, type: 'checksum', message: 'Journal checksum mismatch' } };
-  }
-  return { entry: { ...parsed, legacy: false, rawLine: line } };
-}
-
-export async function readJournal(filePath, { tolerateCorruption = false } = {}) {
+// Plain append-only JSONL: one JSON record per line. A personal tool does not
+// need checksummed, sequence-numbered journal envelopes; atomic writes plus a
+// serializing lock are enough durability.
+export async function readJournal(filePath) {
   let raw;
   try { raw = await readFile(filePath, 'utf8'); }
   catch (error) {
-    if (error.code === 'ENOENT') {
-      return { entries: [], records: [], issues: [], endsWithNewline: true, missing: true };
-    }
+    if (error.code === 'ENOENT') return { records: [], endsWithNewline: true, missing: true };
     throw error;
   }
-
-  const entries = [];
-  const issues = [];
+  const records = [];
   const lines = raw.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (!line.trim()) continue;
-    const result = parseJournalLine(line, index + 1, entries.length + 1);
-    if (result.issue) issues.push(result.issue);
-    else entries.push(result.entry);
-  }
-  if (issues.length > 0 && !tolerateCorruption) {
-    const first = issues[0];
-    throw new Error(`Invalid journal ${filePath} at line ${first.line}: ${first.message}`);
+    try {
+      records.push(JSON.parse(line));
+    } catch (error) {
+      throw new Error(`Invalid journal ${filePath} at line ${index + 1}: ${error.message}`);
+    }
   }
   return {
-    entries,
-    records: entries.map((entry) => entry.payload),
-    issues,
+    records,
     endsWithNewline: raw.length === 0 || raw.endsWith('\n'),
     missing: false
   };
@@ -260,22 +195,16 @@ export async function readJournal(filePath, { tolerateCorruption = false } = {})
 export async function appendJournalRecord(filePath, payload, { recordedAt = new Date().toISOString() } = {}) {
   return withFileLock(`${filePath}.lock`, async () => {
     const journal = await readJournal(filePath);
-    const entry = {
-      journalVersion: JOURNAL_VERSION,
-      sequence: journal.entries.length + 1,
-      recordedAt,
-      // Checksum verification hashes the payload as parsed back from disk, so
-      // hash the JSON round-trip of the payload: a value with toJSON (Date)
-      // would otherwise produce a permanently checksum-invalid record.
-      payload: payload === undefined ? null : JSON.parse(JSON.stringify(payload))
-    };
-    entry.checksum = journalChecksum(entry);
+    const cloned = payload === undefined ? null : JSON.parse(JSON.stringify(payload));
+    const record = cloned && typeof cloned === 'object' && !Array.isArray(cloned)
+      ? { recordedAt, ...cloned }
+      : { recordedAt, payload: cloned };
     await mkdir(path.dirname(filePath), { recursive: true });
     const handle = await open(filePath, 'a', 0o600);
     try {
       // A torn tail line has no trailing newline; start a fresh line so the
-      // new record is not glued onto the corrupt fragment.
-      await handle.writeFile(`${journal.endsWithNewline ? '' : '\n'}${JSON.stringify(entry)}\n`, 'utf8');
+      // new record is not glued onto a partially written fragment.
+      await handle.writeFile(`${journal.endsWithNewline ? '' : '\n'}${JSON.stringify(record)}\n`, 'utf8');
       await handle.sync();
     } finally {
       await handle.close();
@@ -283,101 +212,6 @@ export async function appendJournalRecord(filePath, payload, { recordedAt = new 
     // The record is durable, but a newly created journal's directory entry is
     // not until the directory itself is synced.
     if (journal.missing) await syncDirectory(path.dirname(filePath));
-    return entry;
+    return record;
   });
-}
-
-export async function repairJournal(filePath) {
-  return withFileLock(`${filePath}.lock`, async () => {
-    const journal = await readJournal(filePath, { tolerateCorruption: true });
-    if (journal.issues.length === 0) return { filePath, repaired: false, removedLines: 0, records: journal.records.length };
-    // A sequence issue means a valid, checksummed record follows damage
-    // earlier in the file. Rewriting would silently delete those records, so
-    // only torn-tail damage (invalid-json/checksum with no cascade) is
-    // repairable automatically.
-    if (journal.issues.some((issue) => issue.type === 'sequence')) {
-      return {
-        filePath,
-        repaired: false,
-        removedLines: 0,
-        records: journal.records.length,
-        issues: journal.issues,
-        requiresManualIntervention: true,
-        reason: 'mid-journal damage precedes valid records; automatic repair would delete them'
-      };
-    }
-    const content = journal.entries.length > 0
-      ? `${journal.entries.map((entry) => entry.rawLine).join('\n')}\n`
-      : '';
-    await atomicWriteText(filePath, content);
-    return {
-      filePath,
-      repaired: true,
-      removedLines: journal.issues.length,
-      records: journal.records.length,
-      issues: journal.issues
-    };
-  });
-}
-
-async function walk(root) {
-  const found = [];
-  if (!(await exists(root))) return found;
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    const candidate = path.join(root, entry.name);
-    if (entry.isDirectory()) found.push(...await walk(candidate));
-    else found.push(candidate);
-  }
-  return found;
-}
-
-export async function inspectFileStore(root, { repair = false, staleLockMs = 30_000 } = {}) {
-  const files = await walk(root);
-  const journals = files.filter((file) => file.endsWith('.jsonl'));
-  const locks = files.filter((file) => file.endsWith('.lock'));
-
-  let removedStaleLocks = 0;
-  const lockReports = [];
-  for (const file of locks) {
-    let lock;
-    try { lock = await inspectLockFile(file, staleLockMs); }
-    catch (error) { if (error.code === 'ENOENT') continue; throw error; }
-    if (lock.stale && repair) {
-      await reclaimStaleLock(file, lock);
-      removedStaleLocks += 1;
-    }
-    lockReports.push({
-      file,
-      stale: lock.stale,
-      ownerPid: lock.ownerPid,
-      ownerAlive: lock.ownerAlive,
-      ageMs: lock.ageMs,
-      removed: lock.stale && repair
-    });
-  }
-
-  const journalReports = [];
-  let repairedJournals = 0;
-  for (const file of journals) {
-    const before = await readJournal(file, { tolerateCorruption: true });
-    if (before.issues.length > 0 && repair) {
-      const result = await repairJournal(file);
-      repairedJournals += result.repaired ? 1 : 0;
-      journalReports.push({ file, issues: before.issues, repaired: result.repaired });
-    } else {
-      journalReports.push({ file, issues: before.issues, repaired: false });
-    }
-  }
-
-  const unresolvedJournalIssues = journalReports.filter((report) => report.issues.length > 0 && !report.repaired).length;
-  const unresolvedStaleLocks = lockReports.filter((report) => report.stale && !report.removed).length;
-  return {
-    status: unresolvedJournalIssues === 0 && unresolvedStaleLocks === 0 ? 'pass' : 'fail',
-    root: path.resolve(root),
-    journalsChecked: journals.length,
-    repairedJournals,
-    removedStaleLocks,
-    journalReports,
-    lockReports
-  };
 }

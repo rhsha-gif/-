@@ -21,7 +21,6 @@
       "adapter": "claude",
       "enabled": true,
       "executable": "claude",
-      "trustTier": "trusted",
       "adapterMaturity": "stable"
     },
     {
@@ -29,7 +28,6 @@
       "adapter": "codex",
       "enabled": true,
       "executable": "codex",
-      "trustTier": "trusted",
       "adapterMaturity": "stable"
     }
   ],
@@ -401,8 +399,7 @@
         "openai"
       ],
       "enabled": true,
-      "description": "Root task decomposition and routing workflow installed by aorch.",
-      "trustTier": "trusted"
+      "description": "Root task decomposition and routing workflow installed by aorch."
     },
     {
       "id": "test-driven-development",
@@ -411,8 +408,7 @@
         "anthropic",
         "openai"
       ],
-      "enabled": false,
-      "trustTier": "trusted"
+      "enabled": false
     },
     {
       "id": "systematic-debugging",
@@ -421,8 +417,7 @@
         "anthropic",
         "openai"
       ],
-      "enabled": false,
-      "trustTier": "trusted"
+      "enabled": false
     },
     {
       "id": "verification-before-completion",
@@ -431,8 +426,7 @@
         "anthropic",
         "openai"
       ],
-      "enabled": false,
-      "trustTier": "trusted"
+      "enabled": false
     },
     {
       "id": "browser-qa",
@@ -441,8 +435,7 @@
         "anthropic",
         "openai"
       ],
-      "enabled": false,
-      "trustTier": "reviewed"
+      "enabled": false
     },
     {
       "id": "official-docs",
@@ -451,8 +444,7 @@
         "anthropic",
         "openai"
       ],
-      "enabled": false,
-      "trustTier": "reviewed"
+      "enabled": false
     },
     {
       "id": "quality-gate",
@@ -461,8 +453,7 @@
         "*"
       ],
       "enabled": false,
-      "phase": "post",
-      "trustTier": "trusted"
+      "phase": "post"
     }
   ],
   "progress": {
@@ -473,51 +464,9 @@
     "observationsFile": ".aorch/observations.jsonl"
   },
   "verification": {
-    "commandTimeoutMs": 900000,
-    "isolationByRisk": {
-      "low": "same-workspace",
-      "standard": "git-worktree",
-      "high": "git-worktree",
-      "critical": "git-worktree"
-    }
+    "commandTimeoutMs": 900000
   },
   "controlPlane": {
-    "providerTrustByRisk": {
-      "low": [
-        "trusted",
-        "reviewed",
-        "untrusted"
-      ],
-      "standard": [
-        "trusted",
-        "reviewed"
-      ],
-      "high": [
-        "trusted",
-        "reviewed"
-      ],
-      "critical": [
-        "trusted"
-      ]
-    },
-    "capabilityTrustByRisk": {
-      "low": [
-        "trusted",
-        "reviewed",
-        "untrusted"
-      ],
-      "standard": [
-        "trusted",
-        "reviewed"
-      ],
-      "high": [
-        "trusted",
-        "reviewed"
-      ],
-      "critical": [
-        "trusted"
-      ]
-    },
     "experimentalAdapterMaxRisk": "standard"
   }
 }

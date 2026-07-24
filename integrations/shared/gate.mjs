@@ -109,8 +109,8 @@ export function buildGateContext(classification) {
 
   return `ROOT GATE: The adaptive orchestrator must run first for this prompt.\n` +
     `Classification: ${requestClass}; risk hint: ${riskHint}; gate failure policy: ${failPolicy}; durable run: ${durableRun}.\n` +
-    `This blocking hook is intentionally thin. Perform task decomposition, inventory lookup, lessons retrieval, route scoring, and provider execution outside this hook by invoking the adaptive-orchestrate skill.\n` +
-    `The orchestrator must preserve the user's final goal, avoid unnecessary task splitting, and choose each bounded task's provider, model, reasoning effort, skills, hooks, plugins, permissions, isolation, and verification plan from capabilities that are actually installed and trusted for the task risk.\n` +
-    `Treat worker output as a claim, not proof. Require independent verifier evidence before terminal completion. Keep delegation shallow and do not let workers modify the harness or control-plane policy.\n` +
-    `A simple read-only request may be completed without a durable run after this classification. Development or high-risk work must use a durable run, explicit acceptance criteria, bounded scope, and post-run reflection.`;
+    `This blocking hook is intentionally thin. Perform task decomposition, inventory lookup, route scoring, and provider execution outside this hook by invoking the adaptive-orchestrate skill.\n` +
+    `The orchestrator must preserve the user's final goal, avoid unnecessary task splitting, and choose each bounded task's provider, model, reasoning effort, skills, hooks, plugins, permissions, isolation, and verification plan from capabilities that are actually installed for the task risk.\n` +
+    `Treat worker output as a claim, not proof. Gate terminal completion on the task's own verification commands. Keep delegation shallow and do not let workers modify the harness or control-plane policy.\n` +
+    `A simple read-only request may be completed without a durable run after this classification. Development or high-risk work must use a durable run, explicit acceptance criteria, bounded scope, and verification commands.`;
 }

@@ -1,6 +1,6 @@
 # Adaptive Orchestrator
 
-> **v0.4.0** — 0.3.0 전체 소스에 대한 비판적 검토에서 실증된 결함(잠금 회수 경합, 저널 손상 복구, 게이트 오분류, `--dry-run` 안전 강등, 거짓 partial claim 등)을 수정한 하드닝 릴리스입니다. 상세 내역은 [`docs/REVIEW-2026-07-16.md`](docs/REVIEW-2026-07-16.md)와 [`CHANGELOG.md`](CHANGELOG.md)를 참고하세요. 테스트는 141개(1개 실패) → 172개 전부 통과.
+> **대청소 릴리스** — 개인용 두 구독(Claude Code + Codex CLI) 도구에 과했던 부분을 걷어냈습니다: worker 불신용 SHA-256 attestation/hidden verifier/worktree 재실행 검증, 공급망 trust tier(trusted/reviewed/untrusted), 데이터 없는 학습 시스템(retrospective·lessons·proposal), 체크섬 JSONL·doctor `--repair` 같은 과잉 내구성·운영 기계를 제거했습니다. 남긴 핵심은 난이도→등급 라우팅, 크로스-에이전트 디스패치, 그리고 **테스트 실행 게이트**입니다. 상세 내역은 [`CHANGELOG.md`](CHANGELOG.md)를 참고하세요.
 
 Adaptive Orchestrator는 Claude Code 또는 Codex CLI에서 사용자의 실질적인 요청보다 먼저 작동하는 소형 제어 런타임입니다. 요청을 필요 이상으로 쪼개지 않으면서 독립 검증 가능한 작업으로 분해하고, 각 작업에 가장 적합한 조합을 선택합니다.
 
@@ -20,13 +20,12 @@ provider
 → 얇은 UserPromptSubmit 정책 게이트
 → adaptive-orchestrate root skill
 → 의미 있는 작업 분해
-→ 위험 정책과 capability 신뢰등급 적용
+→ 위험 정책 적용
 → provider/model/effort/capability 선택
 → bounded worker 실행
-→ 독립 verifier attestation
+→ 테스트 실행 게이트(작업의 verification 명령)
 → 필요한 독립 review
 → 결과 통합
-→ 세션 회고와 승인형 개선 제안
 ```
 
 ## 제작 우선순위와 런타임 정책
@@ -41,46 +40,28 @@ TRIP, LazyCodex, autoresearch, SyMerge 등 참고 자료를 선별해 이 소스
 
 기본 선택 순서는 `quality → tokens → latency`이지만 task envelope에서 바꿀 수 있습니다. 품질 외 지표를 먼저 둘 때는 `minimumQuality`를 명시해야 합니다.
 
-## v0.3.0에서 강화된 제어 경계
+## 제어 경계
 
 ### 얇은 root gate
 
-`UserPromptSubmit` hook은 모델 라우팅, inventory 검색, lessons 검색, 작업 분해를 하지 않습니다. 요청을 `read-only`, `development`, `high-risk`로 보수적으로 분류하고 최소 정책만 주입합니다. 보안·DB·금융 같은 주제를 설명하거나 분석해 달라는 read-only 요청은 mutation 요청으로 오인하지 않습니다. 무거운 오케스트레이션은 hook 바깥의 root skill이 수행합니다.
+`UserPromptSubmit` hook은 모델 라우팅, inventory 검색, 작업 분해를 하지 않습니다. 요청을 `read-only`, `development`, `high-risk`로 보수적으로 분류하고 최소 정책만 주입합니다. 보안·DB·금융 같은 주제를 설명하거나 분석해 달라는 read-only 요청은 mutation 요청으로 오인하지 않습니다. 무거운 오케스트레이션은 hook 바깥의 root skill이 수행합니다.
 
 ### risk-first 라우팅
 
-라우터는 모델 점수부터 비교하지 않습니다. 먼저 risk에 따라 허용되는 provider 신뢰등급, adapter maturity, capability 신뢰등급, verification isolation을 제한하고, 그 안에서 model과 effort를 선택합니다.
+라우터는 모델 점수부터 비교하지 않습니다. 먼저 risk에 따라 허용되는 adapter maturity와 write isolation을 제한하고, 그 안에서 model과 effort를 선택합니다.
 
-### worker claim과 verifier evidence 분리
+### worker claim과 테스트 실행 게이트
 
-worker receipt는 완료 증명이 아니라 주장입니다. `aorch exec` 또는 `aorch verify`가 별도 verifier를 실행해 명령을 재실행하고, 실제 Git 변경과 scope를 비교하고, SHA-256 attestation을 발급해야 완료 근거가 됩니다. worker에게 공개하지 않는 `verifierCommands`도 사용할 수 있습니다.
+worker receipt는 완료 증명이 아니라 주장입니다. `aorch exec`는 완료 시 작업이 스스로 정의한 `verificationCommands`(테스트)를 실제로 실행해 그 통과 여부로 완료를 게이트하고, worker가 주장한 변경 파일이 실제 Git diff와 일치하는지 값싸게 확인합니다. "테스트를 돌려라, LLM에게 묻지 마라." SHA-256 attestation, 숨은 verifier 명령, worktree 재실행 격리는 개인 도구엔 과해 제거했습니다.
 
-### 확장 공급망 신뢰등급
-
-provider와 capability에는 다음 등급을 둡니다.
-
-```text
-trusted
-reviewed
-untrusted
-```
-
-provider adapter에는 `stable` 또는 `experimental` maturity를 지정합니다. critical 실행은 trusted/stable 경로만 허용합니다. untrusted provider와 capability는 low-risk read-only 작업에서 각각 명시적으로 허용한 경우에만 선택할 수 있습니다.
-
-### 복구 가능한 file-first state
+### file-first state
 
 데이터베이스나 daemon을 추가하지 않고 다음을 구현했습니다.
 
 - atomic write: 임시 파일 → fsync → rename
 - per-file lock과 live-PID-aware stale-lock 회수
-- checksum과 sequence가 포함된 append-only JSONL
-- partial JSONL tail 복구
-- 잘못된 `active-run.json` pointer 탐지와 정리
-- `aorch doctor --repair`
-
-### advisory lessons와 증거 기반 progress
-
-운영 lesson은 policy가 아닙니다. scope tag, evidence, confidence, expiry, source run이 있는 advisory record로만 저장됩니다. root hook은 lessons를 읽지 않으며, root skill이 blocking path 밖에서 관련 lesson만 조회합니다.
+- append-only plain JSONL
+- 잘못된 `active-run.json` pointer 탐지와 정리(`aorch doctor --repair`)
 
 진행률은 estimated percentage와 함께 phase, confidence, blocker, evidence count, last evidence time을 표시합니다. percentage는 완료 증거가 아닙니다.
 
@@ -90,15 +71,11 @@ provider adapter에는 `stable` 또는 `experimental` maturity를 지정합니�
 2. root `adaptive-orchestrate` skill
 3. task-specific provider/model/effort router
 4. 설치된 skill/plugin/hook exact-ID inventory
-5. 시간 감쇠가 적용된 모델 성과 관측
+5. 시간 감쇠가 적용된 모델 성과 관측(provider·model·effort·taskKind 4차원)
 6. 설정만으로 추가 가능한 모델과 generic provider
-7. provider/capability trust policy
-8. bounded worker와 strict receipt
-9. 독립 verifier attestation과 hidden checks
-10. durable run state와 evidence-aware progress
-11. 종료 후 retrospective, 사용자 feedback, 승인형 improvement proposal
-12. TTL과 evidence를 가진 advisory operational lessons
-13. file-state health check와 repair
+7. bounded worker와 strict receipt
+8. 작업의 verification 명령을 실행하는 완료 게이트
+9. durable run state와 evidence-aware progress
 
 의도적으로 제외한 기능:
 
@@ -116,7 +93,7 @@ provider adapter에는 `stable` 또는 `experimental` maturity를 지정합니�
 
 - Node.js 20 이상
 - Claude Code CLI 또는 Codex CLI
-- Git 저장소: read-only 작업에는 선택 사항이지만 write 작업의 변경 증명과 Git-worktree verifier에는 필수
+- Git 저장소: read-only 작업에는 선택 사항이지만 write 작업의 변경 검증과 격리 worktree에는 필수
 
 각 provider CLI는 사전에 로그인되어 있어야 합니다. 이 패키지는 API key를 저장하거나 전달하지 않습니다. `aorch doctor`는 실행 파일과 로컬 catalog/state를 검사하지만, 계정별 모델 entitlement를 원격 호출 없이 검증했다고 주장하지 않습니다.
 
@@ -150,19 +127,16 @@ project/
 │  ├─ config.json
 │  └─ hooks/
 │     ├─ gate.mjs
-│     ├─ journal.mjs
 │     ├─ user-prompt-submit.mjs
 │     └─ session-review.mjs
 ├─ .claude/
 │  ├─ settings.json
 │  ├─ skills/
-│  │  ├─ adaptive-orchestrate/SKILL.md
-│  │  └─ post-run-reflection/SKILL.md
+│  │  └─ adaptive-orchestrate/SKILL.md
 │  └─ agents/
 ├─ .agents/
 │  └─ skills/
-│     ├─ adaptive-orchestrate/SKILL.md
-│     └─ post-run-reflection/SKILL.md
+│     └─ adaptive-orchestrate/SKILL.md
 └─ .codex/
    ├─ hooks.json
    └─ agents/
@@ -195,20 +169,18 @@ aorch doctor --repair
 thin gate가 요청을 분류하고 root directive를 주입합니다. 호스트 모델은 `adaptive-orchestrate` skill에서 다음 절차를 수행합니다.
 
 1. active run과 사용자 최종 목표 확인
-2. blocking hook 밖에서 `aorch lessons --lint` 실행 및 관련 advisory lesson 조회
-3. 독립 검증 가능한 작업으로만 분해
-4. risk를 먼저 분류하고 isolation·trust·review 요구 결정
-5. write 작업은 이미 격리된 경우가 아니라면 독립 worktree에서 실행. `aorch exec`도 이를 확인하며, low/standard in-place fallback은 task의 `allowInPlaceWrite: true`와 사용자 승인이 모두 있어야 함
-6. `aorch inventory`로 실제 capability 확인
-7. 작업별 task envelope 작성
-8. `aorch route`로 provider/model/effort 선택
-9. `aorch exec`로 bounded worker 실행
-10. receipt를 claim으로 취급하고 verifier attestation·실제 diff·fresh output 검토
-11. 위험도에 따라 독립 reviewer 추가; reviewer에는 executor rationale보다 requirements·invariants·actual diff·verifier artifacts를 먼저 제공
-12. 검토된 route 결과를 `aorch record`로 기록
-13. 전체 run 종료 후 `post-run-reflection` 수행
+2. 독립 검증 가능한 작업으로만 분해
+3. risk를 먼저 분류하고 isolation·review 요구 결정
+4. write 작업은 이미 격리된 경우가 아니라면 독립 worktree에서 실행. `aorch exec`도 이를 확인하며, low/standard in-place fallback은 task의 `allowInPlaceWrite: true`와 사용자 승인이 모두 있어야 함
+5. `aorch inventory`로 실제 capability 확인
+6. 작업별 task envelope 작성
+7. `aorch route`로 provider/model/effort 선택
+8. `aorch exec`로 bounded worker 실행
+9. receipt를 claim으로 취급하고 작업의 verification 명령(테스트) 통과·실제 diff 검토
+10. 위험도에 따라 독립 reviewer 추가; reviewer에는 executor rationale보다 requirements·invariants·actual diff를 먼저 제공
+11. 검토된 route 결과를 `aorch record`로 기록
 
-단순 read-only 요청은 durable run 없이 처리할 수 있습니다. 개발 또는 high-risk 작업은 durable run, 명시적 acceptance criteria, 제한된 scope, verification, post-run reflection을 사용합니다.
+단순 read-only 요청은 durable run 없이 처리할 수 있습니다. 개발 또는 high-risk 작업은 durable run, 명시적 acceptance criteria, 제한된 scope, verification 명령을 사용합니다.
 
 ## 작업 경계
 
@@ -222,7 +194,7 @@ thin gate가 요청을 분류하고 root directive를 주입합니다. 호스트
 
 ## Run lifecycle
 
-실질적인 작업은 durable run으로 관리합니다. 실행 중인 run이나 reflection이 끝나지 않은 terminal run이 있으면 이를 재개·종료·회고한 뒤 새 run을 만듭니다.
+실질적인 작업은 durable run으로 관리합니다. 실행 중인 run이 있으면 이를 재개·종료한 뒤 새 run을 만듭니다.
 
 ### 시작
 
@@ -267,7 +239,7 @@ failed
 cancelled
 ```
 
-`finish` 직후에는 `reviewStatus: pending`입니다. retrospective가 저장되기 전에는 run이 완전히 닫힌 것으로 간주하지 않습니다.
+`finish`는 run을 terminal 상태로 만듭니다. run이 아직 실행 중이면 `Stop` hook이 세션 종료를 막습니다.
 
 ## Progress
 
@@ -305,7 +277,7 @@ aorch route --task examples/task.json
 
 route 출력:
 
-- provider와 trust tier
+- provider
 - profile ID와 model slug
 - reasoning effort
 - adapter maturity
@@ -339,42 +311,28 @@ aorch exec --task examples/task.json --dry-run
 aorch exec --task examples/task.json
 ```
 
-## Independent verification
+## 완료 게이트 (테스트 실행)
 
-Task의 두 verification 계층:
+Task는 자신의 검증 명령을 선언합니다.
 
 ```json
 {
   "verificationCommands": ["npm test"],
-  "verifierCommands": ["npm run check"],
-  "verificationIsolation": "git-worktree"
+  "allowInPlaceWrite": false
 }
 ```
 
-- `verificationCommands`: worker도 알고 실행할 수 있는 공개 검증
-- `verifierCommands`: worker prompt에서 제외되는 verifier-only checks
-- `verificationIsolation`: `same-workspace` 또는 `git-worktree`; 기본값은 low만 same-workspace이고 standard 이상은 git-worktree
+- `verificationCommands`: 완료 게이트로 실제 실행되는 검증/테스트 명령. `aorch exec`가 receipt를 `complete`로 받으면 이 명령들을 워크스페이스에서 실행하고, 하나라도 실패하면 완료를 거절합니다. "테스트를 돌려라, LLM에게 묻지 마라."
 - `allowInPlaceWrite`: low/standard write task에 한해 사용자가 명시적으로 현재 checkout 수정을 허용했음을 기록하는 예외 플래그. 기본값은 `false`이며 high/critical에서는 무시하고 fail closed
 
-worker receipt를 수동 검증할 수도 있습니다.
-
-```bash
-aorch verify \
-  --task task.json \
-  --receipt receipt.json \
-  --isolation git-worktree
-```
-
-수동 `aorch verify`는 검증 명령을 재실행해 read-only claim을 attestation으로 남깁니다. write task의 변경 증거(before/after workspace snapshot)는 `aorch exec` 실행 중에만 캡처되므로, write claim의 attestation은 `aorch exec` 흐름에서 발급됩니다. 수동 verify에 write task를 넘기면 fail closed로 거절됩니다.
-
-verifier는 별도 attestation artifact를 저장합니다. 검증 실패도 attestation으로 남겨 worker의 허위 완료 주장을 추적할 수 있습니다. 완료된 write claim은 Git 변경 증거가 없으면 거절되며, bounded worker가 commit·reset 등으로 `HEAD`를 바꾸는 것도 차단됩니다. 실제 worker 실행도 linked worktree 여부를 확인합니다. low/standard 작업만 명시적 사용자 승인과 `allowInPlaceWrite: true`가 있을 때 현재 checkout에서 실행할 수 있고, high/critical write는 항상 linked worktree를 요구합니다.
+게이트와 별개로, 값싼 변경 가드가 모든 claim에 적용됩니다. worker가 주장한 변경 파일이 실제 Git diff와 일치하는지 비교하고, read-only 작업이 파일을 건드리지 않았는지, bounded worker가 `HEAD`를 바꾸지 않았는지 확인합니다. 완료된 write claim은 Git 변경 증거가 없으면 거절됩니다. 실제 worker 실행도 linked worktree 여부를 확인합니다 — low/standard 작업만 명시적 사용자 승인과 `allowInPlaceWrite: true`가 있을 때 현재 checkout에서 실행할 수 있고, high/critical write는 항상 linked worktree를 요구합니다.
 
 ## 동적으로 변하는 모델 성능
 
 모델 능력을 고정 상수로 취급하지 않습니다. 관측치는 다음 단위로 분리합니다.
 
 ```text
-provider × profileId × model × effort × taskKind × role × risk × complexity
+provider × model × effort × taskKind
 ```
 
 최근 독립 검토 결과는 크게, 오래된 결과는 작게 반영합니다.
@@ -390,7 +348,7 @@ w_i=2^{-a_i/h}
 aorch record --input examples/review-observation.json
 ```
 
-worker의 자기평가가 아니라 독립 reviewer/verifier 결과를 기록해야 합니다. risk와 complexity가 다른 관측치는 서로의 성능 근거로 섞지 않습니다. 새 모델은 challenger로 시작할 수 있지만 critical executor는 trusted/stable provider의 stable model만 허용합니다.
+worker의 자기평가가 아니라 독립 reviewer 결과를 기록해야 합니다. 관측치는 provider·model·effort·taskKind 4차원으로 매칭합니다(솔로 볼륨에서 셀이 실제로 차도록 축소). 새 모델은 challenger로 시작할 수 있으며, 검증되지 않은 challenger를 critical 작업의 단독 executor로 쓰지 않습니다.
 
 ## 새 model과 provider
 
@@ -429,12 +387,11 @@ stdin으로 prompt를 받고 stdout으로 JSON receipt를 반환하는 CLI는 ge
   "enabled": true,
   "executable": "new-provider-cli",
   "args": ["run", "--model", "{model}", "--effort", "{effort}", "-"],
-  "trustTier": "untrusted",
   "adapterMaturity": "experimental"
 }
 ```
 
-새 adapter는 low-risk canary와 contract test를 통과한 뒤 trust/maturity를 올리는 것이 원칙입니다. critical 실행은 experimental adapter를 사용하지 않습니다.
+새 adapter는 low-risk canary와 contract test를 통과한 뒤 maturity를 올리는 것이 원칙입니다. critical 실행은 experimental adapter를 사용하지 않습니다.
 
 ## Skill, plugin, hook 선택
 
@@ -452,7 +409,7 @@ project/.agents/skills/*/SKILL.md
 provider/plugin manifests
 ```
 
-호스트 모델은 inventory에 실제 존재하는 exact ID만 task에 넣습니다. skill과 plugin처럼 서로 다른 capability type이 같은 ID를 사용하면 shadowing을 허용하지 않고 ambiguous ID로 fail closed합니다. capability description은 instruction이 아닌 bounded metadata로 표시되며, untrusted description은 inventory 출력에서 숨깁니다. project-local discovery는 기본 `reviewed`, user-global discovery는 기본 `untrusted`로 취급하며 config가 명시한 trust를 자동 승격하지 않습니다.
+호스트 모델은 inventory에 실제 존재하는 exact ID만 task에 넣습니다. skill과 plugin처럼 서로 다른 capability type이 같은 ID를 사용하면 shadowing을 허용하지 않고 ambiguous ID로 fail closed합니다. capability description은 instruction이 아닌 bounded metadata로 표시됩니다.
 
 기본 상한:
 
@@ -462,90 +419,14 @@ plugins ≤ 2
 hooks   ≤ 3
 ```
 
-critical 작업은 trusted capability와 trusted/stable provider만 사용합니다. untrusted provider는 `allowUntrustedProviders: true`, untrusted capability는 `allowUntrustedCapabilities: true`인 low-risk read-only task에서만 사용할 수 있습니다.
+## 세션 종료 게이트
 
-## Post-run self-feedback
-
-terminal run이 끝나면 `post-run-reflection` skill이 다음을 분석합니다.
-
-- 실제 오류와 증거
-- route 변경과 retry
-- 과도하거나 부족한 context와 agent 호출
-- 잘못된 task boundary
-- verification 누락 또는 과잉
-- 이번 run이 만든 기술부채
-- 기존 범위 밖 기술부채
-- 사용자 사후 feedback
-
-```bash
-aorch run --action reflect \
-  --run active \
-  --input examples/retrospective.json
-```
-
-오류에서 lesson을 만들려면 최소한 다음이 필요합니다.
-
-```text
-description
-prevention
-scope tags
-verified evidence
-confidence
-source run
-```
-
-lesson은 90일 기본 TTL을 가진 advisory record이며 `promotedToPolicy`는 항상 false입니다. root hook은 lesson을 읽지 않습니다. root skill이 blocking path 밖에서 다음 명령으로 검증하고 관련 항목만 조회합니다.
-
-```bash
-aorch lessons --lint
-aorch lessons --query "verification test path" --limit 5
-```
-
-만료되거나 evidence/scope가 없는 lesson은 조회에서 제외됩니다.
-
-Claude Code에서는 `Stop` hook이 terminal run의 retrospective 누락을 한 번 더 알립니다. `SessionEnd`는 종료를 막지 않고 누락 사실을 checksum journal에 기록합니다. Codex의 `Stop` hook도 같은 gate를 담당합니다.
-
-## 사용자 feedback
-
-```json
-{
-  "rating": 4,
-  "comment": "결과는 맞지만 검토 범위가 지나치게 넓었다."
-}
-```
-
-```bash
-aorch run --action feedback \
-  --run <run-id> \
-  --input feedback.json
-```
-
-사용자 feedback이 새 오류나 비효율을 드러내면 retrospective를 개정합니다. 기존 feedback과 proposal decision은 revision 사이에서 보존됩니다.
-
-## 승인형 하네스 개선
-
-회고는 source나 policy를 직접 수정하지 않습니다. improvement proposal은 다음 경계를 갖습니다.
-
-```text
-status: pending
-requiresUserApproval: true
-applied: false
-```
-
-```bash
-aorch run --action decide \
-  --run <run-id> \
-  --proposal P1 \
-  --decision approved \
-  --comment "별도 bounded run에서 적용"
-```
-
-승인은 동의만 기록합니다. 실제 변경은 별도 run에서 테스트·review·verification을 거쳐 구현합니다. router, verifier, permissions, hooks, skills, provider adapters를 운영 작업 중 자동 수정하지 않습니다.
+Claude Code와 Codex의 `Stop` hook은 실행 중인 run이 남아 있으면 세션 종료를 막습니다. run을 재개하거나 `aorch run --action finish`로 명시적으로 종료해야 합니다. worker/verifier 서브프로세스는 이 게이트를 통과합니다.
 
 ## 기술부채 정책
 
 - **현재 run이 만든 부채:** 종료 전에 해결하고 resolution evidence를 남깁니다.
-- **기존 범위 밖 부채:** 현재 작업을 확장하지 않고 proposal로 기록합니다.
+- **기존 범위 밖 부채:** 현재 작업을 확장하지 않고 사용자에게 보고합니다.
 - **하네스 부채:** 사용자 승인 후 별도 run에서 처리합니다.
 
 ## 명령 요약
@@ -553,11 +434,9 @@ aorch run --action decide \
 ```text
 aorch route
 aorch exec
-aorch verify
 aorch record
 aorch inventory
 aorch progress
-aorch lessons [--lint]
 aorch run
 aorch install
 aorch doctor [--repair]
@@ -570,9 +449,6 @@ start
 task
 finish
 show
-reflect
-feedback
-decide
 ```
 
 ## 프로젝트 상태 파일
@@ -585,21 +461,15 @@ decide
 ├─ hooks/
 ├─ runs/
 │  └─ <run-id>/run.json
-├─ task-runs/
-│  └─ <task-run>/<task-id>/
-│     ├─ receipt.json
-│     ├─ execution.json
-│     ├─ verification-latest.json
-│     └─ verifier/<verification-id>/
-│        ├─ attestation.json
-│        └─ *.stdout.log / *.stderr.log
-└─ learning/
-   ├─ retrospectives/<run-id>.json
-   ├─ lessons.json
-   └─ unreviewed-sessions.jsonl
+└─ task-runs/
+   └─ <task-run>/<task-id>/
+      ├─ receipt.json
+      ├─ execution.json
+      ├─ worker-output.json
+      └─ *.stdout.log / *.stderr.log
 ```
 
-JSON files are written atomically. JSONL journals use a live-owner-aware lock, monotonically increasing sequence, and checksum envelope. `aorch doctor --repair` can remove abandoned stale locks, truncate invalid journal tails, and clear an invalid active-run pointer. 별도 service나 DB는 필요하지 않습니다.
+JSON files are written atomically (임시 파일 → fsync → rename). JSONL journals are plain append-only lines guarded by a live-owner-aware lock. `aorch doctor --repair` can remove abandoned stale locks and clear an invalid active-run pointer. 별도 service나 DB는 필요하지 않습니다.
 
 ## 안전 경계
 
@@ -613,4 +483,4 @@ JSON files are written atomically. JSONL journals use a live-owner-aware lock, m
 - 외부 메시지 전송
 - 하네스 source/policy 자동 변경
 
-hook은 workflow policy를 주입하는 guardrail이지 운영체제 수준의 sandbox가 아닙니다. 실제 위험 작업은 provider permission, trusted capability, scope, worktree, network policy, independent verifier, human approval을 함께 사용해 통제해야 합니다.
+hook은 workflow policy를 주입하는 guardrail이지 운영체제 수준의 sandbox가 아닙니다. 실제 위험 작업은 provider permission, scope, worktree, network policy, 테스트 실행 게이트, human approval을 함께 사용해 통제해야 합니다.

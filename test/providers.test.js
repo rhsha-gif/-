@@ -6,7 +6,7 @@ import { buildCodexCommand } from '../src/providers/codex-cli.js';
 import { buildGenericCommand } from '../src/providers/generic-cli.js';
 
 const task = {
-  verifierCommands: ['echo hidden verifier sentinel'],
+  internalNote: 'hidden verifier sentinel',
   id: 'T1', title: 'Implement parser', objective: 'Implement the parser', kind: 'implementation',
   role: 'executor', risk: 'standard', write: true, acceptanceCriteria: ['all parser tests pass']
 };

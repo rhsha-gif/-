@@ -1,7 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { access, readFile, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { inspectFileStore } from './file-store.js';
 
 async function exists(filePath) {
   try { await access(filePath); return true; } catch { return false; }
@@ -98,11 +97,10 @@ export function runDoctor(config) {
 }
 
 export async function inspectStateHealth(root, options = {}) {
-  const files = await inspectFileStore(root, options);
   const activeRun = await inspectActiveRunPointer(root, options);
   return {
-    ...files,
-    status: files.status === 'pass' && activeRun.status === 'pass' ? 'pass' : 'fail',
+    status: activeRun.status === 'pass' ? 'pass' : 'fail',
+    root: path.resolve(root),
     activeRun
   };
 }

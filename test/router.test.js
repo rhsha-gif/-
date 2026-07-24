@@ -265,34 +265,6 @@ test('a high-complexity task can route to a deep effort profile', () => {
   assert.equal(route.decision.complexity, 'high');
 });
 
-test('critical execution requires a trusted stable provider adapter', () => {
-  const critical = { ...task, risk: 'critical', complexity: 'high' };
-  const route = selectRoute({
-    task: critical,
-    catalog: {
-      routing: baseRouting,
-      controlPlane: {
-        providerTrustByRisk: {
-          low: ['trusted', 'reviewed', 'untrusted'], standard: ['trusted', 'reviewed'],
-          high: ['trusted', 'reviewed'], critical: ['trusted']
-        },
-        experimentalAdapterMaxRisk: 'standard'
-      },
-      providers: [
-        { id: 'anthropic', trustTier: 'reviewed', adapterMaturity: 'stable' },
-        { id: 'openai', trustTier: 'trusted', adapterMaturity: 'stable' }
-      ],
-      models: [
-        model({ id: 'higher-reviewed', provider: 'anthropic', quality: { implementation: 0.99 }, efforts: [{ name: 'high', complexities: ['high'], tokenMultiplier: 1, latencyMultiplier: 1 }] }),
-        model({ id: 'trusted', provider: 'openai', quality: { implementation: 0.90 }, efforts: [{ name: 'high', complexities: ['high'], tokenMultiplier: 1, latencyMultiplier: 1 }] })
-      ]
-    },
-    observations: []
-  });
-  assert.equal(route.provider, 'openai');
-  assert.equal(route.providerTrustTier, 'trusted');
-});
-
 test('critical executor does not use a challenger even after observations', () => {
   const observations = Array.from({ length: 8 }, (_, index) => ({
     provider: 'openai', profileId: 'challenger', model: 'challenger', effort: 'high',
@@ -312,44 +284,6 @@ test('critical executor does not use a challenger even after observations', () =
     observations
   });
   assert.equal(route.profileId, 'stable');
-});
-
-test('untrusted providers require explicit low-risk read-only opt-in', () => {
-  const lowRiskReadOnly = { ...task, risk: 'low', write: false };
-  const catalog = {
-    routing: baseRouting,
-    controlPlane: {
-      providerTrustByRisk: {
-        low: ['trusted', 'reviewed', 'untrusted'], standard: ['trusted', 'reviewed'],
-        high: ['trusted', 'reviewed'], critical: ['trusted']
-      },
-      experimentalAdapterMaxRisk: 'standard'
-    },
-    providers: [
-      { id: 'trusted-provider', trustTier: 'trusted', adapterMaturity: 'stable' },
-      { id: 'untrusted-provider', trustTier: 'untrusted', adapterMaturity: 'stable' }
-    ],
-    models: [
-      model({ id: 'trusted-model', provider: 'trusted-provider', quality: { implementation: 0.8 } }),
-      model({ id: 'untrusted-model', provider: 'untrusted-provider', quality: { implementation: 0.99 } })
-    ]
-  };
-
-  const defaultRoute = selectRoute({ task: lowRiskReadOnly, catalog, observations: [] });
-  assert.equal(defaultRoute.provider, 'trusted-provider');
-
-  const optedInRoute = selectRoute({
-    task: { ...lowRiskReadOnly, allowUntrustedProviders: true },
-    catalog,
-    observations: []
-  });
-  assert.equal(optedInRoute.provider, 'untrusted-provider');
-
-  assert.throws(() => selectRoute({
-    task: { ...lowRiskReadOnly, write: true, allowUntrustedProviders: true },
-    catalog: { ...catalog, models: [catalog.models[1]] },
-    observations: []
-  }), /No eligible route/i);
 });
 
 test('models of a disabled provider are never routed', () => {

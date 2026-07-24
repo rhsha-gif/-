@@ -1,15 +1,12 @@
 {
   "provider": "openai",
-  "profileId": "codex-terra-general",
   "model": "gpt-5.6-terra",
   "effort": "high",
   "taskKind": "implementation",
-  "role": "executor",
-  "risk": "standard",
-  "complexity": "standard",
   "verdict": "approved",
   "recordedAt": "2026-07-16T00:00:00Z",
   "metadata": {
+    "profileId": "codex-terra-general",
     "reviewerProvider": "anthropic",
     "taskId": "T-parser"
   }

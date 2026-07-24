@@ -21,12 +21,11 @@ test('run state is durable and progress-relevant fields survive updates', async 
   assert.equal((await resolveActiveRun(root)).path, run.path);
 });
 
-test('finishing a run creates a pending review gate', async () => {
+test('finishing a run records terminal status and timestamp', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-state-finish-'));
   const run = await createRun({ root, prompt: 'build it', tasks: [] });
   const finished = await finishRun(run.path, 'completed');
   assert.equal(finished.status, 'completed');
-  assert.equal(finished.reviewStatus, 'pending');
   assert.ok(finished.finishedAt);
 });
 
@@ -43,11 +42,10 @@ test('rejects unsafe run ids and refuses to overwrite an unfinished active run',
     /active run.*running/i
   );
 
+  // A finished run no longer blocks the next run: reflection gating is gone.
   await finishRun(first.path, 'completed');
-  await assert.rejects(
-    () => createRun({ root, prompt: 'second', runId: 'R2', tasks: [] }),
-    /reflection/i
-  );
+  const second = await createRun({ root, prompt: 'second', runId: 'R2', tasks: [] });
+  assert.equal(second.id, 'R2');
 });
 
 test('completed runs require successful terminal task states', async () => {

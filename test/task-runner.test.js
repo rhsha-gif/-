@@ -62,17 +62,15 @@ test('routes, spawns a generic worker, validates its receipt, and persists evide
 
   assert.equal(result.route.provider, 'local-test');
   assert.equal(result.receipt.status, 'complete');
-  assert.equal(result.attestation.status, 'pass');
-  assert.equal(result.attestation.checks.length, 1);
-  assert.equal(result.attestation.checks[0].exitCode, 0);
-  assert.ok(result.attestationPath.endsWith('attestation.json'));
+  assert.equal(result.verification.status, 'pass');
+  assert.equal(result.verification.checks.length, 1);
+  assert.equal(result.verification.checks[0].exitCode, 0);
   assert.equal(JSON.parse(await readFile(result.receiptPath, 'utf8')).confidence, 0.9);
   assert.equal(progress[0].label, 'estimated');
   assert.equal(progress.at(-1).percent, 100);
   assert.equal(progress.at(-1).phase, 'complete');
   assert.equal(progress.at(-1).confidence, 'high');
   assert.ok(progress.at(-1).evidenceCount >= 2);
-  assert.equal(JSON.parse(await readFile(result.attestationPath, 'utf8')).status, 'pass');
 });
 
 test('dry-run builds the route and command without mutating project state', async () => {
@@ -134,10 +132,10 @@ test('rejects a worker success claim when independent verification fails', async
     config,
     cwd,
     onProgress: (entry) => progress.push(entry)
-  }), /independent verification failed/i);
+  }), /verification command failed/i);
   assert.equal(progress.at(-1).phase, 'failed');
   assert.equal(progress.at(-1).confidence, 'low');
-  assert.match(progress.at(-1).blockers[0].message, /independent verification failed/i);
+  assert.match(progress.at(-1).blockers[0].message, /verification command failed/i);
 });
 
 test('partial worker outcomes are reported as partial rather than still executing', async () => {
@@ -172,7 +170,7 @@ test('partial worker outcomes are reported as partial rather than still executin
   const progress = [];
   const result = await executeTask({ task, config, cwd, onProgress: (entry) => progress.push(entry) });
   assert.equal(result.receipt.status, 'partial');
-  assert.equal(result.attestation, null);
+  assert.equal(result.verification, null);
   assert.equal(progress.at(-1).phase, 'partial');
   assert.equal(progress.at(-1).percent, 75);
   assert.match(progress.at(-1).blockers[0].message, /verification is still pending/i);
@@ -272,7 +270,7 @@ test('write workers require an isolated worktree unless low or standard risk is 
   }), /high-risk.*worktree|worktree.*high-risk/i);
 });
 
-test('a complete claim with nothing verifiable yields an inconclusive attestation and low confidence', async () => {
+test('a complete claim with no verification commands runs no gate and is capped at medium confidence', async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-inconclusive-'));
   const workerPath = path.join(cwd, 'fake-worker.mjs');
   const unverifiableReceipt = {
@@ -300,6 +298,6 @@ test('a complete claim with nothing verifiable yields an inconclusive attestatio
     config, cwd,
     onProgress: (entry) => progress.push(entry)
   });
-  assert.equal(result.attestation.status, 'inconclusive');
-  assert.equal(progress.at(-1).confidence, 'low');
+  assert.equal(result.verification, null);
+  assert.equal(progress.at(-1).confidence, 'medium');
 });

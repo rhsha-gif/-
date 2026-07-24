@@ -64,39 +64,21 @@ test('task complexity is explicit enough to guide model and effort selection', (
   assert.equal(validateTask({ ...base, risk: 'critical' }).complexity, 'high');
 });
 
-test('untrusted capability opt-in must be explicit boolean', () => {
-  const base = {
-    id: 'T-trust', objective: 'Inspect a third-party tool', kind: 'research', role: 'executor',
-    risk: 'low', write: false, acceptanceCriteria: ['Report findings'], verificationCommands: []
-  };
-  assert.equal(validateTask({ ...base, allowUntrustedCapabilities: true }).allowUntrustedCapabilities, true);
-  assert.throws(() => validateTask({ ...base, allowUntrustedCapabilities: 'yes' }), /allowUntrustedCapabilities/i);
-});
-
-test('untrusted provider opt-in must be explicit boolean', () => {
-  const base = {
-    id: 'T-provider-trust', objective: 'Inspect through an experimental provider', kind: 'research', role: 'executor',
-    risk: 'low', write: false, acceptanceCriteria: ['Report findings'], verificationCommands: []
-  };
-  assert.equal(validateTask({ ...base, allowUntrustedProviders: true }).allowUntrustedProviders, true);
-  assert.throws(() => validateTask({ ...base, allowUntrustedProviders: 'yes' }), /allowUntrustedProviders/i);
-});
-
 test('in-place write authorization must be explicit boolean', () => {
   assert.equal(validateTask({ ...base, allowInPlaceWrite: true }).allowInPlaceWrite, true);
   assert.equal(validateTask({ ...base }).allowInPlaceWrite, false);
   assert.throws(() => validateTask({ ...base, allowInPlaceWrite: 'yes' }), /allowInPlaceWrite/i);
 });
 
-test('verifier-only commands are validated but remain separate from worker verification commands', () => {
+test('verification commands are validated as a string array', () => {
   const base = {
-    id: 'T-hidden', objective: 'Implement safely', kind: 'implementation', role: 'executor', risk: 'standard',
+    id: 'T-verify', objective: 'Implement safely', kind: 'implementation', role: 'executor', risk: 'standard',
     write: true, allowedScope: ['src/**'], acceptanceCriteria: ['behavior works'],
-    verificationCommands: ['npm test'], verifierCommands: ['npm run hidden-check']
+    verificationCommands: ['npm test']
   };
   const task = validateTask(base, { forExecution: true });
-  assert.deepEqual(task.verifierCommands, ['npm run hidden-check']);
-  assert.throws(() => validateTask({ ...base, verifierCommands: [''] }), /verifierCommands/i);
+  assert.deepEqual(task.verificationCommands, ['npm test']);
+  assert.throws(() => validateTask({ ...base, verificationCommands: [''] }), /verificationCommands/i);
 });
 
 test('task.write must be a strict boolean', async () => {

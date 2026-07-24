@@ -1,8 +1,24 @@
 # Changelog
 
+## Unreleased — 대청소 (scope pruning)
+
+이 도구의 실제 제품 정의(개인용 두 구독 CLI — Claude Code + Codex CLI — 를 위한 다운시프트 판단 층)와 어긋나는, "워커를 불신하고 시간에 따라 학습하는 분산형 도구"용 코드를 제거했다. 남긴 핵심은 난이도→등급 라우팅, 크로스-에이전트 디스패치, 테스트 실행 게이트다.
+
+### Removed
+
+- **독립 verifier attestation** (`verifier.js`의 SHA-256 attestation, 숨은 `verifierCommands`, sterile worktree 재실행 격리, `aorch verify` 명령, `verifier-attestation` 스키마). 완료 게이트를 작업 자신의 `verificationCommands`를 실제 실행하는 **테스트 실행 게이트**로 대체했다. 값싼 변경 검증(claimed==actual diff, read-only 무변경, HEAD 불변, write 격리)은 유지.
+- **공급망 trust tier** (trusted/reviewed/untrusted): provider·capability의 trustTier, `controlPlane.providerTrustByRisk`/`capabilityTrustByRisk`, `allowUntrustedProviders`/`allowUntrustedCapabilities`. adapter maturity(stable/experimental)와 challenger 게이트는 유지.
+- **데이터 없는 학습 시스템** (`learning.js` 전체): retrospective, TTL lessons, 승인형 improvement proposal, 기술부채 추적, 사용자 feedback, `aorch lessons`, `run --action reflect|feedback|decide`, `post-run-reflection` 스킬, `session-retrospective` 스키마, run의 `reviewStatus`/reflection 게이트.
+- **과잉 내구성·운영 기계**: 체크섬·sequence JSONL 저널 envelope, `repairJournal`/`inspectFileStore`, hook용 `journal.mjs`, release harness(`scripts/release-harness.mjs`), 그리고 저장소에 딸려 있던 독립 v0.7.0 handoff 클론·리뷰 산출물. atomic write와 live-PID-aware 파일 락은 유지.
+
+### Changed
+
+- 모델 성능 관측 매칭을 8차원 → **4차원(provider·model·effort·taskKind)**으로 축소해 솔로 볼륨에서도 셀이 실제로 축적되도록 했다.
+- `doctor`의 상태 점검은 active-run pointer 검사로 축소(저널 복구 제거).
+
 ## 0.4.0 - 2026-07-16
 
-Critical-review hardening release. Every change below fixes a defect confirmed against the running code (most reproduced empirically) during a full-source review of 0.3.0; see `docs/REVIEW-2026-07-16.md` for the report. Test suite grew from 141 (1 failing) to 172, all passing.
+Critical-review hardening release. Every change below fixes a defect confirmed against the running code (most reproduced empirically) during a full-source review of 0.3.0. Test suite grew from 141 (1 failing) to 172, all passing.
 
 ### Correctness and crash fixes
 

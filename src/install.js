@@ -70,7 +70,7 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
   const installed = [];
   const aorchDir = path.join(projectRoot, '.aorch');
   await mkdir(path.join(aorchDir, 'hooks'), { recursive: true });
-  for (const script of ['gate.mjs', 'journal.mjs', 'user-prompt-submit.mjs', 'session-review.mjs']) {
+  for (const script of ['gate.mjs', 'user-prompt-submit.mjs', 'session-review.mjs']) {
     await copyFile(
       path.join(PACKAGE_ROOT, 'integrations/shared', script),
       path.join(aorchDir, 'hooks', script)
@@ -84,8 +84,8 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
     installed.push('.aorch/config.json');
   }
 
-  // Installed skills reference these schemas; without them the reflection
-  // instructions point at files that do not exist in the target project.
+  // Installed skills reference these schemas; without them the task and
+  // receipt instructions point at files that do not exist in the target.
   await copyTree(path.join(PACKAGE_ROOT, 'schemas'), path.join(aorchDir, 'schemas'));
   installed.push('.aorch/schemas');
 
@@ -93,14 +93,14 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/skills'), path.join(projectRoot, '.claude/skills'));
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/agents'), path.join(projectRoot, '.claude/agents'));
     await writeJson(settingsPath, mergedSettings);
-    installed.push('.claude/skills/adaptive-orchestrate', '.claude/skills/post-run-reflection', '.claude/agents', '.claude/settings.json');
+    installed.push('.claude/skills/adaptive-orchestrate', '.claude/agents', '.claude/settings.json');
   }
 
   if (wantsCodex) {
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/codex/skills'), path.join(projectRoot, '.agents/skills'));
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/codex/agents'), path.join(projectRoot, '.codex/agents'));
     await writeJson(hooksPath, mergedCodexHooks);
-    installed.push('.agents/skills/adaptive-orchestrate', '.agents/skills/post-run-reflection', '.codex/agents', '.codex/hooks.json');
+    installed.push('.agents/skills/adaptive-orchestrate', '.codex/agents', '.codex/hooks.json');
   }
 
   return { projectRoot, target, installed };

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { readFile, realpath } from 'node:fs/promises';
-import { appendJournalRecord } from './journal.mjs';
 import path from 'node:path';
 
 async function resolveReal(candidate) {
@@ -47,13 +46,13 @@ async function readActiveRun(cwd) {
     throw new Error('Active run pointer resolves outside the state root');
   }
   // A pointer whose target run is missing is corrupt state, not "no active
-  // run": swallowing it would silently disable the Stop reflection gate.
+  // run": swallowing it would silently disable the Stop lifecycle gate.
   try {
     const run = JSON.parse(await readFile(runPath, 'utf8'));
     return { ...run, path: runPath, stateRoot };
   } catch (error) {
     if (error.code === 'ENOENT') {
-      throw new Error(`Active run pointer targets a missing run state: ${runPath}. Run aorch doctor --repair.`);
+      throw new Error(`Active run pointer targets a missing run state: ${runPath}.`);
     }
     throw error;
   }
@@ -67,53 +66,27 @@ try {
   process.exit(1);
 }
 
+// Only the Stop event gates the session; SessionEnd and worker/verifier
+// subprocesses pass through untouched.
+if (input.hook_event_name !== 'Stop' || input.stop_hook_active === true) process.exit(0);
+
 const cwd = path.resolve(input.cwd ?? process.cwd());
 let run;
 try {
   run = await readActiveRun(cwd);
 } catch (error) {
-  if (input.hook_event_name === 'Stop' && input.stop_hook_active !== true) {
-    process.stdout.write(JSON.stringify({
-      decision: 'block',
-      reason: `Adaptive-orchestrator state could not be verified: ${error.message}. Repair or explicitly close the run state before stopping.`
-    }));
-  } else {
-    process.stderr.write(`adaptive-orchestrator lifecycle state error: ${error.message}\n`);
-  }
+  process.stdout.write(JSON.stringify({
+    decision: 'block',
+    reason: `Adaptive-orchestrator state could not be verified: ${error.message}. Explicitly close the run state before stopping.`
+  }));
   process.exit(0);
 }
 
 if (!run) process.exit(0);
 
-if (input.hook_event_name === 'SessionEnd') {
-  if (run.reviewStatus !== 'complete') {
-    const logPath = path.join(run.stateRoot, 'learning/unreviewed-sessions.jsonl');
-    await appendJournalRecord(logPath, {
-      runId: run.id,
-      runPath: run.path,
-      status: run.status ?? null,
-      reviewStatus: run.reviewStatus ?? null,
-      sessionId: input.session_id ?? null,
-      reason: input.reason ?? 'unknown',
-      recordedAt: new Date().toISOString()
-    });
-  }
-  process.exit(0);
-}
-
-if (input.hook_event_name !== 'Stop' || input.stop_hook_active === true) process.exit(0);
-
 if (run.status === 'running') {
   process.stdout.write(JSON.stringify({
     decision: 'block',
     reason: `Orchestration run ${run.id} is still running. Resume its remaining tasks, or explicitly finish it as completed, partial, blocked, failed, or cancelled before stopping.`
-  }));
-  process.exit(0);
-}
-
-if (run.reviewStatus === 'pending') {
-  process.stdout.write(JSON.stringify({
-    decision: 'block',
-    reason: `Invoke the post-run-reflection skill for orchestration run ${run.id}. Record verified errors, inefficiencies, and technical debt with aorch run --action reflect. Any harness, prompt, hook, skill, plugin, dependency, or unrelated debt change must remain a pending proposal until explicit user approval; do not apply it automatically.`
   }));
 }

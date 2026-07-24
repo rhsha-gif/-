@@ -31,36 +31,29 @@ test('invalid quality observations are rejected', () => {
   }), /quality/);
 });
 
-test('performance evidence requires a complete route and task identity', () => {
+test('performance evidence requires the four matched route dimensions', () => {
   assert.throws(() => normalizeObservation({
     provider: 'openai', quality: 0.9, recordedAt: new Date().toISOString()
-  }), /profileId/i);
+  }), /model|effort|taskKind/i);
 });
 
-test('performance evidence is stratified by task risk and complexity', () => {
-  const route = { provider: 'openai', profileId: 'codex', model: 'gpt', effort: 'high' };
+test('performance evidence matches on the four route dimensions, ignoring risk and complexity', () => {
+  const route = { provider: 'openai', model: 'gpt', effort: 'high' };
   const task = { kind: 'implementation', role: 'executor', risk: 'critical', complexity: 'high' };
   const estimate = estimateRouteQuality({
     route,
     task,
     priorQuality: 0.8,
     observations: [
-      normalizeObservation({
-        ...route,
-        taskKind: 'implementation', role: 'executor', risk: 'low', complexity: 'low',
-        quality: 1, recordedAt: '2026-07-16T00:00:00Z'
-      }),
-      normalizeObservation({
-        ...route,
-        taskKind: 'implementation', role: 'executor', risk: 'critical', complexity: 'high',
-        quality: 0.4, recordedAt: '2026-07-16T00:00:00Z'
-      })
+      normalizeObservation({ ...route, taskKind: 'implementation', quality: 1, recordedAt: '2026-07-16T00:00:00Z' }),
+      normalizeObservation({ ...route, taskKind: 'implementation', quality: 0.4, recordedAt: '2026-07-16T00:00:00Z' })
     ],
     now: new Date('2026-07-16T01:00:00Z'),
     priorWeight: 1,
     uncertaintyPenalty: 0
   });
 
-  assert.equal(estimate.rawSamples, 1);
-  assert.ok(estimate.mean < 0.7, `expected only critical/high evidence to apply, got ${estimate.mean}`);
+  // Both observations share the four matched dimensions, so both count now
+  // that risk and complexity no longer stratify the evidence.
+  assert.equal(estimate.rawSamples, 2);
 });

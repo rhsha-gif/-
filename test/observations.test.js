@@ -20,15 +20,15 @@ test('reviewed outcomes are appended as JSONL performance evidence', async () =>
 });
 
 
-test('observation reader accepts legacy JSONL while new writes use checksum envelopes', async () => {
+test('observation reader and writer share one plain JSONL format', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-observations-legacy-'));
   const file = path.join(root, 'observations.jsonl');
-  const legacy = {
+  const existing = {
     provider: 'anthropic', profileId: 'claude', model: 'model', effort: 'medium',
     taskKind: 'review', role: 'reviewer', quality: 0.85, reviewed: true,
     recordedAt: '2026-07-16T00:00:00Z'
   };
-  await writeFile(file, `${JSON.stringify(legacy)}
+  await writeFile(file, `${JSON.stringify(existing)}
 `);
   await appendObservation(file, {
     provider: 'openai', profileId: 'codex', model: 'gpt', effort: 'high',
@@ -36,7 +36,7 @@ test('observation reader accepts legacy JSONL while new writes use checksum enve
     recordedAt: '2026-07-16T01:00:00Z'
   });
   const raw = await readFile(file, 'utf8');
-  assert.match(raw, /"checksum":/);
+  assert.doesNotMatch(raw, /"checksum":/);
   const entries = await readObservations(file);
   assert.equal(entries.length, 2);
 });

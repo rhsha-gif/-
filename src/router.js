@@ -1,14 +1,9 @@
 import { estimateRouteQuality } from './performance-store.js';
-import { isCapabilityAllowedForTask } from './capabilities.js';
 
 const ROUTE_METRICS = ['quality', 'tokens', 'latency'];
 const TASK_COMPLEXITIES = ['low', 'standard', 'high', 'critical'];
 const DEFAULT_COMPLEXITY_BY_RISK = Object.freeze({ low: 'low', standard: 'standard', high: 'high', critical: 'high' });
 const RISK_RANK = Object.freeze({ low: 0, standard: 1, high: 2, critical: 3 });
-const DEFAULT_PROVIDER_TRUST = Object.freeze({
-  low: ['trusted', 'reviewed', 'untrusted'], standard: ['trusted', 'reviewed'],
-  high: ['trusted', 'reviewed'], critical: ['trusted']
-});
 
 
 function effectiveTaskComplexity(task) {
@@ -26,7 +21,7 @@ function clamp01(value) {
   return Math.min(1, Math.max(0, value));
 }
 
-function providerSupportsCapabilities(provider, requestedIds, inventory, task, policy) {
+function providerSupportsCapabilities(provider, requestedIds, inventory) {
   if (!requestedIds?.length) return true;
   const byId = new Map();
   const ambiguousIds = new Set();
@@ -39,27 +34,20 @@ function providerSupportsCapabilities(provider, requestedIds, inventory, task, p
     const capability = byId.get(id);
     if (!capability || capability.enabled === false) return false;
     const providers = capability.providers ?? ['*'];
-    return (providers.includes('*') || providers.includes(provider))
-      && isCapabilityAllowedForTask(capability, task, policy);
+    return providers.includes('*') || providers.includes(provider);
   });
 }
 
 function providerMetadata(catalog, providerId) {
-  // Raw catalogs may omit provider metadata entirely (direct API use); the
-  // CLI path cannot reach this fallback because validateConfig rejects models
-  // that reference undeclared providers.
+  // A catalog may omit provider metadata entirely; the CLI path cannot reach
+  // this fallback because validateConfig rejects models that reference
+  // undeclared providers.
   return (catalog.providers ?? []).find((entry) => entry.id === providerId)
-    ?? { id: providerId, trustTier: 'trusted', adapterMaturity: 'stable' };
+    ?? { id: providerId, adapterMaturity: 'stable' };
 }
 
 function providerAllowedForTask(provider, task, policy) {
   const risk = task.risk ?? 'standard';
-  const trustTier = provider.trustTier ?? 'reviewed';
-  const allowedTrust = policy.providerTrustByRisk?.[risk] ?? DEFAULT_PROVIDER_TRUST[risk];
-  if (!allowedTrust.includes(trustTier)) return false;
-  if (trustTier === 'untrusted') {
-    if (task.allowUntrustedProviders !== true || task.write === true || risk !== 'low') return false;
-  }
   if ((provider.adapterMaturity ?? 'stable') === 'experimental') {
     const maximum = policy.experimentalAdapterMaxRisk ?? 'standard';
     if ((RISK_RANK[risk] ?? 1) > (RISK_RANK[maximum] ?? 1)) return false;
@@ -77,7 +65,7 @@ function supportsTask(profile, task, catalog) {
     && (!task.allowedProviders?.length || task.allowedProviders.includes(profile.provider))
     && !(task.forbiddenProviders ?? []).includes(profile.provider)
     && !(task.forbiddenProfileIds ?? []).includes(profile.id)
-    && providerSupportsCapabilities(profile.provider, task.capabilityIds, catalog.capabilities, task, catalog.controlPlane ?? {});
+    && providerSupportsCapabilities(profile.provider, task.capabilityIds, catalog.capabilities);
 }
 
 function expandCandidates(task, catalog, complexity) {
@@ -94,7 +82,6 @@ function expandCandidates(task, catalog, complexity) {
           model: profile.model,
           effort: effort.name,
           maturity: profile.maturity ?? 'stable',
-          providerTrustTier: provider.trustTier ?? 'reviewed',
           adapterMaturity: provider.adapterMaturity ?? 'stable',
           priorQuality: clamp01(prior + (effort.qualityDelta ?? 0)),
           tokenIndex: (profile.tokenIndex ?? 1) * (effort.tokenMultiplier ?? 1),

@@ -15,7 +15,7 @@ test('installs both CLI integrations idempotently without editing root instructi
   const codexHooks = JSON.parse(await readFile(path.join(projectRoot, '.codex/hooks.json'), 'utf8'));
   assert.equal(claudeSettings.hooks.UserPromptSubmit.length, 1);
   assert.equal(claudeSettings.hooks.Stop.length, 1);
-  assert.equal(claudeSettings.hooks.SessionEnd.length, 1);
+  assert.equal(claudeSettings.hooks.SessionEnd, undefined);
   assert.equal(codexHooks.hooks.UserPromptSubmit.length, 1);
   assert.equal(codexHooks.hooks.Stop.length, 1);
   const codexPromptCommand = codexHooks.hooks.UserPromptSubmit[0].hooks[0].command;
@@ -35,16 +35,12 @@ test('installs both CLI integrations idempotently without editing root instructi
     assert.equal(hookResult.status, 0, hookResult.stderr);
     assert.match(JSON.parse(hookResult.stdout).hookSpecificOutput.additionalContext, /orchestrator must run first/i);
   }
-  assert.match(await readFile(path.join(projectRoot, '.aorch/schemas/session-retrospective.schema.json'), 'utf8'), /Retrospective/);
+  assert.match(await readFile(path.join(projectRoot, '.aorch/schemas/worker-receipt.schema.json'), 'utf8'), /filesChanged/);
   assert.match(await readFile(path.join(projectRoot, '.aorch/hooks/gate.mjs'), 'utf8'), /classifyPrompt/);
-  assert.match(await readFile(path.join(projectRoot, '.aorch/hooks/journal.mjs'), 'utf8'), /appendJournalRecord/);
   const claudeSkill = await readFile(path.join(projectRoot, '.claude/skills/adaptive-orchestrate/SKILL.md'), 'utf8');
   assert.match(claudeSkill, /task decomposition/i);
-  assert.match(claudeSkill, /verifier attestation/i);
   assert.match(claudeSkill, /phase.*confidence.*blockers/i);
   assert.match(await readFile(path.join(projectRoot, '.agents/skills/adaptive-orchestrate/SKILL.md'), 'utf8'), /task decomposition/i);
-  assert.match(await readFile(path.join(projectRoot, '.claude/skills/post-run-reflection/SKILL.md'), 'utf8'), /user approval/i);
-  assert.match(await readFile(path.join(projectRoot, '.agents/skills/post-run-reflection/SKILL.md'), 'utf8'), /user approval/i);
 });
 
 test('rejects unknown installation targets', async () => {

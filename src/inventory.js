@@ -42,7 +42,6 @@ async function scanSkills(baseDir, provider, metadata = {}) {
       enabled: true,
       path: path.dirname(skillPath),
       discovered: true,
-      trustTier: metadata.trustTier ?? 'reviewed',
       sourceScope: metadata.sourceScope ?? 'project'
     });
   }
@@ -77,7 +76,6 @@ async function scanPluginDirectory(baseDir, provider, metadata = {}) {
         enabled: true,
         path: root,
         discovered: true,
-        trustTier: metadata.trustTier ?? 'reviewed',
         sourceScope: metadata.sourceScope ?? 'project'
       });
     } catch {
@@ -85,12 +83,6 @@ async function scanPluginDirectory(baseDir, provider, metadata = {}) {
     }
   }
   return results;
-}
-
-const TRUST_RANK = Object.freeze({ untrusted: 0, reviewed: 1, trusted: 2 });
-
-function conservativeTrust(left = 'reviewed', right = 'reviewed') {
-  return (TRUST_RANK[left] ?? 0) <= (TRUST_RANK[right] ?? 0) ? left : right;
 }
 
 function combine(entries) {
@@ -107,7 +99,6 @@ function combine(entries) {
     current.path ??= entry.path;
     current.description ||= entry.description;
     current.enabled = current.enabled || entry.enabled;
-    current.trustTier = conservativeTrust(current.trustTier, entry.trustTier);
     if (current.sourceScope !== entry.sourceScope) current.sourceScope = 'mixed';
   }
   return [...map.values()];
@@ -123,27 +114,26 @@ function sanitizeDescription(value) {
 }
 
 function inventoryCapability(entry) {
-  const trustTier = entry.trustTier ?? 'reviewed';
   return {
     ...entry,
-    description: trustTier === 'untrusted' ? '' : sanitizeDescription(entry.description),
+    description: sanitizeDescription(entry.description),
     descriptionUsage: 'metadata-only'
   };
 }
 
 export async function discoverCapabilities({ cwd = process.cwd(), includeUser = true, homeDir = os.homedir() } = {}) {
   const roots = [
-    [path.join(cwd, '.claude/skills'), 'anthropic', scanSkills, { trustTier: 'reviewed', sourceScope: 'project' }],
-    [path.join(cwd, '.agents/skills'), 'openai', scanSkills, { trustTier: 'reviewed', sourceScope: 'project' }],
-    [path.join(cwd, '.claude/plugins'), 'anthropic', scanPluginDirectory, { trustTier: 'reviewed', sourceScope: 'project' }],
-    [path.join(cwd, '.codex/plugins'), 'openai', scanPluginDirectory, { trustTier: 'reviewed', sourceScope: 'project' }]
+    [path.join(cwd, '.claude/skills'), 'anthropic', scanSkills, { sourceScope: 'project' }],
+    [path.join(cwd, '.agents/skills'), 'openai', scanSkills, { sourceScope: 'project' }],
+    [path.join(cwd, '.claude/plugins'), 'anthropic', scanPluginDirectory, { sourceScope: 'project' }],
+    [path.join(cwd, '.codex/plugins'), 'openai', scanPluginDirectory, { sourceScope: 'project' }]
   ];
   if (includeUser) {
     roots.push(
-      [path.join(homeDir, '.claude/skills'), 'anthropic', scanSkills, { trustTier: 'untrusted', sourceScope: 'user' }],
-      [path.join(homeDir, '.agents/skills'), 'openai', scanSkills, { trustTier: 'untrusted', sourceScope: 'user' }],
-      [path.join(homeDir, '.claude/plugins'), 'anthropic', scanPluginDirectory, { trustTier: 'untrusted', sourceScope: 'user' }],
-      [path.join(homeDir, '.codex/plugins'), 'openai', scanPluginDirectory, { trustTier: 'untrusted', sourceScope: 'user' }]
+      [path.join(homeDir, '.claude/skills'), 'anthropic', scanSkills, { sourceScope: 'user' }],
+      [path.join(homeDir, '.agents/skills'), 'openai', scanSkills, { sourceScope: 'user' }],
+      [path.join(homeDir, '.claude/plugins'), 'anthropic', scanPluginDirectory, { sourceScope: 'user' }],
+      [path.join(homeDir, '.codex/plugins'), 'openai', scanPluginDirectory, { sourceScope: 'user' }]
     );
   }
   const groups = await Promise.all(roots.map(([root, provider, scanner, metadata]) => scanner(root, provider, metadata)));
@@ -156,20 +146,12 @@ export function mergeCapabilities(configured = [], discovered = []) {
     const actual = discoveredMap.get(`${entry.type}:${entry.id}`);
     if (!actual) return { ...entry };
     discoveredMap.delete(`${entry.type}:${entry.id}`);
-    // Explicit config trust covers artifacts in the config's own trust domain
-    // (the project). A user-global artifact that merely collides with a
-    // configured ID must not inherit that tier, or dropping a directory into
-    // ~/.claude/skills would escalate it to trusted for critical tasks.
-    const trustTier = actual.sourceScope === 'project'
-      ? (entry.trustTier ?? actual.trustTier)
-      : conservativeTrust(entry.trustTier ?? actual.trustTier, actual.trustTier);
     return {
       ...entry,
       ...actual,
       description: actual.description || entry.description,
       providers: actual.providers,
-      enabled: true,
-      ...(trustTier === undefined ? {} : { trustTier })
+      enabled: true
     };
   });
   return combine([...merged, ...discoveredMap.values()]);

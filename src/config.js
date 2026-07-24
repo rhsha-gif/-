@@ -6,7 +6,6 @@ const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const ROUTE_METRICS = ['quality', 'tokens', 'latency'];
 const TASK_COMPLEXITIES = ['low', 'standard', 'high', 'critical'];
 const RISK_TIERS = ['low', 'standard', 'high', 'critical'];
-const TRUST_TIERS = ['trusted', 'reviewed', 'untrusted'];
 const ADAPTER_MATURITIES = ['stable', 'experimental'];
 export const DEFAULT_CONFIG_PATH = path.join(PACKAGE_ROOT, 'config', 'aorch.config.json');
 
@@ -44,14 +43,6 @@ function nonNegativeNumber(value, name, fallback) {
 
 
 
-function trustTier(value, name, fallback) {
-  const resolved = value ?? fallback;
-  if (!TRUST_TIERS.includes(resolved)) {
-    throw new Error(`${name} must be one of ${TRUST_TIERS.join(', ')}`);
-  }
-  return resolved;
-}
-
 function adapterMaturity(value, name, fallback) {
   const resolved = value ?? fallback;
   if (!ADAPTER_MATURITIES.includes(resolved)) {
@@ -60,47 +51,16 @@ function adapterMaturity(value, name, fallback) {
   return resolved;
 }
 
-function validateTrustMap(value, name, fallback) {
-  const source = value ?? fallback;
-  if (!source || typeof source !== 'object' || Array.isArray(source)) {
-    throw new TypeError(`${name} must be an object`);
-  }
-  const result = {};
-  for (const risk of RISK_TIERS) {
-    const tiers = source[risk];
-    if (!Array.isArray(tiers) || tiers.length === 0 || new Set(tiers).size !== tiers.length
-      || tiers.some((tier) => !TRUST_TIERS.includes(tier))) {
-      throw new TypeError(`${name}.${risk} must be a unique non-empty array of trust tiers`);
-    }
-    result[risk] = [...tiers];
-  }
-  return result;
-}
-
 function validateControlPlane(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new TypeError('controlPlane must be an object');
   }
-  const defaultProviders = {
-    low: ['trusted', 'reviewed', 'untrusted'],
-    standard: ['trusted', 'reviewed'],
-    high: ['trusted', 'reviewed'],
-    critical: ['trusted']
-  };
-  const defaultCapabilities = {
-    low: ['trusted', 'reviewed', 'untrusted'],
-    standard: ['trusted', 'reviewed'],
-    high: ['trusted', 'reviewed'],
-    critical: ['trusted']
-  };
   const experimentalAdapterMaxRisk = input.experimentalAdapterMaxRisk ?? 'standard';
   if (!RISK_TIERS.includes(experimentalAdapterMaxRisk)) {
     throw new Error('controlPlane.experimentalAdapterMaxRisk must be low, standard, high, or critical');
   }
   return {
     ...input,
-    providerTrustByRisk: validateTrustMap(input.providerTrustByRisk, 'controlPlane.providerTrustByRisk', defaultProviders),
-    capabilityTrustByRisk: validateTrustMap(input.capabilityTrustByRisk, 'controlPlane.capabilityTrustByRisk', defaultCapabilities),
     experimentalAdapterMaxRisk
   };
 }
@@ -187,7 +147,6 @@ export function validateConfig(input) {
     }
     return {
       ...provider,
-      trustTier: trustTier(provider.trustTier, `provider ${provider.id}.trustTier`, provider.adapter === 'generic' ? 'untrusted' : 'reviewed'),
       adapterMaturity: adapterMaturity(provider.adapterMaturity, `provider ${provider.id}.adapterMaturity`, provider.adapter === 'generic' ? 'experimental' : 'stable')
     };
   });
@@ -239,15 +198,9 @@ export function validateConfig(input) {
       throw new Error(`Unsupported capability type for ${capability.id}: ${capability.type}`);
     }
     assertNonEmptyStrings(capability.providers ?? ['*'], `capability ${capability.id}.providers`);
-    // Do not inject a default trustTier: only an explicit config tier may
-    // override discovery-scope trust when the capability is found on disk.
-    // Consumers already treat a missing tier as 'reviewed'.
     return {
       ...capability,
-      providers: [...(capability.providers ?? ['*'])],
-      ...(capability.trustTier === undefined
-        ? {}
-        : { trustTier: trustTier(capability.trustTier, `capability ${capability.id}.trustTier`) })
+      providers: [...(capability.providers ?? ['*'])]
     };
   });
   const routing = validateRouting(input.routing ?? {});
@@ -261,15 +214,6 @@ export function validateConfig(input) {
   if (!Number.isFinite(verificationTimeoutMs) || verificationTimeoutMs <= 0) {
     throw new Error('verification.commandTimeoutMs must be positive');
   }
-  const defaultIsolationByRisk = {
-    low: 'same-workspace', standard: 'git-worktree', high: 'git-worktree', critical: 'git-worktree'
-  };
-  const isolationByRisk = { ...defaultIsolationByRisk, ...(input.verification?.isolationByRisk ?? {}) };
-  for (const risk of RISK_TIERS) {
-    if (!['same-workspace', 'git-worktree'].includes(isolationByRisk[risk])) {
-      throw new Error(`verification.isolationByRisk.${risk} must be same-workspace or git-worktree`);
-    }
-  }
 
   return structuredClone({
     ...input,
@@ -279,7 +223,7 @@ export function validateConfig(input) {
     routing,
     controlPlane,
     progress: { intervalMinutes: progressMinutes, ...(input.progress ?? {}) },
-    verification: { ...(input.verification ?? {}), commandTimeoutMs: verificationTimeoutMs, isolationByRisk },
+    verification: { ...(input.verification ?? {}), commandTimeoutMs: verificationTimeoutMs },
     paths: { stateDir: '.aorch', ...(input.paths ?? {}) }
   });
 }
