@@ -1,7 +1,7 @@
-import { access, copyFile, mkdir, readFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { atomicWriteJson } from './file-store.js';
+import { randomUUID } from 'node:crypto';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -18,8 +18,23 @@ async function readJson(filePath, fallback = {}) {
   }
 }
 
+// Atomic JSON write: temp file then rename, so a crash mid-write cannot leave a
+// half-written settings/hooks file that later parses as junk.
 async function writeJson(filePath, value) {
-  await atomicWriteJson(filePath, value);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const temp = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp-${process.pid}-${randomUUID()}`);
+  let handle;
+  try {
+    handle = await open(temp, 'wx', 0o600);
+    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await handle.close();
+    handle = null;
+    await rename(temp, filePath);
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    await unlink(temp).catch(() => {});
+    throw error;
+  }
 }
 
 function mergeHook(target, fragment, targetPath) {

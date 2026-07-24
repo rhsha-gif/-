@@ -33,7 +33,7 @@ test('help exposes the intentionally small command surface', () => {
   assert.match(result.stdout, /exec/);
   assert.match(result.stdout, /record/);
   assert.match(result.stdout, /install/);
-  assert.match(result.stdout, /run/);
+  assert.match(result.stdout, /inventory/);
 });
 
 
@@ -46,36 +46,6 @@ test('npm-style bin symlinks execute the CLI entrypoint', async () => {
   const result = spawnSync(binPath, ['--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Adaptive Orchestrator/);
-});
-
-test('progress command accepts a task graph directly', async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-progress-'));
-  const tasksPath = path.join(dir, 'tasks.json');
-  await writeFile(tasksPath, JSON.stringify([
-    { id: 'A', weight: 1, status: 'complete' },
-    { id: 'B', weight: 1, status: 'running', fraction: 0.5 }
-  ]));
-  const result = spawnSync(process.execPath, [cli, 'progress', '--config', defaultConfig, '--tasks', tasksPath], { encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(JSON.parse(result.stdout).percent, 75);
-});
-
-test('run command supports start, finish, and show', async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-run-cli-'));
-  const manifestPath = path.join(dir, 'manifest.json');
-  await writeFile(manifestPath, JSON.stringify({ prompt: 'build it', runId: 'RCLI', tasks: [] }));
-
-  const start = spawnSync(process.execPath, [cli, 'run', '--action', 'start', '--config', defaultConfig, '--cwd', dir, '--input', manifestPath], { encoding: 'utf8' });
-  assert.equal(start.status, 0, start.stderr);
-  assert.equal(JSON.parse(start.stdout).run.id, 'RCLI');
-
-  const finish = spawnSync(process.execPath, [cli, 'run', '--action', 'finish', '--config', defaultConfig, '--cwd', dir, '--run', 'active', '--status', 'completed'], { encoding: 'utf8' });
-  assert.equal(finish.status, 0, finish.stderr);
-  assert.equal(JSON.parse(finish.stdout).run.status, 'completed');
-
-  const show = spawnSync(process.execPath, [cli, 'run', '--action', 'show', '--config', defaultConfig, '--cwd', dir, '--run', 'RCLI'], { encoding: 'utf8' });
-  assert.equal(show.status, 0, show.stderr);
-  assert.equal(JSON.parse(show.stdout).run.id, 'RCLI');
 });
 
 test('unknown options and boolean flags with junk values fail instead of being silently ignored', async () => {

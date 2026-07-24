@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { realpathSync } from 'node:fs';
-import { realpath } from 'node:fs/promises';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,51 +8,30 @@ import { readObservations, appendObservation } from './observations.js';
 import { selectRoute } from './router.js';
 import { executeTask } from './task-runner.js';
 import { discoverCapabilities, getInventory, mergeCapabilities } from './inventory.js';
-import { calculateProgress } from './progress.js';
-import {
-  createRun,
-  finishRun,
-  loadRun,
-  resolveActiveRun,
-  updateTaskState
-} from './state.js';
 import { installProject } from './install.js';
-import { inspectStateHealth, runDoctor } from './doctor.js';
 import { validateTask } from './task.js';
 
 const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `Commands:\n` +
   `  route     Select provider, model, and effort for a task JSON file\n` +
-  `  exec      Route and execute one bounded task\n` +
+  `  exec      Route and dispatch one bounded task\n` +
   `  record    Append an independently reviewed model-performance observation\n` +
   `  inventory Print configured providers, models, skills, plugins, and hooks\n` +
-  `  progress  Calculate weighted estimated progress from a run state file\n` +
-  `  run       Manage run lifecycle (start, task, finish, show)\n` +
-  `  install   Install project-local Claude Code and/or Codex integration\n` +
-  `  doctor    Validate config, CLIs, and durable state\n\n` +
-  `Run actions:\n` +
-  `  start     --input <manifest.json>\n` +
-  `  task      [--run active|id|path] --task <id> --status <status> [--fraction <0..1>]\n` +
-  `  finish    [--run active|id|path] --status completed|partial|blocked|failed|cancelled\n` +
-  `  show      [--run active|id|path]\n\n` +
+  `  install   Install project-local Claude Code and/or Codex integration\n\n` +
   `Common options:\n` +
   `  --config <path>       Config JSON; defaults to .aorch/config.json or packaged config\n` +
   `  --cwd <path>          Project working directory\n` +
-  `  --observations <path> Reviewed outcomes JSONL\n` +
-  `  --verification-timeout-ms <n> Independent verification timeout per command\n`;
+  `  --observations <path> Reviewed outcomes JSONL\n`;
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'repair', 'force-config', 'project-only', 'help', 'h']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h']);
 
 const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
 const COMMAND_FLAGS = Object.freeze({
   route: [...COMMON_FLAGS, 'task', 'observations'],
-  exec: [...COMMON_FLAGS, 'task', 'observations', 'timeout-ms', 'verification-timeout-ms', 'dry-run'],
+  exec: [...COMMON_FLAGS, 'task', 'observations', 'timeout-ms', 'dry-run'],
   record: [...COMMON_FLAGS, 'input', 'observations'],
   inventory: [...COMMON_FLAGS],
-  progress: [...COMMON_FLAGS, 'tasks', 'run'],
-  run: [...COMMON_FLAGS, 'action', 'input', 'run', 'task', 'status', 'fraction', 'note'],
-  install: ['cwd', 'help', 'h', 'target', 'project', 'force-config'],
-  doctor: [...COMMON_FLAGS, 'repair']
+  install: ['cwd', 'help', 'h', 'target', 'project', 'force-config']
 });
 
 function coerceBoolean(rawKey, value) {
@@ -143,78 +121,6 @@ function cleanRoute(route) {
   };
 }
 
-function stateRoot(config, cwd) {
-  return path.resolve(cwd, config.paths?.stateDir ?? '.aorch');
-}
-
-async function resolveRunReference({ root, cwd, ref = 'active' }) {
-  if (!ref || ref === true || ref === 'active') {
-    const active = await resolveActiveRun(root);
-    if (!active) throw new Error('No active orchestration run');
-    return active;
-  }
-  const candidate = String(ref);
-  if (!candidate.includes('/') && !candidate.includes('\\') && !candidate.endsWith('.json')
-    && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(candidate)) {
-    throw new Error('run reference must be a path-safe id or a state-root path');
-  }
-  const runPath = candidate.includes('/') || candidate.includes('\\') || candidate.endsWith('.json')
-    ? path.resolve(cwd, candidate)
-    : path.join(root, 'runs', candidate, 'run.json');
-  // Compare realpaths like state.js/doctor.js so symlinked state roots behave
-  // consistently across every containment check.
-  const resolveReal = async (target) => {
-    try { return await realpath(target); }
-    catch { return path.resolve(target); }
-  };
-  const relative = path.relative(await resolveReal(root), await resolveReal(runPath));
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error('run reference resolves outside the configured state root');
-  }
-  return { ...(await loadRun(runPath)), path: runPath, dir: path.dirname(runPath) };
-}
-
-async function handleRunCommand({ flags, cwd, config }) {
-  const action = requireFlag(flags, 'action');
-  const root = stateRoot(config, cwd);
-
-  if (action === 'start') {
-    const manifest = await readJson(requireFlag(flags, 'input'), cwd);
-    const run = await createRun({
-      root,
-      prompt: manifest.prompt,
-      tasks: manifest.tasks ?? [],
-      runId: manifest.runId
-    });
-    return { action, run };
-  }
-
-  const run = await resolveRunReference({ root, cwd, ref: flags.run ?? 'active' });
-
-  if (action === 'task') {
-    const patch = { status: requireFlag(flags, 'status') };
-    if (flags.fraction !== undefined && flags.fraction !== true) {
-      const fraction = Number(flags.fraction);
-      if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1) {
-        throw new RangeError('--fraction must be between 0 and 1');
-      }
-      patch.fraction = fraction;
-    }
-    if (flags.note && flags.note !== true) patch.note = flags.note;
-    return { action, run: await updateTaskState(run.path, requireFlag(flags, 'task'), patch), path: run.path };
-  }
-
-  if (action === 'finish') {
-    return { action, run: await finishRun(run.path, requireFlag(flags, 'status')), path: run.path };
-  }
-
-  if (action === 'show') {
-    return { action, run };
-  }
-
-  throw new Error(`Unknown run action: ${action}`);
-}
-
 async function main(argv = process.argv.slice(2)) {
   const { command, flags, positionals } = parseArgs(argv);
   if (!command || command === 'help' || flags.help || flags.h) {
@@ -250,7 +156,6 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === 'exec') {
     const timeoutMs = numericFlag(flags, 'timeout-ms');
-    const verificationTimeoutMs = numericFlag(flags, 'verification-timeout-ms');
     const task = validateTask(await readJson(requireFlag(flags, 'task'), cwd), { forExecution: true });
     const observations = await readObservations(resolveObservationPath(config, flags, cwd));
     const result = await executeTask({
@@ -259,12 +164,11 @@ async function main(argv = process.argv.slice(2)) {
       observations,
       cwd,
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      verificationTimeoutMs,
       dryRun: flags['dry-run'] === true
     });
     const output = flags['dry-run'] === true
       ? { route: cleanRoute(result.route), capabilities: result.capabilities, commandSpec: result.commandSpec, runDir: result.runDir }
-      : { route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, verification: result.verification, runDir: result.runDir };
+      : { route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, runDir: result.runDir };
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return 0;
   }
@@ -279,39 +183,6 @@ async function main(argv = process.argv.slice(2)) {
   if (command === 'inventory') {
     process.stdout.write(`${JSON.stringify(getInventory(config), null, 2)}\n`);
     return 0;
-  }
-
-  if (command === 'progress') {
-    let tasks;
-    if (flags.tasks && flags.tasks !== true) {
-      const graph = await readJson(flags.tasks, cwd);
-      tasks = Array.isArray(graph) ? graph : graph.tasks;
-      if (!Array.isArray(tasks)) throw new Error('--tasks must point to an array or an object with tasks');
-    } else {
-      const run = await resolveRunReference({ root: stateRoot(config, cwd), cwd, ref: flags.run ?? 'active' });
-      tasks = run.tasks;
-    }
-    process.stdout.write(`${JSON.stringify(calculateProgress(tasks), null, 2)}\n`);
-    return 0;
-  }
-
-  if (command === 'run') {
-    const result = await handleRunCommand({ flags, cwd, config });
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-    return 0;
-  }
-
-  if (command === 'doctor') {
-    const root = stateRoot(config, cwd);
-    const core = runDoctor(config);
-    const state = await inspectStateHealth(root, { repair: flags.repair === true });
-    const result = {
-      ...core,
-      state,
-      status: core.status === 'pass' && state.status === 'pass' ? 'pass' : 'fail'
-    };
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-    return result.status === 'pass' ? 0 : 1;
   }
 
   throw new Error(`Unknown command: ${command}`);
@@ -334,4 +205,4 @@ if (isEntry) {
   });
 }
 
-export { handleRunCommand, isCliEntrypoint, main, parseArgs };
+export { isCliEntrypoint, main, parseArgs };
