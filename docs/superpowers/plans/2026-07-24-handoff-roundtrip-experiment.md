@@ -37,7 +37,7 @@
 - Consumes: 스펙 §4의 envelope 정의, `examples/task.json` 스키마.
 - Produces: `docs/handoff-experiment/envelope.json`(Task 2가 Codex에 그대로 전달), `docs/handoff-experiment/log.md`(Task 3가 결과를 채움).
 
-- [ ] **Step 1: envelope 파일 생성**
+- [x] **Step 1: envelope 파일 생성**
 
 `docs/handoff-experiment/envelope.json`:
 
@@ -63,7 +63,7 @@
 }
 ```
 
-- [ ] **Step 2: 로그 스켈레톤 생성**
+- [x] **Step 2: 로그 스켈레톤 생성**
 
 `docs/handoff-experiment/log.md`:
 
@@ -93,11 +93,11 @@
 | 다음 함의 | __ |
 ```
 
-- [ ] **Step 3: 사용자에게 블라인드 자기추정 N 요청 후 기록**
+- [x] **Step 3: 사용자에게 블라인드 자기추정 N 요청 후 기록** — 75분("60분+" 버킷)
 
 사용자에게 묻는다: "이 envelope 작업(thin executeTask 회귀 테스트)을 **당신이 직접** 하면 몇 분 걸릴 것 같나요?" — 받은 숫자 N을 `log.md`의 "자기추정: __분"에 채운다. (이 숫자는 사람의 반사실이라 모델이 지어내지 않는다.)
 
-- [ ] **Step 4: 봉인 커밋 (Codex 결과 전)**
+- [x] **Step 4: 봉인 커밋 (Codex 결과 전)** — `5fd6fd8` (2026-07-24T21:55:17+09:00)
 
 ```bash
 git add docs/handoff-experiment/envelope.json docs/handoff-experiment/log.md
@@ -119,7 +119,7 @@ Expected: 커밋 성공. 이 커밋이 **자기추정 봉인 증거**(Codex 결�
 - Consumes: `docs/handoff-experiment/envelope.json`.
 - Produces: worktree 안의 `test/task-runner.test.js` + Codex의 작업 요약(무엇을 했는지). Task 3가 이를 검증한다.
 
-- [ ] **Step 1: 격리 worktree 생성 + 시간 기록 시작**
+- [x] **Step 1: 격리 worktree 생성 + 시간 기록 시작** — 실제 경로 `~/.claude/jobs/50c8fd88/tmp/handoff-probe` (23:03:26 체크아웃)
 
 현재 커밋에서:
 
@@ -129,11 +129,11 @@ git worktree add "C:/Users/goyan/AppData/Local/Temp/aorch-handoff-probe" HEAD
 
 이 시점부터 **핸드오프 준비 시간** 타이머 시작(worktree 생성 + Step 2 세팅까지).
 
-- [ ] **Step 2: 차가운 Codex 세션에 envelope만 전달**
+- [x] **Step 2: 차가운 Codex 세션에 envelope만 전달** — 이탈: 사용자 지시로 에이전트가 `codex exec` 헤드리스 실행(맥락 0 유지, log.md 이탈 기록 참조)
 
 worktree 디렉터리에서 **새(차가운) Codex CLI 세션**을 연다. 우리 대화·이 계획 어떤 맥락도 주지 않는다. 프롬프트로 `envelope.json`의 내용만 붙여넣는다. 여기서 준비 시간 타이머 정지, **Codex 왕복 벽시계** 타이머 시작.
 
-- [ ] **Step 3: Codex 작업 완료까지 관찰**
+- [x] **Step 3: Codex 작업 완료까지 관찰** — 23:09:07 완료(왕복 ≈5분41초), 범위 이탈 없음
 
 Codex가 `test/task-runner.test.js`를 만들고 끝내면 왕복 타이머 정지. Codex가 범위를 벗어났는지(forbiddenScope: src/**, docs/**), 의도를 오해했는지 육안 관찰해 메모(실패 모드 후보).
 
@@ -151,7 +151,7 @@ Expected: worktree 안에 `test/task-runner.test.js`가 생성됨(혹은 실패/
 - Consumes: Task 2의 worktree 결과.
 - Produces: 채워진 `log.md`(부호 판정 포함).
 
-- [ ] **Step 1: verificationCommands 실행**
+- [x] **Step 1: verificationCommands 실행** — 89→93(+4) 그린, 기존 symlink EPERM 1건만(환경성)
 
 worktree에서:
 
@@ -161,15 +161,15 @@ node --test
 
 Expected: 그린이면 품질 바닥선 통과 후보. 실패면 실패 내용 기록.
 
-- [ ] **Step 2: acceptance 육안 확인 + 리워크(시간 측정)**
+- [x] **Step 2: acceptance 육안 확인 + 리워크(시간 측정)** — 4/4 통과, 리워크 0분(무수정 채택, `8d5720e` 바이트 동일)
 
 envelope의 acceptanceCriteria 4개를 하나씩 확인한다(dry-run route+commandSpec 반환 / high-risk 격리 거절 / standard in-place 거절 / node --test 그린). 미달이면 **사람이 직접 고쳐** 수용 가능하게 만들고 그 시간을 **리워크 시간**으로 잰다. 리워크가 "처음부터 내가 짜는 것"과 다름없으면 그 사실을 기록(순이득에 그대로 반영).
 
-- [ ] **Step 3: 로그 채우고 부호 판정**
+- [x] **Step 3: 로그 채우고 부호 판정** — **(+)**, 순이득 ≥ +65분 (2026-07-28 타임스탬프 재구성 기입)
 
 `docs/handoff-experiment/log.md`의 실측 표를 채운다: 준비/왕복/리워크 시간, 순이득 = N − (준비+리워크), acceptance/verification 결과, 실패 모드, **부호 (+)/(−)**, 다음 함의(부호 (+)면 "envelope 민감도" 실험, (−)면 "실패 모드" 실험으로 분기).
 
-- [ ] **Step 4: worktree 정리**
+- [x] **Step 4: worktree 정리** — 2026-07-28 제거 완료
 
 ```bash
 git worktree remove "C:/Users/goyan/AppData/Local/Temp/aorch-handoff-probe"
@@ -177,7 +177,7 @@ git worktree remove "C:/Users/goyan/AppData/Local/Temp/aorch-handoff-probe"
 
 (수용된 테스트를 메인에 살릴지는 별도 결정 — 실험 로그와 무관.)
 
-- [ ] **Step 5: 결과 커밋**
+- [x] **Step 5: 결과 커밋** — 이 갱신과 함께 커밋(봉인 `5fd6fd8`과 분리)
 
 ```bash
 git add docs/handoff-experiment/log.md
