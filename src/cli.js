@@ -10,11 +10,13 @@ import { executeTask } from './task-runner.js';
 import { discoverCapabilities, getInventory, mergeCapabilities } from './inventory.js';
 import { installProject } from './install.js';
 import { validateTask } from './task.js';
+import { classifyDifficulty } from './difficulty.js';
 
 const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `Commands:\n` +
   `  route     Select provider, model, and effort for a task JSON file\n` +
   `  exec      Route and dispatch one bounded task\n` +
+  `  classify  Map a raw objective to a difficulty and a concrete route\n` +
   `  record    Append an independently reviewed model-performance observation\n` +
   `  inventory Print configured providers, models, skills, plugins, and hooks\n` +
   `  install   Install project-local Claude Code and/or Codex integration\n\n` +
@@ -29,6 +31,7 @@ const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
 const COMMAND_FLAGS = Object.freeze({
   route: [...COMMON_FLAGS, 'task', 'observations'],
   exec: [...COMMON_FLAGS, 'task', 'observations', 'timeout-ms', 'dry-run'],
+  classify: [...COMMON_FLAGS, 'objective', 'role', 'risk'],
   record: [...COMMON_FLAGS, 'input', 'observations'],
   inventory: [...COMMON_FLAGS],
   install: ['cwd', 'help', 'h', 'target', 'project', 'force-config']
@@ -170,6 +173,30 @@ async function main(argv = process.argv.slice(2)) {
       ? { route: cleanRoute(result.route), capabilities: result.capabilities, commandSpec: result.commandSpec, runDir: result.runDir }
       : { route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, runDir: result.runDir };
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+    return 0;
+  }
+
+  if (command === 'classify') {
+    const objective = requireFlag(flags, 'objective');
+    const classification = classifyDifficulty({ objective });
+    const task = validateTask({
+      id: 'classify-probe',
+      objective,
+      role: flags.role ?? 'executor',
+      risk: flags.risk ?? 'standard',
+      kind: classification.kind,
+      complexity: classification.complexity,
+      minimumQuality: classification.minimumQuality,
+      // arm1 is Claude-only: Codex delegation is a separately-gated later
+      // arm, and a Claude Code subagent's model cannot be a Codex model.
+      allowedProviders: ['anthropic'],
+      routingPriorities: classification.routingPriorities
+    });
+    const route = selectRoute({ task, catalog: config, observations: [] });
+    process.stdout.write(`${JSON.stringify({
+      classification,
+      route: { provider: route.provider, model: route.model, effort: route.effort }
+    })}\n`);
     return 0;
   }
 
