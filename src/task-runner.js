@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -40,6 +40,25 @@ async function assertWriteIsolation(task, cwd) {
   }
   if (task.allowInPlaceWrite !== true) {
     throw new Error('Write task must run in an isolated linked worktree; in-place write requires explicit task.allowInPlaceWrite authorization');
+  }
+}
+
+// Atomic JSON write: temp file then rename, so an interrupted run cannot leave
+// a half-written receipt that later parses as junk. Same shape as install.js;
+// each module keeps its own copy since the shared file-store was removed.
+async function writeJsonAtomic(filePath, value) {
+  const temp = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp-${process.pid}-${randomUUID()}`);
+  let handle;
+  try {
+    handle = await open(temp, 'wx', 0o600);
+    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await handle.close();
+    handle = null;
+    await rename(temp, filePath);
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    await unlink(temp).catch(() => {});
+    throw error;
   }
 }
 
@@ -128,5 +147,8 @@ export async function executeTask({
     throw new Error(`Worker exited with ${result.exitCode}`);
   }
   const receipt = await parseWorkerOutput({ provider, stdout: result.stdout, outputPath });
+  // The worker prompt promises the wrapper persists the receipt here, and the
+  // CLI hands this path back to the caller. Keep both true.
+  await writeJsonAtomic(receiptPath, receipt);
   return { task, route, capabilities, receipt, result, receiptPath, runDir };
 }
