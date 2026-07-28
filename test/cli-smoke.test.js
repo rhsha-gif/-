@@ -94,10 +94,18 @@ test('help exposes the intentionally small command surface', () => {
 
 
 
-test('npm-style bin symlinks execute the CLI entrypoint', async () => {
+test('npm-style bin symlinks execute the CLI entrypoint', async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-bin-'));
   const binPath = path.join(dir, 'aorch');
-  await symlink(cli, binPath);
+  try {
+    await symlink(cli, binPath);
+  } catch (error) {
+    if (process.platform === 'win32' && error?.code === 'EPERM') {
+      t.skip('symlink privilege unavailable');
+      return;
+    }
+    throw error;
+  }
 
   const result = spawnSync(binPath, ['--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
