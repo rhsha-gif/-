@@ -32,9 +32,12 @@ export function runCommand(spec, {
     let stderr = '';
     let timedOut = false;
     let killTimer = null;
+    let drainTimer = null;
+    let settled = false;
     const clearTimers = () => {
       if (timer) clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
+      if (drainTimer) clearTimeout(drainTimer);
     };
     const timer = timeoutMs > 0 ? setTimeout(() => {
       timedOut = true;
@@ -61,7 +64,9 @@ export function runCommand(spec, {
         reject(error);
       }
     });
-    child.on('close', (code, closeSignal) => {
+    const settle = (code, closeSignal) => {
+      if (settled) return;
+      settled = true;
       clearTimers();
       const endedAt = new Date();
       resolve({
@@ -75,7 +80,14 @@ export function runCommand(spec, {
         endedAt: endedAt.toISOString(),
         durationMs: endedAt.getTime() - startedAt.getTime()
       });
+    };
+    // 'close' waits for every stdio consumer; a worker that leaves behind a
+    // helper process holding the inherited pipes would park us here forever.
+    // After the worker itself exits, allow a short drain window and settle.
+    child.on('exit', (code, exitSignal) => {
+      drainTimer = setTimeout(() => settle(code, exitSignal), 2000);
     });
+    child.on('close', settle);
 
     if (spec.stdin !== null && spec.stdin !== undefined) child.stdin.end(spec.stdin);
     else child.stdin.end();

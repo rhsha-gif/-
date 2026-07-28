@@ -43,6 +43,23 @@ test('termination escalation sends SIGTERM and then SIGKILL after the grace peri
   assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
 });
 
+test('a worker whose orphaned child holds the stdio pipes still resolves promptly after exit', async () => {
+  // Codex-style CLIs spawn helper processes that inherit stdio; waiting for
+  // the 'close' event alone would then hang long after the worker exited.
+  const started = Date.now();
+  const result = await runCommand({
+    command: process.execPath,
+    args: ['-e', 'const{spawn}=require("child_process");spawn(process.execPath,["-e","setTimeout(()=>{},8000)"],{stdio:"inherit"}).unref();process.stdout.write("done")'],
+    env: {},
+    stdin: null
+  });
+  const elapsedMs = Date.now() - started;
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.status, 'complete');
+  assert.match(result.stdout, /done/);
+  assert.ok(elapsedMs < 6000, `runCommand took ${elapsedMs}ms waiting for an orphan`);
+});
+
 test('marks a timed-out worker failed and terminates it promptly', async () => {
   const result = await runCommand({
     command: process.execPath,

@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — 리빌드 (rebuild on the pruned baseline)
+
+인터뷰로 확정한 6-슬라이스 리빌드. 목적함수는 시간·구독 한도 절약(품질 바닥선 유지)이다.
+
+### Added
+
+- **다운시프트 실효화**: haiku 카탈로그 확장(testing/implementation/exploration/research/log-analysis)과 exploration/research 분류 규칙. 광고한 다운시프트 대상 전부가 실제로 haiku에 도달하며, `test/downshift-matrix.test.js`가 경계를 회귀 고정한다.
+- **verify 게이트 + escalation**: `aorch exec`가 작업의 `verificationCommands`를 직접 실행하고, 실패 시 같은 provider의 사다리(Claude: opus→fable, Codex: sol/high→sol/xhigh)를 `forcedRoute`로 상향한다(총 attempt ≤ 3, 소진 시 증거와 함께 사람 반환). verify 결과는 quality 1.0/0.2 관측(`metadata.source:'verify-gate'`)으로 자동 기록되어 나쁜 다운시프트가 자기교정된다. `claude-fable-apex` 프로필은 `complexities:["critical"]` 잠금으로 일반 라우팅에서 숨긴다(escalation 전용).
+- **훅 강제**: PreToolUse(`Task|Agent`) `subagent-gate.mjs`가 서브에이전트 스폰을 classify하고 과등급/모델 미지정 스폰을 정확한 모델 안내와 함께 차단한다(fail-open, `AORCH_NO_ENFORCE=1` 탈출구).
+- **provider limits + 크로스 fallback**: `.aorch/limits.json`(만료 타임스탬프, 데몬 없음), `aorch limits` CLI, route/exec의 forbiddenProviders 주입, rate-limit 감지 시 남은 provider로 재선택. 실제 한도 메시지 포맷은 미확정 — 이벤트 발생 시 fixture로 패턴을 고정할 것; 그때까지 수동 토글이 1차 경로다.
+- `classify --providers`로 Claude-전용 기본을 넘어 크로스-provider 라우팅 개방.
+
+### Fixed
+
+- Windows에서 워커(codex)가 stdio 파이프를 쥔 헬퍼 프로세스를 남기면 executor가 `close` 이벤트를 영원히 기다리던 행 — worker `exit` 후 2초 드레인 윈도우로 settle.
+
+### Dogfooding (성공 기준 달성)
+
+aorch 자기 자신의 실제 서브태스크(리뷰어 에이전트 문구 정합화)를 `classify --providers openai` → `codex-luna-repeatable@medium` 다운시프트 → `aorch exec` 위임 → verify 게이트(수용 기준 검사 + `node --test test/install.test.js`) 1차 통과로 왕복했다. receipt: `.aorch/task-runs/d31972b1-2fd5-4b25-be64-e8bd3fed725e/T-dogfood-reviewer-wording/receipt.json`, 관측: `.aorch/observations.jsonl`의 verify-gate 레코드 1건.
+
 ## Unreleased — 대청소 (scope pruning)
 
 이 도구의 실제 제품 정의(개인용 두 구독 CLI — Claude Code + Codex CLI — 를 위한 다운시프트 판단 층)와 어긋나는, "워커를 불신하고 시간에 따라 학습하는 분산형 도구"용 코드를 제거했다. 남긴 핵심은 난이도→등급 라우팅, 크로스-에이전트 디스패치, 테스트 실행 게이트다.
