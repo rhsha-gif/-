@@ -110,6 +110,54 @@ test('dry-run returns the route, capabilities, and command without spawning a wo
   await assertWorkerWasNotSpawned(markerPath);
 });
 
+test('forcedRoute bypasses complexity eligibility so escalation can reach locked profiles', async (t) => {
+  // Given a second effort locked to critical complexity, which normal routing
+  // for this standard task can never select
+  const cwd = await temporaryDirectory(t, 'aorch-task-runner-forced-');
+  const markerPath = path.join(cwd, 'worker-spawned');
+  const catalog = config(markerPath);
+  catalog.models[0].efforts.push({
+    name: 'apex',
+    qualityDelta: 0.05,
+    tokenMultiplier: 2,
+    latencyMultiplier: 2,
+    complexities: ['critical']
+  });
+
+  // When
+  const result = await executeTask({
+    task: task({ id: 'T-forced' }),
+    config: catalog,
+    cwd,
+    dryRun: true,
+    forcedRoute: { profileId: 'fixture-model', effort: 'apex' }
+  });
+
+  // Then
+  assert.equal(result.route.effort, 'apex');
+  assert.equal(result.route.decision.policy, 'forced-route');
+  await assertWorkerWasNotSpawned(markerPath);
+});
+
+test('forcedRoute rejects unknown profiles and efforts instead of guessing', async (t) => {
+  const cwd = await temporaryDirectory(t, 'aorch-task-runner-forced-bad-');
+  const markerPath = path.join(cwd, 'worker-spawned');
+  await assert.rejects(
+    executeTask({
+      task: task(), config: config(markerPath), cwd, dryRun: true,
+      forcedRoute: { profileId: 'ghost', effort: 'medium' }
+    }),
+    /ghost/
+  );
+  await assert.rejects(
+    executeTask({
+      task: task(), config: config(markerPath), cwd, dryRun: true,
+      forcedRoute: { profileId: 'fixture-model', effort: 'mystery' }
+    }),
+    /mystery/
+  );
+});
+
 for (const risk of ['high', 'critical']) {
   test(`${risk}-risk write is refused outside a linked worktree`, async (t) => {
     // Given

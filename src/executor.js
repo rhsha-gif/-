@@ -23,6 +23,9 @@ export function runCommand(spec, {
       env: { ...process.env, ...(spec.env ?? {}) },
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
+      // cmd.exe does not understand Node's backslash-escaped quotes; callers
+      // spawning it pass a pre-quoted command line and opt out of escaping.
+      windowsVerbatimArguments: spec.verbatim === true,
       signal
     });
     let stdout = '';

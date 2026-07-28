@@ -119,6 +119,44 @@ function validateRouting(input = {}) {
   };
 }
 
+// Ladders are same-provider by design: cross-provider fallback is a separate
+// mechanism (route reselection under forbiddenProviders), while a ladder only
+// climbs quality tiers inside the provider that already owns the task.
+function validateEscalation(input = {}, providers, models) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new TypeError('escalation must be an object');
+  }
+  const maxAttempts = input.maxAttempts ?? 3;
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    throw new RangeError('escalation.maxAttempts must be a positive integer');
+  }
+  const ladders = input.ladders ?? {};
+  if (!ladders || typeof ladders !== 'object' || Array.isArray(ladders)) {
+    throw new TypeError('escalation.ladders must be an object');
+  }
+  const providerIds = new Set(providers.map((provider) => provider.id));
+  const modelById = new Map(models.map((model) => [model.id, model]));
+  for (const [providerId, steps] of Object.entries(ladders)) {
+    if (!providerIds.has(providerId)) {
+      throw new Error(`escalation.ladders references unknown provider ${providerId}`);
+    }
+    assertArray(steps, `escalation.ladders.${providerId}`);
+    for (const step of steps) {
+      const profile = modelById.get(step?.profileId);
+      if (!profile) {
+        throw new Error(`escalation.ladders.${providerId} references unknown profile ${step?.profileId}`);
+      }
+      if (profile.provider !== providerId) {
+        throw new Error(`escalation.ladders.${providerId} step ${step.profileId} belongs to provider ${profile.provider}`);
+      }
+      if (!(profile.efforts ?? []).some((effort) => effort.name === step.effort)) {
+        throw new Error(`escalation.ladders.${providerId} step ${step.profileId} references unknown effort ${step.effort}`);
+      }
+    }
+  }
+  return { ...input, maxAttempts, ladders };
+}
+
 function validateQualityMap(quality, id) {
   if (!quality || typeof quality !== 'object') throw new TypeError(`model ${id} requires quality map`);
   for (const [key, value] of Object.entries(quality)) {
@@ -205,6 +243,7 @@ export function validateConfig(input) {
   });
   const routing = validateRouting(input.routing ?? {});
   const controlPlane = validateControlPlane(input.controlPlane ?? {});
+  const escalation = validateEscalation(input.escalation ?? {}, normalizedProviders, normalizedModels);
 
   const progressMinutes = input.progress?.intervalMinutes ?? 30;
   if (!Number.isFinite(progressMinutes) || progressMinutes <= 0) {
@@ -222,6 +261,7 @@ export function validateConfig(input) {
     capabilities: normalizedCapabilities,
     routing,
     controlPlane,
+    escalation,
     progress: { intervalMinutes: progressMinutes, ...(input.progress ?? {}) },
     verification: { ...(input.verification ?? {}), commandTimeoutMs: verificationTimeoutMs },
     paths: { stateDir: '.aorch', ...(input.paths ?? {}) }

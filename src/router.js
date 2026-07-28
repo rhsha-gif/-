@@ -136,6 +136,38 @@ function narrowByMetric(candidates, metric, policy) {
   return candidates.filter((candidate) => candidate[field] <= best * (1 + tolerance));
 }
 
+// Escalation deliberately bypasses the eligibility filters: a ladder is a
+// human-authored recovery path, and its profiles may be locked out of normal
+// routing on purpose (e.g. an apex model whose only effort is critical-only).
+export function forceRoute({ catalog, profileId, effort, task = {} }) {
+  const profile = (catalog.models ?? []).find((entry) => entry.id === profileId);
+  if (!profile || profile.enabled === false) {
+    throw new Error(`Forced route requires an enabled profile: ${profileId}`);
+  }
+  const effortSpec = (profile.efforts ?? []).find((entry) => entry.name === effort);
+  if (!effortSpec) {
+    throw new Error(`Forced route effort is not defined for ${profileId}: ${effort}`);
+  }
+  const provider = providerMetadata(catalog, profile.provider);
+  const prior = clamp01(
+    (profile.quality?.[task.kind] ?? profile.quality?.default ?? 0.5) + (effortSpec.qualityDelta ?? 0)
+  );
+  return {
+    provider: profile.provider,
+    profileId: profile.id,
+    model: profile.model,
+    effort: effortSpec.name,
+    maturity: profile.maturity ?? 'stable',
+    adapterMaturity: provider.adapterMaturity ?? 'stable',
+    priorQuality: prior,
+    quality: { mean: prior, conservative: prior, uncertainty: 0, effectiveSamples: 0, rawSamples: 0, priorQuality: prior, priorWeight: 0 },
+    tokenIndex: (profile.tokenIndex ?? 1) * (effortSpec.tokenMultiplier ?? 1),
+    latencyIndex: (profile.latencyIndex ?? 1) * (effortSpec.latencyMultiplier ?? 1),
+    metadata: profile.metadata ?? {},
+    decision: { policy: 'forced-route', complexity: task.complexity ?? null }
+  };
+}
+
 export function selectRoute({ task, catalog, observations = [], now = new Date() }) {
   if (!task?.kind || !task?.role) {
     throw new TypeError('task.kind and task.role are required');

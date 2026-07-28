@@ -202,6 +202,49 @@
       ]
     },
     {
+      "id": "claude-fable-apex",
+      "provider": "anthropic",
+      "model": "fable",
+      "enabled": true,
+      "roles": [
+        "planner",
+        "executor",
+        "reviewer"
+      ],
+      "taskKinds": [
+        "architecture",
+        "planning",
+        "debugging",
+        "review",
+        "implementation",
+        "testing",
+        "security",
+        "risk-analysis"
+      ],
+      "quality": {
+        "default": 0.96,
+        "architecture": 0.98,
+        "debugging": 0.97,
+        "implementation": 0.96,
+        "security": 0.98,
+        "risk-analysis": 0.98
+      },
+      "tokenIndex": 3,
+      "latencyIndex": 2.2,
+      "maturity": "stable",
+      "efforts": [
+        {
+          "name": "high",
+          "qualityDelta": 0,
+          "tokenMultiplier": 1,
+          "latencyMultiplier": 1,
+          "complexities": [
+            "critical"
+          ]
+        }
+      ]
+    },
+    {
       "id": "codex-luna-repeatable",
       "provider": "openai",
       "model": "gpt-5.6-luna",
@@ -460,6 +503,31 @@
       "phase": "post"
     }
   ],
+  "escalation": {
+    "maxAttempts": 3,
+    "ladders": {
+      "anthropic": [
+        {
+          "profileId": "claude-opus-deep",
+          "effort": "high"
+        },
+        {
+          "profileId": "claude-fable-apex",
+          "effort": "high"
+        }
+      ],
+      "openai": [
+        {
+          "profileId": "codex-sol-deep",
+          "effort": "high"
+        },
+        {
+          "profileId": "codex-sol-deep",
+          "effort": "xhigh"
+        }
+      ]
+    }
+  },
   "progress": {
     "intervalMinutes": 30
   },

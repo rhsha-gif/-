@@ -119,6 +119,38 @@ test('effort profiles can declare supported task complexities', () => {
   assert.throws(() => validateConfig(config), /complexities/i);
 });
 
+test('escalation defaults exist without configuration', () => {
+  const validated = validateConfig(minimalConfig());
+  assert.equal(validated.escalation.maxAttempts, 3);
+  assert.deepEqual(validated.escalation.ladders, {});
+});
+
+test('escalation ladders must reference known providers, profiles, and efforts', () => {
+  const config = minimalConfig();
+  config.escalation = { maxAttempts: 3, ladders: { newco: [{ profileId: 'newco-best', effort: 'high' }] } };
+  const validated = validateConfig(config);
+  assert.deepEqual(validated.escalation.ladders.newco, [{ profileId: 'newco-best', effort: 'high' }]);
+
+  config.escalation = { ladders: { newco: [{ profileId: 'newco-best', effort: 'mystery' }] } };
+  assert.throws(() => validateConfig(config), /unknown effort/i);
+
+  config.escalation = { ladders: { ghost: [] } };
+  assert.throws(() => validateConfig(config), /unknown provider/i);
+
+  config.escalation = { ladders: { newco: [{ profileId: 'ghost-model', effort: 'high' }] } };
+  assert.throws(() => validateConfig(config), /unknown profile/i);
+
+  config.escalation = { maxAttempts: 0 };
+  assert.throws(() => validateConfig(config), /escalation\.maxAttempts/i);
+});
+
+test('escalation ladder steps must stay on their own provider', () => {
+  const config = minimalConfig();
+  config.providers.push({ id: 'otherco', adapter: 'generic', enabled: true, executable: 'other', args: ['run'] });
+  config.escalation = { ladders: { otherco: [{ profileId: 'newco-best', effort: 'high' }] } };
+  assert.throws(() => validateConfig(config), /belongs to provider/i);
+});
+
 test('control-plane validates the experimental adapter risk ceiling', () => {
   const config = minimalConfig();
   config.controlPlane = { experimentalAdapterMaxRisk: 'standard' };

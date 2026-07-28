@@ -1,8 +1,9 @@
-import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { selectRoute } from './router.js';
+import { forceRoute, selectRoute } from './router.js';
+import { writeJsonAtomic } from './fs-util.js';
 import { selectCapabilities } from './capabilities.js';
 import { providerById } from './config.js';
 import { buildTaskPrompt } from './providers/base.js';
@@ -43,25 +44,6 @@ async function assertWriteIsolation(task, cwd) {
   }
 }
 
-// Atomic JSON write: temp file then rename, so an interrupted run cannot leave
-// a half-written receipt that later parses as junk. Same shape as install.js;
-// each module keeps its own copy since the shared file-store was removed.
-async function writeJsonAtomic(filePath, value) {
-  const temp = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp-${process.pid}-${randomUUID()}`);
-  let handle;
-  try {
-    handle = await open(temp, 'wx', 0o600);
-    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
-    await handle.close();
-    handle = null;
-    await rename(temp, filePath);
-  } catch (error) {
-    await handle?.close().catch(() => {});
-    await unlink(temp).catch(() => {});
-    throw error;
-  }
-}
-
 function parseClaudeOutput(stdout) {
   const parsed = JSON.parse(stdout);
   return parsed.structured_output ?? parsed.result?.structured_output ?? parsed;
@@ -86,17 +68,19 @@ export async function executeTask({
   // A hung worker must not hang the orchestrator forever; pass 0 explicitly
   // to disable the watchdog.
   timeoutMs = 60 * 60 * 1000,
-  dryRun = false
+  dryRun = false,
+  // Escalation override: pins profile and effort, bypassing route selection.
+  forcedRoute
 }) {
   task = validateTask(task, { forExecution: true });
-  const route = selectRoute({ task, catalog: config, observations });
+  const route = forcedRoute
+    ? forceRoute({ catalog: config, task, profileId: forcedRoute.profileId, effort: forcedRoute.effort })
+    : selectRoute({ task, catalog: config, observations });
   const capabilities = selectCapabilities({
     requestedIds: task.capabilityIds ?? [],
     inventory: config.capabilities,
     provider: route.provider,
-    limits: config.capabilityLimits,
-    task,
-    policy: config.controlPlane ?? {}
+    limits: config.capabilityLimits
   });
   const provider = providerById(config, route.provider);
   const runId = task.runId ?? randomUUID();

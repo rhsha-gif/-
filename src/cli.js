@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.js';
 import { readObservations, appendObservation } from './observations.js';
 import { selectRoute } from './router.js';
-import { executeTask } from './task-runner.js';
+import { executeWithVerification } from './run-loop.js';
 import { discoverCapabilities, getInventory, mergeCapabilities } from './inventory.js';
 import { installProject } from './install.js';
 import { validateTask } from './task.js';
@@ -161,17 +161,18 @@ async function main(argv = process.argv.slice(2)) {
     const timeoutMs = numericFlag(flags, 'timeout-ms');
     const task = validateTask(await readJson(requireFlag(flags, 'task'), cwd), { forExecution: true });
     const observations = await readObservations(resolveObservationPath(config, flags, cwd));
-    const result = await executeTask({
+    const result = await executeWithVerification({
       task,
       config,
       observations,
       cwd,
+      observationsPath: resolveObservationPath(config, flags, cwd),
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
       dryRun: flags['dry-run'] === true
     });
     const output = flags['dry-run'] === true
       ? { route: cleanRoute(result.route), capabilities: result.capabilities, commandSpec: result.commandSpec, runDir: result.runDir }
-      : { route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, runDir: result.runDir };
+      : { route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, runDir: result.runDir, verification: result.verification, attempts: result.attempts };
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return 0;
   }
