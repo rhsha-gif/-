@@ -65,6 +65,15 @@ async function copyTree(source, destination) {
   }
 }
 
+// Installed instruction files cannot know where this package lives, so they
+// carry an {{AORCH_ROOT}} placeholder that is resolved at install time.
+async function resolvePlaceholders(filePath) {
+  const { writeFile } = await import('node:fs/promises');
+  const content = await readFile(filePath, 'utf8');
+  if (!content.includes('{{AORCH_ROOT}}')) return;
+  await writeFile(filePath, content.replaceAll('{{AORCH_ROOT}}', PACKAGE_ROOT.replaceAll('\\', '/')), 'utf8');
+}
+
 export async function installProject({ projectRoot = process.cwd(), target = 'both', forceConfig = false } = {}) {
   if (!['both', 'claude', 'codex'].includes(target)) throw new Error(`Unknown installation target: ${target}`);
   const wantsClaude = target === 'both' || target === 'claude';
@@ -106,9 +115,10 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
 
   if (wantsClaude) {
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/skills'), path.join(projectRoot, '.claude/skills'));
+    await resolvePlaceholders(path.join(projectRoot, '.claude/skills/aorch-downshift/SKILL.md'));
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/agents'), path.join(projectRoot, '.claude/agents'));
     await writeJson(settingsPath, mergedSettings);
-    installed.push('.claude/skills/adaptive-orchestrate', '.claude/agents', '.claude/settings.json');
+    installed.push('.claude/skills/adaptive-orchestrate', '.claude/skills/aorch-downshift', '.claude/agents', '.claude/settings.json');
   }
 
   if (wantsCodex) {

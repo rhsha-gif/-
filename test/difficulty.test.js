@@ -47,6 +47,21 @@ test('empty or missing objective throws', () => {
   assert.throws(() => classifyDifficulty({}), TypeError);
 });
 
+test('exploration and research objectives classify low so haiku task kinds are reachable', () => {
+  const explore = classifyDifficulty({ objective: 'Explore the repo and map out the routing modules' });
+  assert.equal(explore.kind, 'exploration');
+  assert.equal(explore.complexity, 'low');
+  const research = classifyDifficulty({ objective: 'Research and compare options for schema validation' });
+  assert.equal(research.kind, 'research');
+  assert.equal(research.complexity, 'low');
+});
+
+test('debugging wins over research when both keywords appear', () => {
+  const r = classifyDifficulty({ objective: 'Research the logs to find the root cause of the crash' });
+  assert.equal(r.kind, 'debugging');
+  assert.equal(r.complexity, 'high');
+});
+
 test('stem keywords match inflected forms', () => {
   assert.equal(classifyDifficulty({ objective: 'patch this vulnerability' }).complexity, 'high');
   assert.equal(classifyDifficulty({ objective: 'make the service scalable' }).complexity, 'high');

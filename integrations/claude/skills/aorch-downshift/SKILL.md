@@ -8,7 +8,7 @@ description: 작업을 서브태스크로 나눠 워커(서브에이전트)에�
 리드가 작업을 서브태스크로 분해해 워커를 띄우려 할 때, **각 서브태스크마다 워커를 spawn하기 전에** 다음을 한다:
 
 1. 서브태스크의 목표 한 줄을 정한다.
-2. `node <repo>/src/cli.js classify --objective "<서브태스크 목표>"` 를 실행한다.
+2. `node "{{AORCH_ROOT}}/src/cli.js" classify --objective "<서브태스크 목표>"` 를 실행한다.
 3. 반환된 `route.model`(haiku/sonnet/opus 등)과 `route.effort`를 **그 서브에이전트의 model 오버라이드**로 사용한다.
 4. 등급을 임의로 올리지 않는다. 분류기가 이미 품질 바닥선(minimumQuality)을 지킨다.
 

@@ -45,14 +45,18 @@
         "exploration",
         "research",
         "log-analysis",
-        "documentation"
+        "documentation",
+        "testing",
+        "implementation"
       ],
       "quality": {
         "default": 0.76,
         "exploration": 0.82,
         "research": 0.78,
         "log-analysis": 0.8,
-        "documentation": 0.78
+        "documentation": 0.78,
+        "testing": 0.82,
+        "implementation": 0.81
       },
       "tokenIndex": 0.35,
       "latencyIndex": 0.35,

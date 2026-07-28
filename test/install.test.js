@@ -41,6 +41,13 @@ test('installs both CLI integrations idempotently without editing root instructi
   assert.match(claudeSkill, /task decomposition/i);
   assert.match(claudeSkill, /phase.*confidence.*blockers/i);
   assert.match(await readFile(path.join(projectRoot, '.agents/skills/adaptive-orchestrate/SKILL.md'), 'utf8'), /task decomposition/i);
+
+  // The downshift skill must actually ship and point at this package, not at
+  // an unresolved placeholder or a nonexistent repo path.
+  const downshiftSkill = await readFile(path.join(projectRoot, '.claude/skills/aorch-downshift/SKILL.md'), 'utf8');
+  assert.match(downshiftSkill, /classify --objective/);
+  assert.ok(!downshiftSkill.includes('{{AORCH_ROOT}}'), 'placeholder must be resolved at install time');
+  assert.match(downshiftSkill, /src\/cli\.js/);
 });
 
 test('rejects unknown installation targets', async () => {
