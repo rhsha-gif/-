@@ -245,10 +245,6 @@ export function validateConfig(input) {
   const controlPlane = validateControlPlane(input.controlPlane ?? {});
   const escalation = validateEscalation(input.escalation ?? {}, normalizedProviders, normalizedModels);
 
-  const progressMinutes = input.progress?.intervalMinutes ?? 30;
-  if (!Number.isFinite(progressMinutes) || progressMinutes <= 0) {
-    throw new Error('progress.intervalMinutes must be positive');
-  }
   const verificationTimeoutMs = input.verification?.commandTimeoutMs ?? 15 * 60 * 1000;
   if (!Number.isFinite(verificationTimeoutMs) || verificationTimeoutMs <= 0) {
     throw new Error('verification.commandTimeoutMs must be positive');
@@ -262,7 +258,6 @@ export function validateConfig(input) {
     routing,
     controlPlane,
     escalation,
-    progress: { intervalMinutes: progressMinutes, ...(input.progress ?? {}) },
     verification: { ...(input.verification ?? {}), commandTimeoutMs: verificationTimeoutMs },
     paths: { stateDir: '.aorch', ...(input.paths ?? {}) }
   });

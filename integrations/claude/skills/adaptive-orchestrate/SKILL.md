@@ -41,7 +41,7 @@ A capability that is not in `aorch inventory` must not be assumed available. Tre
 
 Report after decomposition, after meaningful state changes, and at least every 30 minutes while the same request remains active. Include `phase` (planning, executing, verifying, blocked, complete), `confidence` (low, medium, high), and open blockers, together with completed work, current work, the routes chosen and why, and what verification actually ran.
 
-There is no durable run state and no progress command to read these from — you assess them yourself, so state them as your own judgment rather than as measurements. Never present activity as proof of completion or hide a blocked state behind it.
+Run state is not persisted between sessions and there is no progress command to read these from — you assess them yourself, so state them as your own judgment rather than as measurements. Never present activity as proof of completion or hide a blocked state behind it.
 
 ## Dynamic provider and model catalog
 

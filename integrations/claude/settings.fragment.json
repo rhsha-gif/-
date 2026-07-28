@@ -24,18 +24,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.aorch/hooks/session-review.mjs\"",
-            "timeout": 30,
-            "statusMessage": "Checking active orchestration run"
-          }
-        ]
-      }
     ]
   }
 }

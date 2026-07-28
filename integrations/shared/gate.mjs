@@ -61,16 +61,14 @@ export function classifyPrompt(prompt) {
         requestClass: 'read-only',
         riskHint: 'standard',
         failPolicy: 'closed',
-        requiresOrchestration: true,
-        durableRunRecommended: false
+        requiresOrchestration: true
       };
     }
     return {
       requestClass: 'read-only',
       riskHint: 'low',
       failPolicy: 'open',
-      requiresOrchestration: true,
-      durableRunRecommended: false
+      requiresOrchestration: true
     };
   }
   if (highRisk && (development || !readOnly || destructive)) {
@@ -78,8 +76,7 @@ export function classifyPrompt(prompt) {
       requestClass: 'high-risk',
       riskHint: 'critical',
       failPolicy: 'closed',
-      requiresOrchestration: true,
-      durableRunRecommended: true
+      requiresOrchestration: true
     };
   }
   if (development) {
@@ -87,8 +84,7 @@ export function classifyPrompt(prompt) {
       requestClass: 'development',
       riskHint: 'standard',
       failPolicy: 'closed',
-      requiresOrchestration: true,
-      durableRunRecommended: true
+      requiresOrchestration: true
     };
   }
   return {
@@ -96,7 +92,6 @@ export function classifyPrompt(prompt) {
     riskHint: 'low',
     failPolicy: 'open',
     requiresOrchestration: true,
-    durableRunRecommended: false,
     recognizedReadOnlyIntent: readOnly
   };
 }
@@ -105,12 +100,11 @@ export function buildGateContext(classification) {
   const requestClass = classification?.requestClass ?? 'read-only';
   const riskHint = classification?.riskHint ?? 'low';
   const failPolicy = classification?.failPolicy ?? 'open';
-  const durableRun = classification?.durableRunRecommended === true ? 'recommended' : 'optional';
 
   return `ROOT GATE: The adaptive orchestrator must run first for this prompt.\n` +
-    `Classification: ${requestClass}; risk hint: ${riskHint}; gate failure policy: ${failPolicy}; durable run: ${durableRun}.\n` +
+    `Classification: ${requestClass}; risk hint: ${riskHint}; gate failure policy: ${failPolicy}.\n` +
     `This blocking hook is intentionally thin. Perform task decomposition, inventory lookup, route scoring, and provider execution outside this hook by invoking the adaptive-orchestrate skill.\n` +
     `The orchestrator must preserve the user's final goal, avoid unnecessary task splitting, and choose each bounded task's provider, model, reasoning effort, skills, hooks, plugins, permissions, isolation, and verification plan from capabilities that are actually installed for the task risk.\n` +
-    `Treat worker output as a claim, not proof. Gate terminal completion on the task's own verification commands. Keep delegation shallow and do not let workers modify the harness or control-plane policy.\n` +
-    `A simple read-only request may be completed without a durable run after this classification. Development or high-risk work must use a durable run, explicit acceptance criteria, bounded scope, and verification commands.`;
+    `Treat worker output as a claim, not proof. aorch exec runs each task's verificationCommands itself and escalates on failure; give development tasks real verification commands. Keep delegation shallow and do not let workers modify the harness or control-plane policy.\n` +
+    `A simple read-only request may be completed directly after this classification. Development or high-risk work must carry explicit acceptance criteria, bounded scope, and verification commands.`;
 }

@@ -14,7 +14,9 @@ test('installs both CLI integrations idempotently without editing root instructi
   const claudeSettings = JSON.parse(await readFile(path.join(projectRoot, '.claude/settings.json'), 'utf8'));
   const codexHooks = JSON.parse(await readFile(path.join(projectRoot, '.codex/hooks.json'), 'utf8'));
   assert.equal(claudeSettings.hooks.UserPromptSubmit.length, 1);
-  assert.equal(claudeSettings.hooks.Stop.length, 1);
+  // The Stop-gate premise (durable run state) was pruned; completion gating
+  // now lives inside the exec loop, so no Stop hook may be installed.
+  assert.equal(claudeSettings.hooks.Stop, undefined);
   assert.equal(claudeSettings.hooks.SessionEnd, undefined);
   assert.equal(claudeSettings.hooks.PreToolUse.length, 1);
   assert.equal(claudeSettings.hooks.PreToolUse[0].matcher, 'Task|Agent');
@@ -25,7 +27,7 @@ test('installs both CLI integrations idempotently without editing root instructi
   assert.ok(!installedGate.includes('{{AORCH_ROOT}}'), 'gate placeholder must be resolved at install time');
   assert.match(installedGate, /src[/\\]cli\.js|src', 'cli\.js/);
   assert.equal(codexHooks.hooks.UserPromptSubmit.length, 1);
-  assert.equal(codexHooks.hooks.Stop.length, 1);
+  assert.equal(codexHooks.hooks.Stop, undefined);
   const codexPromptCommand = codexHooks.hooks.UserPromptSubmit[0].hooks[0].command;
   assert.match(codexPromptCommand, /\.aorch\/hooks\/user-prompt-submit\.mjs/);
   if (process.platform !== 'win32') {

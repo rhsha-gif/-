@@ -21,7 +21,6 @@ function minimalConfig() {
       }
     ],
     capabilities: [],
-    progress: { intervalMinutes: 30 },
     paths: { stateDir: '.aorch' }
   };
 }

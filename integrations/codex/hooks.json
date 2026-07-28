@@ -11,18 +11,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ROOT=\"$PWD\"; while [ ! -e \"$ROOT/.aorch/hooks/session-review.mjs\" ] && [ \"$ROOT\" != \"/\" ]; do ROOT=\"$(dirname \"$ROOT\")\"; done; if [ -e \"$ROOT/.aorch/hooks/session-review.mjs\" ]; then node \"$ROOT/.aorch/hooks/session-review.mjs\"; else echo \"aorch: no .aorch/hooks above $PWD\" >&2; fi",
-            "timeout": 30,
-            "statusMessage": "Checking active orchestration run"
-          }
-        ]
-      }
     ]
   }
 }

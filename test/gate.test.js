@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildGateContext, classifyPrompt } from '../src/gate.js';
 
-test('thin gate classifies read-only prompts without forcing a durable run', () => {
+test('thin gate classifies read-only prompts as pass-through work', () => {
   const result = classifyPrompt('Explain what this function does and do not edit files.');
   assert.equal(result.requestClass, 'read-only');
   assert.equal(result.riskHint, 'low');
@@ -27,7 +27,6 @@ test('high-risk subject matter stays read-only when no mutation or external acti
   assert.equal(result.requestClass, 'read-only');
   assert.equal(result.riskHint, 'low');
   assert.equal(result.failPolicy, 'open');
-  assert.equal(result.durableRunRecommended, false);
 });
 
 test('destructive prompts without a development verb still classify as high-risk', () => {

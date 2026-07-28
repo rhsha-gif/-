@@ -56,9 +56,9 @@ async function parseWorkerOutput({ provider, stdout, outputPath }) {
 }
 
 // Thin dispatch: route the task, select capabilities, build the provider command,
-// run it, and return the worker's raw receipt. The completion gate, evidence
-// plane, and durable run state were part of a different (distributed, distrustful)
-// product and were removed; rebuild them on top of these primitives as needed.
+// run it, and return the worker's raw receipt. Verification gating and
+// escalation live one level up in run-loop.js; this module runs exactly one
+// worker once.
 export async function executeTask({
   task,
   config,

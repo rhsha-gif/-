@@ -528,9 +528,6 @@
       ]
     }
   },
-  "progress": {
-    "intervalMinutes": 30
-  },
   "paths": {
     "stateDir": ".aorch",
     "observationsFile": ".aorch/observations.jsonl"

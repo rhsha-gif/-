@@ -1,13 +1,8 @@
 # Adaptive Orchestrator
 
-> **판단 코어 릴리스** — 개인용 두 구독(Claude Code + Codex CLI) 도구에 과했던 부분을 두 차례에 걸쳐 걷어냈습니다.
->
-> - 1차: worker 불신용 SHA-256 attestation·hidden verifier, 공급망 trust tier(trusted/reviewed/untrusted), 데이터 없는 학습 시스템(retrospective·lessons·proposal), 체크섬 JSONL·`doctor --repair` 같은 과잉 내구성·운영 기계
-> - 2차: verifier 완료 게이트, receipt 검증, weighted progress, durable run state, doctor, file-store journal 평면 전체
->
-> 남은 것은 **난이도→등급 라우팅 판단**과 그 판단을 실행하는 **얇은 디스패치**입니다. 삭제 내역은 [`CHANGELOG.md`](CHANGELOG.md), 아직 구현되지 않은 것은 [아직 없는 것 (로드맵)](#아직-없는-것-로드맵)을 보세요.
+> **리빌드 릴리스** — 개인용 두 구독(Claude Code + Codex CLI)을 위한 **다운시프트 판단 층**입니다. 목적함수는 시간·구독 한도 절약이고, 품질 바닥선(`minimumQuality`)이 하한을 지킵니다. 프루닝(판단 코어 릴리스)으로 걷어낸 기반 위에 다운시프트 실효화, verify 게이트 + escalation, 서브에이전트 등급 강제 훅, provider limits + 크로스 fallback을 증축했습니다. 내역은 [`CHANGELOG.md`](CHANGELOG.md)를 보세요.
 
-Adaptive Orchestrator는 Claude Code 또는 Codex CLI 아래에서 동작하는 소형 라우팅 런타임입니다. **작업을 대신 분해하지 않습니다.** 분해는 호스트 모델(리드)이 자기 네이티브 능력으로 하고, aorch는 그렇게 나온 각 작업에 대해 다음 조합을 판단합니다.
+Adaptive Orchestrator는 Claude Code 또는 Codex CLI 아래에서 동작하는 소형 라우팅 런타임입니다. **작업을 대신 분해하지 않습니다.** 분해는 호스트 모델(리드)이 자기 네이티브 능력으로 하고, aorch는 그렇게 나온 각 작업에 대해 다음 조합을 판단하고 강제합니다.
 
 ```text
 provider
@@ -15,6 +10,7 @@ provider
 + reasoning effort
 + skill / plugin / hook
 + permission / scope / isolation
++ verification / escalation
 ```
 
 핵심 흐름은 다음과 같습니다.
@@ -23,10 +19,13 @@ provider
 사용자 프롬프트
 → 얇은 UserPromptSubmit 정책 게이트
 → adaptive-orchestrate root skill (호스트 모델이 분해)
-→ 위험 정책 적용
-→ provider/model/effort/capability 선택   (aorch route)
-→ bounded worker 실행                     (aorch exec)
-→ 호스트 모델이 실제 diff와 테스트로 결과 검토
+→ 서브태스크마다 등급 판정                 (aorch classify)
+   ├─ 서브에이전트 스폰이면 PreToolUse 훅이 등급 강제
+   └─ 워커 위임이면 task envelope 작성
+→ bounded worker 실행 + verify 게이트     (aorch exec)
+   ├─ verificationCommands 실제 실행, 실패 시 escalation 사다리 상향
+   └─ rate-limit 시 남은 provider로 재선택 (aorch limits)
+→ 호스트 모델이 실제 diff로 결과 검토
 → 결과 통합
 ```
 
@@ -52,11 +51,40 @@ TRIP, LazyCodex, autoresearch, SyMerge 등 참고 자료를 선별해 이 소스
 
 라우터는 모델 점수부터 비교하지 않습니다. 먼저 risk에 따라 허용되는 adapter maturity를 제한하고(experimental adapter는 `experimentalAdapterMaxRisk` 이하 risk에서만), critical 작업에서는 challenger 모델을 후보에서 제외합니다 — reviewer 역할이면서 `criticalMinimumSamples` 이상의 실효 표본을 가진 경우에만 남습니다. 그렇게 좁혀진 후보 안에서 model과 effort를 선택합니다. write isolation은 라우터가 아니라 실행 단계(`aorch exec`)가 강제합니다.
 
-### worker claim — 현재는 강제되지 않는다
+### 다운시프트: classify와 서브에이전트 등급 강제
 
-worker receipt는 완료 증명이 아니라 주장입니다. **현재 `aorch exec`는 receipt를 파싱해 그대로 반환할 뿐, 검증 명령을 실행하지 않습니다.** task의 `verificationCommands`는 워커 프롬프트에 요구사항으로 전달되지만 강제되지 않으며, claimed diff와 actual diff를 대조하는 가드도 없습니다. 완료 판단은 전적으로 호스트 모델(리드)의 몫입니다 — receipt를 그대로 믿지 말고 실제 diff와 테스트 결과를 직접 확인하세요.
+`aorch classify --objective "<한 줄 목표>"`는 목표를 kind/complexity로 분류하고 구체적 route를 반환합니다. 바닥선은 complexity가 결정합니다(`low 0.72 / standard 0.80 / high 0.88`). low/standard는 tokens-first로 다운시프트하고, high(security/architecture/debugging)는 quality-first를 유지합니다 — 고난도가 다운시프트되지 않는 것은 의도된 동작입니다.
 
-SHA-256 attestation, 숨은 verifier 명령, sterile worktree 재실행 격리는 워커를 불신하는 분산형 도구의 장치였고 개인 도구에는 과해 제거했습니다. 그것을 대체할 **테스트 실행 게이트**는 아직 구현되지 않았습니다([아직 없는 것](#아직-없는-것-로드맵)).
+대표 경계(실제 packaged config, `test/downshift-matrix.test.js`가 회귀 고정):
+
+| objective 예시 | kind/complexity | route |
+|---|---|---|
+| "Format this JSON file" | documentation/low | haiku |
+| "Write unit tests for the parser" | testing/standard | haiku |
+| "Implement the config parser" | implementation/standard | haiku |
+| "Explore the repo and map out modules" | exploration/low | haiku |
+| "Investigate and debug the deadlock" | debugging/high | opus |
+| "Design the auth architecture" | architecture/high | opus |
+
+리드가 서브에이전트를 직접 띄우면 PreToolUse 훅(`subagent-gate.mjs`, matcher `Task|Agent`)이 스폰의 objective를 classify하고 **모델 미지정·과등급 스폰을 정확한 모델 안내와 함께 차단**합니다. 안내대로 재시도하면 통과하므로 1회 수렴합니다. 이 훅은 비용 최적화이지 안전장치가 아니라서 모든 실패 경로가 fail-open이며, `AORCH_NO_ENFORCE=1`이 탈출구입니다.
+
+### verify 게이트와 escalation
+
+worker receipt는 완료 증명이 아니라 주장입니다. task가 `verificationCommands`를 선언하면 **`aorch exec`가 워커 종료 후 그 명령을 직접 실행**하고, 실패하면 같은 provider의 escalation 사다리(Claude: opus→fable, Codex: sol/high→sol/xhigh)를 실패 증거와 함께 상향합니다. 총 attempt는 3회이며, 소진되면 증거(`runDir/verification.json`)와 함께 사람에게 반환합니다 — 조용한 재시도 루프는 없습니다. verify 결과는 quality 1.0/0.2 관측으로 자동 기록되어, 다운시프트된 모델이 반복 실패하면 라우팅이 스스로 상위 모델로 복귀합니다.
+
+claimed diff와 actual diff를 대조하는 가드는 아직 없습니다 — diff 검토는 리드의 몫입니다([아직 없는 것](#아직-없는-것-로드맵)).
+
+### provider limits와 크로스 fallback
+
+구독 한도에 걸린 provider는 `.aorch/limits.json`에 만료 타임스탬프로 기록됩니다(데몬 없음 — 읽기 시점에 자동 해제).
+
+```bash
+aorch limits set anthropic --minutes 120 --note "weekly cap"
+aorch limits            # 활성 limits 표시
+aorch limits clear      # 전체 해제
+```
+
+route/exec는 활성 limits를 `forbiddenProviders`로 주입해 한도 걸린 provider를 피합니다. 실행 중 워커 출력에서 rate-limit 패턴이 감지되면 자동으로 limit을 기록하고 남은 provider에서 route를 재선택합니다(best-effort — 실제 한도 메시지 포맷은 이벤트 발생 시 fixture로 고정 예정이며, 그때까지 수동 토글이 1차 경로입니다). 후보가 전부 사라지면 라우터의 정상 에러가 표면화됩니다 — 조용한 우회는 없습니다.
 
 ### 실제로 강제되는 안전 불변식: write isolation
 
@@ -78,13 +106,16 @@ blast-radius 통제이지 worker 불신이 아닙니다.
 ## 포함 범위
 
 1. Claude Code와 Codex의 `UserPromptSubmit` thin gate
-2. root `adaptive-orchestrate` skill
-3. task-specific provider/model/effort router
-4. 설치된 skill/plugin/hook exact-ID inventory
-5. 시간 감쇠가 적용된 모델 성과 관측(provider·model·effort·taskKind 4차원)
-6. 설정만으로 추가 가능한 모델과 generic provider
-7. bounded worker 디스패치와 receipt 스키마 전달(구조화 출력 강제는 provider CLI에 위임)
-8. write isolation 불변식
+2. root `adaptive-orchestrate` skill과 `aorch-downshift` skill
+3. task-specific provider/model/effort router와 `aorch classify` 난이도 분류
+4. PreToolUse 서브에이전트 등급 강제 훅 (fail-open)
+5. verify 게이트 + 같은 provider escalation 사다리 (Fable은 escalation 전용 잠금 프로필)
+6. provider limits 상태와 rate-limit 크로스 fallback
+7. 설치된 skill/plugin/hook exact-ID inventory
+8. 시간 감쇠가 적용된 모델 성과 관측(provider·model·effort·taskKind 4차원) + verify-gate 자동 관측
+9. 설정만으로 추가 가능한 모델과 generic provider
+10. bounded worker 디스패치와 receipt 스키마 전달(구조화 출력 강제는 provider CLI에 위임)
+11. write isolation 불변식
 
 의도적으로 제외한 기능:
 
@@ -101,12 +132,11 @@ blast-radius 통제이지 worker 불신이 아닙니다.
 
 ## 아직 없는 것 (로드맵)
 
-제거했지만 되돌릴 의도가 있는 것들입니다. 문서가 실제보다 강한 보증을 주장하지 않도록 여기에 분리해 둡니다.
+문서가 실제보다 강한 보증을 주장하지 않도록 여기에 분리해 둡니다.
 
-- **테스트 실행 완료 게이트** — "테스트를 돌려라, LLM에게 묻지 마라." task가 선언한 `verificationCommands`를 워크스페이스에서 실제로 실행하고 하나라도 실패하면 완료를 거절하는 게이트. 조사한 어떤 라우터도 verify를 테스트 실행으로 하지 않기 때문에 이 프로젝트의 차별점으로 남겨 둔 항목입니다.
-- **claimed diff vs actual diff 대조** — worker가 주장한 변경 파일이 실제 Git diff와 일치하는지, read-only 작업이 파일을 건드리지 않았는지, bounded worker가 `HEAD`를 바꾸지 않았는지 확인하는 값싼 변경 가드.
-- **run lifecycle과 진행률** — durable run state, weighted progress, `Stop` hook의 미완료 run 차단. `Stop` hook은 아직 `.aorch/active-run.json`을 읽지만 그 포인터를 쓰는 코드가 없어 사실상 항상 통과합니다. 프루닝 이전 설치에서 넘어온 stale 포인터가 남아 있다면 세션 종료를 풀 명령이 없으니 그 파일을 지우세요.
-- **Codex 위임과 크로스 fallback** — 현재 라우팅은 Claude 티어 사이에서만 실측·검증됐습니다.
+- **claimed diff vs actual diff 대조** — worker가 주장한 변경 파일이 실제 Git diff와 일치하는지, read-only 작업이 파일을 건드리지 않았는지, bounded worker가 `HEAD`를 바꾸지 않았는지 확인하는 값싼 변경 가드. 현재는 리드가 직접 diff를 확인해야 합니다.
+- **rate-limit 메시지 fixture** — 자동 감지 패턴은 best-effort 추정입니다. 실제 한도 이벤트가 발생하면 provider별 메시지를 fixture로 캡처해 패턴을 고정합니다. 그때까지 `aorch limits set` 수동 토글이 1차 경로입니다.
+- **run lifecycle과 진행률** — durable run state와 weighted progress는 프루닝으로 제거했고 되돌릴 계획이 없습니다. 프루닝 이전 설치에서 넘어온 `.aorch/active-run.json`이나 `.aorch/hooks/session-review.mjs`가 남아 있다면 지워도 됩니다(재설치가 정리하지는 않습니다).
 
 ## 요구사항
 
@@ -148,11 +178,12 @@ project/
 │  └─ hooks/
 │     ├─ gate.mjs
 │     ├─ user-prompt-submit.mjs
-│     └─ session-review.mjs
+│     └─ subagent-gate.mjs
 ├─ .claude/
 │  ├─ settings.json
 │  ├─ skills/
-│  │  └─ adaptive-orchestrate/SKILL.md
+│  │  ├─ adaptive-orchestrate/SKILL.md
+│  │  └─ aorch-downshift/SKILL.md
 │  └─ agents/
 ├─ .agents/
 │  └─ skills/
@@ -187,8 +218,8 @@ thin gate가 요청을 분류하고 root directive를 주입합니다. 호스트
 4. `aorch inventory`로 실제 capability 확인
 5. 작업별 task envelope 작성
 6. `aorch route`로 provider/model/effort 선택
-7. `aorch exec`로 bounded worker 실행
-8. receipt를 claim으로 취급하고 **직접** 실제 diff를 확인하고 테스트를 실행 (aorch는 아직 이를 대신 해 주지 않음)
+7. `aorch exec`로 bounded worker 실행 — task에 `verificationCommands`가 있으면 exec가 직접 실행하고 실패 시 escalation
+8. receipt를 claim으로 취급하고 **직접** 실제 diff를 확인 (verify 게이트는 테스트를 대신 돌려주지만 diff 대조는 리드의 몫)
 9. 위험도에 따라 독립 reviewer 추가; reviewer에는 executor rationale보다 requirements·invariants·actual diff를 먼저 제공
 10. 검토된 route 결과를 `aorch record`로 기록
 
@@ -259,7 +290,7 @@ aorch exec --task examples/task.json
 }
 ```
 
-- `verificationCommands`: 워커에게 전달되는 검증/테스트 요구사항. `critical` risk task는 이 값이 비어 있으면 validation 단계에서 거부합니다(fail closed). **현재 aorch는 이 명령을 직접 실행하지 않습니다** — 호스트 모델이 실행해야 합니다.
+- `verificationCommands`: 완료 게이트. **`aorch exec`가 워커 종료 후 이 명령을 플랫폼 셸로 직접 실행**하고, 실패하면 escalation 사다리를 상향합니다(총 3 attempt, 소진 시 증거와 함께 반환). `critical` risk task는 이 값이 비어 있으면 validation 단계에서 거부합니다(fail closed). 비어 있는 task는 게이트 없이 1회 실행됩니다.
 - `allowInPlaceWrite`: low/standard write task에 한해 사용자가 명시적으로 현재 checkout 수정을 허용했음을 기록하는 예외 플래그. 기본값은 `false`이며 high/critical에서는 무시하고 fail closed
 
 ## 동적으로 변하는 모델 성능
@@ -283,7 +314,7 @@ w_i=2^{-a_i/h}
 aorch record --input examples/review-observation.json
 ```
 
-worker의 자기평가가 아니라 독립 reviewer 결과를 기록해야 합니다. 관측치는 provider·model·effort·taskKind 4차원으로 매칭합니다(솔로 볼륨에서 셀이 실제로 차도록 축소). 새 모델은 challenger로 시작할 수 있으며, 검증되지 않은 challenger를 critical 작업의 단독 executor로 쓰지 않습니다.
+worker의 자기평가가 아니라 독립 reviewer 결과를 기록해야 합니다. 예외는 하나입니다: **verify 게이트의 pass/fail은 객관적 신호이므로 quality 1.0/0.2, `metadata.source: 'verify-gate'`로 자동 기록됩니다.** 이것이 다운시프트의 자연 복원 안전망입니다 — 값싼 모델이 반복 실패하면 conservative 추정치가 바닥선 아래로 내려가 라우팅이 스스로 상위 모델로 복귀합니다. 관측치는 provider·model·effort·taskKind 4차원으로 매칭합니다(솔로 볼륨에서 셀이 실제로 차도록 축소). 새 모델은 challenger로 시작할 수 있으며, 검증되지 않은 challenger를 critical 작업의 단독 executor로 쓰지 않습니다.
 
 ## 새 model과 provider
 
@@ -363,8 +394,10 @@ hooks   ≤ 3
 ## 명령 요약
 
 ```text
+aorch classify   objective 한 줄 → 난이도 분류 + 구체적 route (--providers로 provider 개방)
 aorch route      task JSON에 대한 provider/model/effort 선택
-aorch exec       route 후 bounded worker 하나를 디스패치 (--dry-run 지원)
+aorch exec       route 후 bounded worker 디스패치 + verify 게이트 + escalation (--dry-run 지원)
+aorch limits     provider 사용 한도 표시/설정/해제 (limits set <provider> --minutes N)
 aorch record     독립 검토된 model-performance 관측 추가
 aorch inventory  설정된 provider·model·skill·plugin·hook 출력
 aorch install    프로젝트 로컬 Claude Code / Codex 통합 설치
@@ -375,12 +408,14 @@ aorch install    프로젝트 로컬 Claude Code / Codex 통합 설치
 ```text
 .aorch/
 ├─ config.json
-├─ observations.jsonl
+├─ observations.jsonl          독립 검토 + verify-gate 자동 관측
+├─ limits.json                 provider 사용 한도 (만료 타임스탬프)
 ├─ schemas/
 ├─ hooks/
 └─ task-runs/
    └─ <run-id>/<task-id>/
       ├─ receipt.json           워커가 반환한 receipt
+      ├─ verification.json      verify 게이트 결과 (attempt별)
       └─ worker-output.json     (Codex adapter만)
 ```
 
@@ -400,4 +435,4 @@ JSON 파일은 atomic하게 씁니다(임시 파일 → rename). 관측 기록�
 - 외부 메시지 전송
 - 하네스 source/policy 자동 변경
 
-hook은 workflow policy를 주입하는 guardrail이지 운영체제 수준의 sandbox가 아닙니다. 실제 위험 작업은 provider permission, scope, worktree, network policy, 사람의 검토를 함께 사용해 통제해야 합니다. **aorch가 코드로 강제하는 것은 write isolation 하나뿐**이라는 점을 전제로 두세요.
+hook은 workflow policy를 주입하는 guardrail이지 운영체제 수준의 sandbox가 아닙니다. 실제 위험 작업은 provider permission, scope, worktree, network policy, 사람의 검토를 함께 사용해 통제해야 합니다. **aorch가 코드로 강제하는 안전 불변식은 write isolation과 verify 게이트 둘**입니다 — 서브에이전트 등급 훅은 비용 최적화라 fail-open이며 안전장치로 믿으면 안 됩니다.
