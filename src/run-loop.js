@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { executeTask } from './task-runner.js';
 import { runVerificationCommands } from './verify.js';
 import { appendObservation } from './observations.js';
+import { detectRateLimit, setLimit, DEFAULT_LIMIT_MINUTES } from './limits.js';
 import { writeJsonAtomic } from './fs-util.js';
 
 function routeSummary(route) {
@@ -27,9 +28,11 @@ export async function executeWithVerification({
   timeoutMs,
   dryRun = false,
   observationsPath,
+  stateRoot = path.resolve(cwd, config.paths?.stateDir ?? '.aorch'),
   executeTaskImpl = executeTask,
   runVerificationImpl = runVerificationCommands,
-  appendObservationImpl = appendObservation
+  appendObservationImpl = appendObservation,
+  setLimitImpl = setLimit
 }) {
   const passthrough = { config, observations, cwd, ...(timeoutMs === undefined ? {} : { timeoutMs }) };
   if (dryRun) return executeTaskImpl({ task, ...passthrough, dryRun: true });
@@ -41,15 +44,42 @@ export async function executeWithVerification({
   const runId = task.runId ?? randomUUID();
   const attempts = [];
   const triedRoutes = new Set();
+  const forbiddenProviders = new Set(task.forbiddenProviders ?? []);
   let currentTask = { ...structuredClone(task), runId };
   let forcedRoute;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const execution = await executeTaskImpl({
-      task: currentTask,
-      ...passthrough,
-      ...(forcedRoute ? { forcedRoute } : {})
-    });
+    let execution;
+    try {
+      execution = await executeTaskImpl({
+        task: currentTask,
+        ...passthrough,
+        ...(forcedRoute ? { forcedRoute } : {})
+      });
+    } catch (error) {
+      // A rate-limited provider is a cost event, not a task failure: record
+      // the limit, forbid the provider, and reselect a route across the
+      // remaining providers. Anything else propagates untouched.
+      if (!error?.route?.provider || !detectRateLimit(error.result)) throw error;
+      const provider = error.route.provider;
+      await setLimitImpl(stateRoot, provider, {
+        minutes: DEFAULT_LIMIT_MINUTES,
+        source: 'auto-detect',
+        note: `detected during task ${currentTask.id}`
+      });
+      forbiddenProviders.add(provider);
+      attempts.push({ attempt, route: routeSummary(error.route), passed: false, rateLimited: true });
+      if (attempt === maxAttempts) {
+        const exhausted = new Error(
+          `Provider ${provider} is rate limited and the attempt budget is exhausted after ${attempt} attempt(s)`
+        );
+        exhausted.attempts = attempts;
+        throw exhausted;
+      }
+      forcedRoute = undefined;
+      currentTask = { ...currentTask, forbiddenProviders: [...forbiddenProviders] };
+      continue;
+    }
     triedRoutes.add(`${execution.route.profileId}:${execution.route.effort}`);
 
     if (commands.length === 0) {
@@ -98,6 +128,7 @@ export async function executeWithVerification({
     currentTask = {
       ...structuredClone(task),
       runId,
+      forbiddenProviders: [...forbiddenProviders],
       id: `${task.id}.esc${attempt}`,
       objective: `${task.objective}\n\n## Previous attempt failed verification\n` +
         `Route: ${execution.route.model}@${execution.route.effort}\n` +

@@ -42,6 +42,46 @@ test('classify emits a route for a boilerplate objective', () => {
   assert.match(out.route.model, /haiku/);
 });
 
+test('classify --providers opens routing to the requested provider set', () => {
+  const result = spawnSync(process.execPath, [
+    cli, 'classify', '--config', defaultConfig,
+    '--objective', 'Format the config JSON', '--providers', 'openai'
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.route.provider, 'openai');
+});
+
+test('limits set/show/clear round-trips and an active limit reroutes away from the provider', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-cli-limits-'));
+  const spawnCli = (...args) => spawnSync(process.execPath, [cli, ...args, '--config', defaultConfig, '--cwd', dir], { encoding: 'utf8' });
+
+  const set = spawnCli('limits', 'set', 'anthropic', '--minutes', '30', '--note', 'weekly cap');
+  assert.equal(set.status, 0, set.stderr);
+  assert.equal(JSON.parse(set.stdout).provider, 'anthropic');
+
+  const show = spawnCli('limits');
+  assert.equal(show.status, 0, show.stderr);
+  assert.ok(JSON.parse(show.stdout).anthropic.limitedUntil);
+
+  // route must not pick the limited provider
+  const taskPath = path.join(dir, 'task.json');
+  await writeFile(taskPath, JSON.stringify({
+    id: 'T-limited', kind: 'implementation', role: 'executor', risk: 'standard'
+  }));
+  const routed = spawnCli('route', '--task', taskPath);
+  assert.equal(routed.status, 0, routed.stderr);
+  assert.equal(JSON.parse(routed.stdout).provider, 'openai');
+
+  const cleared = spawnCli('limits', 'clear');
+  assert.equal(cleared.status, 0, cleared.stderr);
+  assert.deepEqual(JSON.parse(cleared.stdout), {});
+
+  const unknown = spawnCli('limits', 'set', 'ghostco', '--minutes', '30');
+  assert.equal(unknown.status, 1);
+  assert.match(unknown.stderr, /unknown provider/i);
+});
+
 test('help exposes the intentionally small command surface', () => {
   const result = spawnSync(process.execPath, [cli, '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0);

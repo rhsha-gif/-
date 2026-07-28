@@ -128,7 +128,12 @@ export async function executeTask({
   await mkdir(runDir, { recursive: true });
   const result = await runCommand(commandSpec, { cwd, timeoutMs });
   if (result.exitCode !== 0) {
-    throw new Error(`Worker exited with ${result.exitCode}`);
+    // The run loop needs the route and raw output to tell a rate-limited
+    // provider apart from a genuine worker failure.
+    const error = new Error(`Worker exited with ${result.exitCode}`);
+    error.route = route;
+    error.result = result;
+    throw error;
   }
   const receipt = await parseWorkerOutput({ provider, stdout: result.stdout, outputPath });
   // The worker prompt promises the wrapper persists the receipt here, and the

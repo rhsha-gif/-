@@ -214,6 +214,75 @@ test('an empty ladder fails after the first attempt instead of retrying blindly'
   assert.equal(calls.length, 1);
 });
 
+test('a rate-limited attempt records the limit and reroutes to another provider', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const limitCalls = [];
+  let first = true;
+  const executor = async ({ task, forcedRoute, dryRun }) => {
+    calls.push({ task, forcedRoute, dryRun });
+    if (first) {
+      first = false;
+      const error = new Error('Worker exited with 1');
+      error.route = { provider: 'anthropic', profileId: 'claude-sonnet-general', model: 'sonnet', effort: 'medium' };
+      error.result = { stderr: 'usage limit reached, resets at 5pm', stdout: '' };
+      throw error;
+    }
+    const runDir = path.join(dir, 'task-runs', task.runId ?? 'run', task.id);
+    await mkdir(runDir, { recursive: true });
+    return {
+      task,
+      route: { provider: 'openai', profileId: 'codex-terra-general', model: 'gpt-5.6-terra', effort: 'medium' },
+      receipt: { status: 'complete' },
+      receiptPath: path.join(runDir, 'receipt.json'),
+      runDir
+    };
+  };
+
+  const result = await executeWithVerification({
+    task: baseTask(),
+    config: baseConfig(),
+    cwd: dir,
+    executeTaskImpl: executor,
+    runVerificationImpl: stubVerifier([true]),
+    setLimitImpl: async (stateRoot, provider, options) => { limitCalls.push({ stateRoot, provider, options }); }
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(limitCalls.length, 1);
+  assert.equal(limitCalls[0].provider, 'anthropic');
+  assert.equal(limitCalls[0].options.source, 'auto-detect');
+  // The reroute is a fresh selection under forbiddenProviders, not a ladder step.
+  assert.equal(calls[1].forcedRoute, undefined);
+  assert.ok(calls[1].task.forbiddenProviders.includes('anthropic'));
+  assert.equal(result.route.provider, 'openai');
+  assert.equal(result.verification.passed, true);
+});
+
+test('a non-rate-limit execution error propagates instead of being retried', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const executor = async ({ task, forcedRoute }) => {
+    calls.push({ task, forcedRoute });
+    const error = new Error('Worker exited with 1');
+    error.route = { provider: 'anthropic', profileId: 'claude-sonnet-general', model: 'sonnet', effort: 'medium' };
+    error.result = { stderr: 'SyntaxError: unexpected token', stdout: '' };
+    throw error;
+  };
+  await assert.rejects(
+    executeWithVerification({
+      task: baseTask(),
+      config: baseConfig(),
+      cwd: dir,
+      executeTaskImpl: executor,
+      runVerificationImpl: stubVerifier([]),
+      setLimitImpl: async () => { throw new Error('must not be called'); }
+    }),
+    /Worker exited with 1/
+  );
+  assert.equal(calls.length, 1);
+});
+
 test('dry-run delegates without running verification', async (t) => {
   const dir = await temporaryDirectory(t);
   const calls = [];

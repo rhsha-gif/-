@@ -11,6 +11,7 @@ import { discoverCapabilities, getInventory, mergeCapabilities } from './invento
 import { installProject } from './install.js';
 import { validateTask } from './task.js';
 import { classifyDifficulty } from './difficulty.js';
+import { clearLimits, readLimits, setLimit } from './limits.js';
 
 const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `Commands:\n` +
@@ -18,6 +19,7 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  exec      Route and dispatch one bounded task\n` +
   `  classify  Map a raw objective to a difficulty and a concrete route\n` +
   `  record    Append an independently reviewed model-performance observation\n` +
+  `  limits    Show, set, or clear provider usage limits (limits [set <provider> --minutes N | clear [provider]])\n` +
   `  inventory Print configured providers, models, skills, plugins, and hooks\n` +
   `  install   Install project-local Claude Code and/or Codex integration\n\n` +
   `Common options:\n` +
@@ -31,8 +33,9 @@ const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
 const COMMAND_FLAGS = Object.freeze({
   route: [...COMMON_FLAGS, 'task', 'observations'],
   exec: [...COMMON_FLAGS, 'task', 'observations', 'timeout-ms', 'dry-run'],
-  classify: [...COMMON_FLAGS, 'objective', 'role', 'risk'],
+  classify: [...COMMON_FLAGS, 'objective', 'role', 'risk', 'providers'],
   record: [...COMMON_FLAGS, 'input', 'observations'],
+  limits: [...COMMON_FLAGS, 'minutes', 'note'],
   inventory: [...COMMON_FLAGS],
   install: ['cwd', 'help', 'h', 'target', 'project', 'force-config']
 });
@@ -73,8 +76,10 @@ function parseArgs(argv) {
 function validateCommandArgs(command, flags, positionals) {
   const allowed = COMMAND_FLAGS[command];
   if (!allowed) return;
-  if (positionals.length > 0) {
-    throw new Error(`Unexpected argument for ${command}: ${positionals[0]}`);
+  // `limits` takes an action and an optional provider as positionals.
+  const positionalBudget = command === 'limits' ? 2 : 0;
+  if (positionals.length > positionalBudget) {
+    throw new Error(`Unexpected argument for ${command}: ${positionals[positionalBudget]}`);
   }
   const allowedSet = new Set(allowed);
   for (const name of Object.keys(flags)) {
@@ -107,6 +112,22 @@ async function readJson(filePath, cwd) {
 
 function resolveObservationPath(config, flags, cwd) {
   return path.resolve(cwd, flags.observations || config.paths.observationsFile || '.aorch/observations.jsonl');
+}
+
+function resolveStateRoot(config, cwd) {
+  return path.resolve(cwd, config.paths?.stateDir ?? '.aorch');
+}
+
+// Route and exec must not pick a provider that is known to be limited: merge
+// active limits into the task's forbiddenProviders. When that forbids every
+// candidate, the router's normal "no eligible route" error surfaces — there
+// is no silent bypass.
+async function applyActiveLimits(task, config, cwd) {
+  const limits = await readLimits(resolveStateRoot(config, cwd));
+  const limited = Object.keys(limits);
+  if (limited.length === 0) return task;
+  task.forbiddenProviders = [...new Set([...(task.forbiddenProviders ?? []), ...limited])];
+  return task;
 }
 
 function cleanRoute(route) {
@@ -150,7 +171,7 @@ async function main(argv = process.argv.slice(2)) {
   );
 
   if (command === 'route') {
-    const task = validateTask(await readJson(requireFlag(flags, 'task'), cwd));
+    const task = await applyActiveLimits(validateTask(await readJson(requireFlag(flags, 'task'), cwd)), config, cwd);
     const observations = await readObservations(resolveObservationPath(config, flags, cwd));
     const route = selectRoute({ task, catalog: config, observations });
     process.stdout.write(`${JSON.stringify(cleanRoute(route), null, 2)}\n`);
@@ -159,7 +180,11 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === 'exec') {
     const timeoutMs = numericFlag(flags, 'timeout-ms');
-    const task = validateTask(await readJson(requireFlag(flags, 'task'), cwd), { forExecution: true });
+    const task = await applyActiveLimits(
+      validateTask(await readJson(requireFlag(flags, 'task'), cwd), { forExecution: true }),
+      config,
+      cwd
+    );
     const observations = await readObservations(resolveObservationPath(config, flags, cwd));
     const result = await executeWithVerification({
       task,
@@ -180,6 +205,12 @@ async function main(argv = process.argv.slice(2)) {
   if (command === 'classify') {
     const objective = requireFlag(flags, 'objective');
     const classification = classifyDifficulty({ objective });
+    // Default stays Claude-only: the common caller is the subagent gate, and
+    // a Claude Code subagent's model cannot be a Codex model. Cross-provider
+    // callers (cross fallback, manual delegation) opt in via --providers.
+    const allowedProviders = typeof flags.providers === 'string'
+      ? flags.providers.split(',').map((entry) => entry.trim()).filter(Boolean)
+      : ['anthropic'];
     const task = validateTask({
       id: 'classify-probe',
       objective,
@@ -188,9 +219,7 @@ async function main(argv = process.argv.slice(2)) {
       kind: classification.kind,
       complexity: classification.complexity,
       minimumQuality: classification.minimumQuality,
-      // arm1 is Claude-only: Codex delegation is a separately-gated later
-      // arm, and a Claude Code subagent's model cannot be a Codex model.
-      allowedProviders: ['anthropic'],
+      allowedProviders,
       routingPriorities: classification.routingPriorities
     });
     const route = selectRoute({ task, catalog: config, observations: [] });
@@ -199,6 +228,35 @@ async function main(argv = process.argv.slice(2)) {
       route: { provider: route.provider, model: route.model, effort: route.effort }
     })}\n`);
     return 0;
+  }
+
+  if (command === 'limits') {
+    const stateRoot = resolveStateRoot(config, cwd);
+    const [action, provider] = positionals;
+    if (action === undefined) {
+      process.stdout.write(`${JSON.stringify(await readLimits(stateRoot), null, 2)}\n`);
+      return 0;
+    }
+    if (action === 'set') {
+      if (!provider) throw new Error('limits set requires a provider id');
+      if (!config.providers.some((entry) => entry.id === provider)) {
+        throw new Error(`Unknown provider for limits set: ${provider}`);
+      }
+      const minutes = numericFlag(flags, 'minutes');
+      if (minutes === undefined || minutes <= 0) throw new Error('--minutes must be a positive number of minutes');
+      const entry = await setLimit(stateRoot, provider, {
+        minutes,
+        source: 'manual',
+        note: typeof flags.note === 'string' ? flags.note : undefined
+      });
+      process.stdout.write(`${JSON.stringify({ provider, ...entry }, null, 2)}\n`);
+      return 0;
+    }
+    if (action === 'clear') {
+      process.stdout.write(`${JSON.stringify(await clearLimits(stateRoot, provider), null, 2)}\n`);
+      return 0;
+    }
+    throw new Error(`Unknown limits action: ${action}`);
   }
 
   if (command === 'record') {
