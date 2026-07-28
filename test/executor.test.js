@@ -132,14 +132,21 @@ test('a worker whose orphaned child holds the stdio pipes still resolves promptl
   const started = Date.now();
   const result = await runCommand({
     command: process.execPath,
-    args: ['-e', 'const{spawn}=require("child_process");spawn(process.execPath,["-e","setTimeout(()=>{},8000)"],{stdio:"inherit"}).unref();process.stdout.write("done")'],
+    args: ['-e', 'const{spawn}=require("child_process");const child=spawn(process.execPath,["-e","setTimeout(()=>{},8000)"],{stdio:"inherit",detached:true});child.unref();process.stdout.write("pid:"+child.pid+"\\ndone")'],
     env: {},
     stdin: null
   });
   const elapsedMs = Date.now() - started;
+  const orphanPid = Number(result.stdout.match(/pid:(\d+)/u)?.[1]);
+  if (Number.isInteger(orphanPid)) {
+    try {
+      process.kill(orphanPid);
+    } catch {}
+  }
   assert.equal(result.exitCode, 0);
   assert.equal(result.status, 'complete');
   assert.match(result.stdout, /done/);
+  assert.ok(elapsedMs >= 1500, `runCommand settled in ${elapsedMs}ms without exercising the drain fallback`);
   assert.ok(elapsedMs < 6000, `runCommand took ${elapsedMs}ms waiting for an orphan`);
 });
 
