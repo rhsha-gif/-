@@ -16,6 +16,14 @@ test('installs both CLI integrations idempotently without editing root instructi
   assert.equal(claudeSettings.hooks.UserPromptSubmit.length, 1);
   assert.equal(claudeSettings.hooks.Stop.length, 1);
   assert.equal(claudeSettings.hooks.SessionEnd, undefined);
+  assert.equal(claudeSettings.hooks.PreToolUse.length, 1);
+  assert.equal(claudeSettings.hooks.PreToolUse[0].matcher, 'Task|Agent');
+  assert.match(claudeSettings.hooks.PreToolUse[0].hooks[0].command, /subagent-gate\.mjs/);
+  // The installed gate must know where this package lives so it can invoke
+  // the classify CLI from an arbitrary project.
+  const installedGate = await readFile(path.join(projectRoot, '.aorch/hooks/subagent-gate.mjs'), 'utf8');
+  assert.ok(!installedGate.includes('{{AORCH_ROOT}}'), 'gate placeholder must be resolved at install time');
+  assert.match(installedGate, /src[/\\]cli\.js|src', 'cli\.js/);
   assert.equal(codexHooks.hooks.UserPromptSubmit.length, 1);
   assert.equal(codexHooks.hooks.Stop.length, 1);
   const codexPromptCommand = codexHooks.hooks.UserPromptSubmit[0].hooks[0].command;
