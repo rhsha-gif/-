@@ -5,6 +5,7 @@ import { runVerificationCommands } from './verify.js';
 import { appendObservation } from './observations.js';
 import { detectRateLimit, setLimit, DEFAULT_LIMIT_MINUTES } from './limits.js';
 import { writeJsonAtomic } from './fs-util.js';
+import { captureGitSnapshot, evaluateChangeGuard } from './change-guard.js';
 
 function routeSummary(route) {
   return { provider: route.provider, profileId: route.profileId, model: route.model, effort: route.effort };
@@ -13,6 +14,32 @@ function routeSummary(route) {
 function nextLadderStep(config, provider, triedRoutes) {
   const ladder = config.escalation?.ladders?.[provider] ?? [];
   return ladder.find((step) => !triedRoutes.has(`${step.profileId}:${step.effort}`));
+}
+
+async function failChangeGuard({ attempt, route, runDir, changeGuard, attempts, cause }) {
+  const routeEvidence = routeSummary(route);
+  attempts.push({
+    attempt,
+    route: routeEvidence,
+    passed: false,
+    changeGuardPassed: false
+  });
+  const evidencePath = path.join(runDir, 'verification.json');
+  await writeJsonAtomic(evidencePath, {
+    attempt,
+    route: routeEvidence,
+    passed: false,
+    results: [],
+    changeGuard
+  });
+  const error = new Error(
+    `Change guard failed after attempt ${attempt}; manual review required. Evidence: ${evidencePath}`,
+    cause ? { cause } : undefined
+  );
+  error.attempts = attempts;
+  error.runDir = runDir;
+  error.changeGuard = changeGuard;
+  throw error;
 }
 
 // Exec -> verify -> escalate. A failed verification climbs the provider's
@@ -32,7 +59,9 @@ export async function executeWithVerification({
   executeTaskImpl = executeTask,
   runVerificationImpl = runVerificationCommands,
   appendObservationImpl = appendObservation,
-  setLimitImpl = setLimit
+  setLimitImpl = setLimit,
+  captureGitSnapshotImpl = captureGitSnapshot,
+  evaluateChangeGuardImpl = evaluateChangeGuard
 }) {
   const passthrough = { config, observations, cwd, ...(timeoutMs === undefined ? {} : { timeoutMs }) };
   if (dryRun) return executeTaskImpl({ task, ...passthrough, dryRun: true });
@@ -49,6 +78,7 @@ export async function executeWithVerification({
   let forcedRoute;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const beforeSnapshot = await captureGitSnapshotImpl({ cwd });
     let execution;
     try {
       execution = await executeTaskImpl({
@@ -57,6 +87,26 @@ export async function executeWithVerification({
         ...(forcedRoute ? { forcedRoute } : {})
       });
     } catch (error) {
+      if (error?.route) {
+        const afterSnapshot = await captureGitSnapshotImpl({ cwd });
+        const changeGuard = evaluateChangeGuardImpl({
+          task: currentTask,
+          receipt: { filesChanged: [] },
+          before: beforeSnapshot,
+          after: afterSnapshot,
+          ignoredPaths: [stateRoot]
+        });
+        if (!changeGuard.passed) {
+          await failChangeGuard({
+            attempt,
+            route: error.route,
+            runDir: error.runDir ?? path.join(stateRoot, 'task-runs', runId, currentTask.id),
+            changeGuard,
+            attempts,
+            cause: error
+          });
+        }
+      }
       // A rate-limited provider is a cost event, not a task failure: record
       // the limit, forbid the provider, and reselect a route across the
       // remaining providers. Anything else propagates untouched.
@@ -81,9 +131,41 @@ export async function executeWithVerification({
       continue;
     }
     triedRoutes.add(`${execution.route.profileId}:${execution.route.effort}`);
+    const afterSnapshot = await captureGitSnapshotImpl({ cwd });
+    const changeGuard = evaluateChangeGuardImpl({
+      task: currentTask,
+      receipt: execution.receipt,
+      before: beforeSnapshot,
+      after: afterSnapshot,
+      ignoredPaths: [stateRoot]
+    });
+    const evidencePath = path.join(execution.runDir, 'verification.json');
+
+    if (!changeGuard.passed) {
+      await failChangeGuard({
+        attempt,
+        route: execution.route,
+        runDir: execution.runDir,
+        changeGuard,
+        attempts
+      });
+    }
 
     if (commands.length === 0) {
-      return { ...execution, verification: null, attempts: [{ attempt, route: routeSummary(execution.route), passed: null }] };
+      const singleAttempt = {
+        attempt,
+        route: routeSummary(execution.route),
+        passed: null,
+        changeGuardPassed: true
+      };
+      await writeJsonAtomic(evidencePath, {
+        attempt,
+        route: routeSummary(execution.route),
+        passed: true,
+        results: [],
+        changeGuard
+      });
+      return { ...execution, verification: null, attempts: [singleAttempt] };
     }
 
     const verification = await runVerificationImpl({
@@ -91,13 +173,18 @@ export async function executeWithVerification({
       cwd,
       timeoutMs: config.verification?.commandTimeoutMs
     });
-    attempts.push({ attempt, route: routeSummary(execution.route), passed: verification.passed });
-    const evidencePath = path.join(execution.runDir, 'verification.json');
+    attempts.push({
+      attempt,
+      route: routeSummary(execution.route),
+      passed: verification.passed,
+      changeGuardPassed: true
+    });
     await writeJsonAtomic(evidencePath, {
       attempt,
       route: routeSummary(execution.route),
       passed: verification.passed,
-      results: verification.results
+      results: verification.results,
+      changeGuard
     });
     if (observationsPath) {
       await appendObservationImpl(observationsPath, {

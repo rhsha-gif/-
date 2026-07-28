@@ -12,26 +12,23 @@ import { buildCodexCommand } from './providers/codex-cli.js';
 import { buildGenericCommand } from './providers/generic-cli.js';
 import { resolveWindowsCommandSpec, runCommand } from './executor.js';
 import { validateTask } from './task.js';
+import { runGit } from './change-guard.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RECEIPT_SCHEMA_PATH = path.join(PACKAGE_ROOT, 'schemas', 'worker-receipt.schema.json');
-
-async function git(args, cwd) {
-  return runCommand({ command: 'git', args, env: { AORCH_WORKER: '1' } }, { cwd, timeoutMs: 10_000 });
-}
 
 // The one safety invariant the judgment layer keeps: writes must not run in the
 // live workspace unless deliberately opted in. High/critical writes always need
 // an isolated linked worktree. This is blast-radius control, not worker distrust.
 async function assertWriteIsolation(task, cwd) {
   if (task.write !== true) return;
-  const probe = await git(['rev-parse', '--is-inside-work-tree'], cwd);
+  const probe = await runGit(['rev-parse', '--is-inside-work-tree'], cwd);
   if (probe.exitCode !== 0 || probe.stdout.trim() !== 'true') {
     throw new Error('Write task requires a Git repository and an isolated linked worktree');
   }
   const [gitDir, commonDir] = await Promise.all([
-    git(['rev-parse', '--git-dir'], cwd),
-    git(['rev-parse', '--git-common-dir'], cwd)
+    runGit(['rev-parse', '--git-dir'], cwd),
+    runGit(['rev-parse', '--git-common-dir'], cwd)
   ]);
   const linkedWorktree = gitDir.exitCode === 0 && commonDir.exitCode === 0
     && path.resolve(cwd, gitDir.stdout.trim()) !== path.resolve(cwd, commonDir.stdout.trim());

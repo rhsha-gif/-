@@ -51,7 +51,13 @@ function stubExecutor(dir, calls, { initialRoute } = {}) {
       : (initialRoute ?? { provider: 'anthropic', profileId: 'claude-sonnet-general', model: 'sonnet', effort: 'medium' });
     const runDir = path.join(dir, 'task-runs', task.runId ?? 'run', task.id);
     await mkdir(runDir, { recursive: true });
-    return { task, route, receipt: { status: 'complete' }, receiptPath: path.join(runDir, 'receipt.json'), runDir };
+    return {
+      task,
+      route,
+      receipt: { status: 'complete', filesChanged: [] },
+      receiptPath: path.join(runDir, 'receipt.json'),
+      runDir
+    };
   };
 }
 
@@ -81,11 +87,26 @@ function stubRecorder(records) {
   };
 }
 
+const NON_GIT_SNAPSHOT = Object.freeze({
+  applicable: false,
+  reason: 'not-git-repository',
+  root: null,
+  head: null,
+  entries: {}
+});
+
+function executeLoop(options) {
+  return executeWithVerification({
+    captureGitSnapshotImpl: async () => NON_GIT_SNAPSHOT,
+    ...options
+  });
+}
+
 test('a first-attempt pass records evidence and a verify-gate observation', async (t) => {
   const dir = await temporaryDirectory(t);
   const calls = [];
   const records = [];
-  const result = await executeWithVerification({
+  const result = await executeLoop({
     task: baseTask(),
     config: baseConfig(),
     cwd: dir,
@@ -105,6 +126,7 @@ test('a first-attempt pass records evidence and a verify-gate observation', asyn
   const persisted = JSON.parse(await readFile(path.join(result.runDir, 'verification.json'), 'utf8'));
   assert.equal(persisted.passed, true);
   assert.equal(persisted.route.model, 'sonnet');
+  assert.equal(persisted.changeGuard.passed, true);
 });
 
 test('a task without verification commands keeps single-shot behavior', async (t) => {
@@ -112,7 +134,7 @@ test('a task without verification commands keeps single-shot behavior', async (t
   const calls = [];
   const records = [];
   const verifyCalls = [];
-  const result = await executeWithVerification({
+  const result = await executeLoop({
     task: baseTask({ verificationCommands: [] }),
     config: baseConfig(),
     cwd: dir,
@@ -126,13 +148,71 @@ test('a task without verification commands keeps single-shot behavior', async (t
   assert.equal(calls.length, 1);
   assert.equal(verifyCalls.length, 0);
   assert.equal(records.length, 0);
+  const persisted = JSON.parse(await readFile(path.join(result.runDir, 'verification.json'), 'utf8'));
+  assert.equal(persisted.passed, true);
+  assert.deepEqual(persisted.results, []);
+  assert.equal(persisted.changeGuard.applicable, false);
+});
+
+test('a change guard violation returns immediately without verification or escalation', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const records = [];
+  const verifyCalls = [];
+  const snapshots = [
+    { applicable: true, reason: null, root: dir, head: 'before', entries: {} },
+    {
+      applicable: true,
+      reason: null,
+      root: dir,
+      head: 'before',
+      entries: {
+        'src/unclaimed.js': {
+          status: ' M',
+          index: '100644 fixture 0',
+          worktree: 'file:changed'
+        }
+      }
+    }
+  ];
+  let caught;
+
+  await assert.rejects(
+    executeLoop({
+      task: baseTask({
+        write: true,
+        allowedScope: ['src/**'],
+        forbiddenScope: []
+      }),
+      config: baseConfig(),
+      cwd: dir,
+      observationsPath: path.join(dir, 'obs.jsonl'),
+      executeTaskImpl: stubExecutor(dir, calls),
+      runVerificationImpl: stubVerifier([true], verifyCalls),
+      appendObservationImpl: stubRecorder(records),
+      captureGitSnapshotImpl: async () => snapshots.shift()
+    }),
+    (error) => {
+      caught = error;
+      assert.match(error.message, /change guard failed/i);
+      assert.deepEqual(error.changeGuard.unclaimedFiles, ['src/unclaimed.js']);
+      return true;
+    }
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(verifyCalls.length, 0);
+  assert.equal(records.length, 0);
+  const persisted = JSON.parse(await readFile(path.join(caught.runDir, 'verification.json'), 'utf8'));
+  assert.equal(persisted.passed, false);
+  assert.deepEqual(persisted.changeGuard.unclaimedFiles, ['src/unclaimed.js']);
 });
 
 test('a verify failure escalates on the provider ladder with the failure evidence attached', async (t) => {
   const dir = await temporaryDirectory(t);
   const calls = [];
   const records = [];
-  const result = await executeWithVerification({
+  const result = await executeLoop({
     task: baseTask(),
     config: baseConfig(),
     cwd: dir,
@@ -159,7 +239,7 @@ test('exhausting the attempt budget returns the human an error with evidence', a
   const calls = [];
   const records = [];
   await assert.rejects(
-    executeWithVerification({
+    executeLoop({
       task: baseTask(),
       config: baseConfig(),
       cwd: dir,
@@ -183,7 +263,7 @@ test('exhausting the attempt budget returns the human an error with evidence', a
 test('a ladder step the run already used is skipped instead of retried', async (t) => {
   const dir = await temporaryDirectory(t);
   const calls = [];
-  const result = await executeWithVerification({
+  const result = await executeLoop({
     task: baseTask(),
     config: baseConfig(),
     cwd: dir,
@@ -202,7 +282,7 @@ test('an empty ladder fails after the first attempt instead of retrying blindly'
   const dir = await temporaryDirectory(t);
   const calls = [];
   await assert.rejects(
-    executeWithVerification({
+    executeLoop({
       task: baseTask(),
       config: baseConfig({ escalation: { maxAttempts: 3, ladders: {} } }),
       cwd: dir,
@@ -233,13 +313,13 @@ test('a rate-limited attempt records the limit and reroutes to another provider'
     return {
       task,
       route: { provider: 'openai', profileId: 'codex-terra-general', model: 'gpt-5.6-terra', effort: 'medium' },
-      receipt: { status: 'complete' },
+      receipt: { status: 'complete', filesChanged: [] },
       receiptPath: path.join(runDir, 'receipt.json'),
       runDir
     };
   };
 
-  const result = await executeWithVerification({
+  const result = await executeLoop({
     task: baseTask(),
     config: baseConfig(),
     cwd: dir,
@@ -259,6 +339,63 @@ test('a rate-limited attempt records the limit and reroutes to another provider'
   assert.equal(result.verification.passed, true);
 });
 
+test('a failed worker that changed a read-only workspace stops before rate-limit fallback', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const limitCalls = [];
+  const snapshots = [
+    { applicable: true, reason: null, root: dir, head: 'before', entries: {} },
+    {
+      applicable: true,
+      reason: null,
+      root: dir,
+      head: 'before',
+      entries: {
+        'src/mutated.js': {
+          status: ' M',
+          index: '100644 fixture 0',
+          worktree: 'file:changed'
+        }
+      }
+    }
+  ];
+  const executor = async ({ task }) => {
+    calls.push(task);
+    const error = new Error('Worker exited with 1');
+    error.route = {
+      provider: 'anthropic',
+      profileId: 'claude-sonnet-general',
+      model: 'sonnet',
+      effort: 'medium'
+    };
+    error.result = { stderr: 'usage limit reached, resets at 5pm', stdout: '' };
+    throw error;
+  };
+  let caught;
+
+  await assert.rejects(
+    executeLoop({
+      task: baseTask({ write: false }),
+      config: baseConfig(),
+      cwd: dir,
+      executeTaskImpl: executor,
+      captureGitSnapshotImpl: async () => snapshots.shift(),
+      setLimitImpl: async (...args) => limitCalls.push(args)
+    }),
+    (error) => {
+      caught = error;
+      assert.match(error.message, /change guard failed/i);
+      assert.deepEqual(error.changeGuard.readOnlyFiles, ['src/mutated.js']);
+      return true;
+    }
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(limitCalls.length, 0);
+  const persisted = JSON.parse(await readFile(path.join(caught.runDir, 'verification.json'), 'utf8'));
+  assert.equal(persisted.passed, false);
+});
+
 test('a non-rate-limit execution error propagates instead of being retried', async (t) => {
   const dir = await temporaryDirectory(t);
   const calls = [];
@@ -270,7 +407,7 @@ test('a non-rate-limit execution error propagates instead of being retried', asy
     throw error;
   };
   await assert.rejects(
-    executeWithVerification({
+    executeLoop({
       task: baseTask(),
       config: baseConfig(),
       cwd: dir,
@@ -287,7 +424,7 @@ test('dry-run delegates without running verification', async (t) => {
   const dir = await temporaryDirectory(t);
   const calls = [];
   const verifyCalls = [];
-  await executeWithVerification({
+  await executeLoop({
     task: baseTask(),
     config: baseConfig(),
     cwd: dir,
