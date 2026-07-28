@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -107,6 +107,41 @@ test('dry-run returns the route, capabilities, and command without spawning a wo
   assert.equal(result.commandSpec.command, process.execPath);
   assert.deepEqual(result.commandSpec.args, ['-e', workerScript, markerPath]);
   assert.equal(result.commandSpec.env.AORCH_TASK_ID, 'T-dry-run');
+  await assertWorkerWasNotSpawned(markerPath);
+});
+
+test('Codex dry-run resolves a Windows command shim before execution', async (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('Windows command shim behavior');
+    return;
+  }
+  const cwd = await temporaryDirectory(t, 'aorch-codex-shim-');
+  const markerPath = path.join(cwd, 'worker-spawned');
+  const shimPath = path.join(cwd, 'fixture.cmd');
+  await writeFile(shimPath, '@ECHO off\r\nEXIT /b 0\r\n');
+  const originalPath = process.env.PATH;
+  const originalPathExt = process.env.PATHEXT;
+  process.env.PATH = cwd;
+  process.env.PATHEXT = '.EXE;.CMD;.BAT';
+  t.after(() => {
+    process.env.PATH = originalPath;
+    if (originalPathExt === undefined) delete process.env.PATHEXT;
+    else process.env.PATHEXT = originalPathExt;
+  });
+  const catalog = config(markerPath);
+  catalog.providers[0].adapter = 'codex';
+  catalog.providers[0].executable = 'fixture';
+
+  const result = await executeTask({
+    task: task({ id: 'T-codex-shim' }),
+    config: catalog,
+    cwd,
+    dryRun: true
+  });
+
+  assert.equal(result.commandSpec.command, process.env.ComSpec);
+  assert.equal(result.commandSpec.verbatim, true);
+  assert.deepEqual(result.commandSpec.args.slice(0, 3), ['/d', '/s', '/c']);
   await assertWorkerWasNotSpawned(markerPath);
 });
 

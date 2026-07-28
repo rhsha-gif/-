@@ -1,4 +1,74 @@
 import { spawn } from 'node:child_process';
+import { statSync } from 'node:fs';
+import path from 'node:path';
+
+function environmentValue(env, name) {
+  const key = Object.keys(env).find((entry) => entry.toUpperCase() === name);
+  return key === undefined ? undefined : env[key];
+}
+
+function regularFile(filePath) {
+  try {
+    return statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function quoteWindowsArgument(value) {
+  let quoted = '"';
+  let backslashes = 0;
+  for (const character of String(value)) {
+    if (character === '\\') {
+      backslashes += 1;
+      continue;
+    }
+    if (character === '"') {
+      quoted += `${'\\'.repeat(backslashes * 2 + 1)}"`;
+      backslashes = 0;
+      continue;
+    }
+    quoted += `${'\\'.repeat(backslashes)}${character}`;
+    backslashes = 0;
+  }
+  return `${quoted}${'\\'.repeat(backslashes * 2)}"`;
+}
+
+export function resolveWindowsCommandSpec(spec, {
+  platform = process.platform,
+  env = { ...process.env, ...(spec?.env ?? {}) },
+  isFile = regularFile
+} = {}) {
+  if (platform !== 'win32' || typeof spec?.command !== 'string') return spec;
+  if (/[\\/]/u.test(spec.command) || path.win32.extname(spec.command) !== '') return spec;
+
+  const searchPath = environmentValue(env, 'PATH') ?? '';
+  const directories = searchPath
+    .split(';')
+    .map((entry) => entry.trim().replace(/^"(.*)"$/u, '$1'))
+    .filter(Boolean);
+  const pathExt = environmentValue(env, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD';
+  const shimExtensions = pathExt
+    .split(';')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry === '.cmd' || entry === '.bat');
+  for (const directory of directories) {
+    const executable = path.win32.join(directory, `${spec.command}.exe`);
+    if (isFile(executable)) return { ...spec, command: executable };
+    for (const extension of shimExtensions) {
+      const candidate = path.win32.join(directory, `${spec.command}${extension}`);
+      if (!isFile(candidate)) continue;
+      const commandLine = [candidate, ...spec.args].map(quoteWindowsArgument).join(' ');
+      return {
+        ...spec,
+        command: environmentValue(env, 'COMSPEC') ?? 'cmd.exe',
+        args: ['/d', '/s', '/c', `"${commandLine}"`],
+        verbatim: true
+      };
+    }
+  }
+  return spec;
+}
 
 export function terminateWithEscalation(child, killGraceMs, schedule = setTimeout) {
   child.kill('SIGTERM');

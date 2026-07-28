@@ -10,7 +10,7 @@ import { buildTaskPrompt } from './providers/base.js';
 import { buildClaudeCommand } from './providers/claude-cli.js';
 import { buildCodexCommand } from './providers/codex-cli.js';
 import { buildGenericCommand } from './providers/generic-cli.js';
-import { runCommand } from './executor.js';
+import { resolveWindowsCommandSpec, runCommand } from './executor.js';
 import { validateTask } from './task.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -121,6 +121,9 @@ export async function executeTask({
     AORCH_SELECTED_HOOKS: capabilities.hooks.map((entry) => entry.id).join(','),
     AORCH_TASK_ID: task.id
   };
+  if (provider.adapter === 'codex') {
+    commandSpec = resolveWindowsCommandSpec(commandSpec);
+  }
 
   if (dryRun) return { task, route, capabilities, provider, commandSpec, receiptPath, runDir };
 
