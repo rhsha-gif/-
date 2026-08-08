@@ -1,6 +1,8 @@
 node_modules/
 .aorch/
 .claude/
+.agents/
+.codex/
 .omo/
 *.log
 .DS_Store
