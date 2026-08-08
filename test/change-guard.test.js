@@ -136,6 +136,26 @@ test('writes outside allowed scope and inside forbidden scope are reported', asy
   assert.deepEqual(result.forbiddenFiles, ['src/dirty.js']);
 });
 
+test('a directory-style forbiddenScope entry matches files beneath it', async (t) => {
+  const cwd = await repository(t);
+  await mkdir(path.join(cwd, 'src', 'secret'), { recursive: true });
+  const before = await captureGitSnapshot({ cwd });
+  await writeFile(path.join(cwd, 'src', 'secret', 'leak.js'), 'export const leak = 1;\n');
+  const after = await captureGitSnapshot({ cwd });
+
+  const result = evaluateChangeGuard({
+    // A bare directory pattern (no trailing /**) must not fail open: a worker
+    // writing under a forbidden directory has to be caught.
+    task: writeTask({ forbiddenScope: ['src/secret'] }),
+    receipt: { filesChanged: ['src/secret/leak.js'] },
+    before,
+    after
+  });
+
+  assert.equal(result.passed, false);
+  assert.deepEqual(result.forbiddenFiles, ['src/secret/leak.js']);
+});
+
 test('read-only work fails when the working tree changes', async (t) => {
   const cwd = await repository(t);
   const before = await captureGitSnapshot({ cwd });

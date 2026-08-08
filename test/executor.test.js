@@ -109,6 +109,30 @@ test('Windows command resolution executes a PATH command shim with argv and stdi
   });
 });
 
+test('Windows cmd-shim resolution fails closed on arguments that could break cmd quoting', () => {
+  const shimDir = 'C:\\shims';
+  const files = new Set([path.win32.join(shimDir, 'codex.cmd').toLowerCase()]);
+  const resolve = (args) => executor.resolveWindowsCommandSpec(
+    { command: 'codex', args, stdin: 'prompt' },
+    {
+      platform: 'win32',
+      env: { PATH: shimDir, PATHEXT: '.EXE;.CMD;.BAT', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+      isFile: (candidate) => files.has(candidate.toLowerCase())
+    }
+  );
+
+  // cmd.exe cannot carry these verbatim; an odd quote reopens quote state and
+  // everything after '&' runs as a separate command (BatBadBut / CVE-2024-27980).
+  for (const evil of ['high" & echo PWNED & rem ', 'a | whoami', 'x > out', 'v%USERNAME%', 'a\r\nb']) {
+    assert.throws(() => resolve(['-c', evil]), /unsafe|cmd/i, `expected rejection for ${JSON.stringify(evil)}`);
+  }
+
+  // The one legitimate quoted argument the Codex adapter constructs must survive.
+  const ok = resolve(['-c', 'model_reasoning_effort="high"', '--json']);
+  assert.equal(ok.verbatim, true);
+  assert.match(ok.args[3], /model_reasoning_effort/);
+});
+
 test('termination escalation sends SIGTERM and then SIGKILL after the grace period', () => {
   const signals = [];
   let scheduledDelay = null;
@@ -129,6 +153,7 @@ test('termination escalation sends SIGTERM and then SIGKILL after the grace peri
 test('a worker whose orphaned child holds the stdio pipes still resolves promptly after exit', async () => {
   // Codex-style CLIs spawn helper processes that inherit stdio; waiting for
   // the 'close' event alone would then hang long after the worker exited.
+  const pipesBefore = process.getActiveResourcesInfo().filter((kind) => kind === 'PipeWrap').length;
   const started = Date.now();
   const result = await runCommand({
     command: process.execPath,
@@ -138,6 +163,12 @@ test('a worker whose orphaned child holds the stdio pipes still resolves promptl
   });
   const elapsedMs = Date.now() - started;
   const orphanPid = Number(result.stdout.match(/pid:(\d+)/u)?.[1]);
+  // The drain fallback must release the inherited stdio handles, or the orphan
+  // keeps the event loop alive and `aorch exec` hangs after the promise settles.
+  // destroy() emits 'close' asynchronously, so let it propagate before counting.
+  // Same-file tests run sequentially, so a before/after delta is stable.
+  await new Promise((settle) => setTimeout(settle, 200));
+  const pipesAfter = process.getActiveResourcesInfo().filter((kind) => kind === 'PipeWrap').length;
   if (Number.isInteger(orphanPid)) {
     try {
       process.kill(orphanPid);
@@ -147,6 +178,7 @@ test('a worker whose orphaned child holds the stdio pipes still resolves promptl
   assert.equal(result.status, 'complete');
   assert.match(result.stdout, /done/);
   assert.ok(elapsedMs >= 1500, `runCommand settled in ${elapsedMs}ms without exercising the drain fallback`);
+  assert.ok(pipesAfter <= pipesBefore, `drain fallback leaked ${pipesAfter - pipesBefore} stdio handle(s)`);
   assert.ok(elapsedMs < 6000, `runCommand took ${elapsedMs}ms waiting for an orphan`);
 });
 

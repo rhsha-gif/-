@@ -58,6 +58,16 @@ export function resolveWindowsCommandSpec(spec, {
     for (const extension of shimExtensions) {
       const candidate = path.win32.join(directory, `${spec.command}${extension}`);
       if (!isFile(candidate)) continue;
+      // A .cmd/.bat shim runs through cmd.exe, which re-parses the command line
+      // and cannot carry these characters verbatim: an unbalanced quote reopens
+      // quote state and '& | < >' then start a fresh command (BatBadBut /
+      // CVE-2024-27980), while '%' triggers environment expansion. These never
+      // appear in a legitimate model id, effort, or evidence path, so fail
+      // closed rather than escape — a bad receipt config must not reach a shell.
+      const unsafe = [candidate, ...spec.args].find((argument) => /[&|<>^%\r\n]/u.test(String(argument)));
+      if (unsafe !== undefined) {
+        throw new Error(`Refusing to launch cmd shim: argument contains characters unsafe for cmd.exe: ${JSON.stringify(unsafe)}`);
+      }
       const commandLine = [candidate, ...spec.args].map(quoteWindowsArgument).join(' ');
       return {
         ...spec,
@@ -155,7 +165,14 @@ export function runCommand(spec, {
     // helper process holding the inherited pipes would park us here forever.
     // After the worker itself exits, allow a short drain window and settle.
     child.on('exit', (code, exitSignal) => {
-      drainTimer = setTimeout(() => settle(code, exitSignal), 2000);
+      drainTimer = setTimeout(() => {
+        // Settling alone leaves our read ends of the inherited pipes open while
+        // the orphan holds the write ends, keeping the event loop alive so the
+        // whole process hangs after this promise resolves. Release them first.
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        settle(code, exitSignal);
+      }, 2000);
     });
     child.on('close', settle);
 

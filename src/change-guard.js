@@ -141,7 +141,14 @@ function globRegex(pattern) {
 function matchesScope(file, patterns) {
   return patterns.some((pattern) => {
     const normalized = repoPath(pattern);
-    return normalized !== null && globRegex(normalized).test(file);
+    if (normalized === null) return false;
+    // A pattern with no glob metacharacter names a path, not an exact-match
+    // regex. Treat it as "this file or anything beneath it" so a bare directory
+    // in forbiddenScope cannot fail open (and allowedScope stays consistent).
+    if (!/[*?]/u.test(normalized)) {
+      return file === normalized || file.startsWith(`${normalized}/`);
+    }
+    return globRegex(normalized).test(file);
   });
 }
 
