@@ -106,3 +106,15 @@ test('a worker that exits non-zero leaves no receipt behind, even if it printed 
   await assert.rejects(execution, /Worker exited with 3/);
   await assert.rejects(readFile(receiptPath, 'utf8'), { code: 'ENOENT' });
 });
+
+test('a worker that dies before producing output surfaces its stderr as evidence', async (t) => {
+  // Given: a worker that rejects its invocation the way a CLI flag error does
+  const cwd = await temporaryDirectory(t, 'aorch-receipt-stderr-');
+  const dieWithStderr = 'process.stderr.write("Error: --json-schema is not a valid JSON Schema"); process.exit(1)';
+
+  // When
+  const execution = executeTask({ task: task(), config: config(dieWithStderr), cwd });
+
+  // Then: the failure message carries the stderr tail so `aorch exec` output is diagnosable
+  await assert.rejects(execution, /Worker exited with 1[\s\S]*--json-schema is not a valid JSON Schema/);
+});

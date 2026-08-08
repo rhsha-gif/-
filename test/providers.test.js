@@ -35,6 +35,24 @@ test('Claude command pins model and effort and bypasses recursive orchestration'
   assert.equal(spec.env.AORCH_WORKER, '1');
 });
 
+test('Claude command strips the $schema meta-declaration the CLI validator rejects', () => {
+  const spec = buildClaudeCommand({
+    prompt: 'do it',
+    route,
+    write: true,
+    jsonSchema: {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      properties: { status: { type: 'string' } },
+      required: ['status']
+    }
+  });
+  const payload = JSON.parse(spec.args[spec.args.indexOf('--json-schema') + 1]);
+  assert.equal(payload.$schema, undefined);
+  assert.deepEqual(payload.required, ['status']);
+  assert.equal(payload.properties.status.type, 'string');
+});
+
 test('Codex command uses explicit sandbox, model, effort, and structured output', () => {
   const spec = buildCodexCommand({
     prompt: 'do it',

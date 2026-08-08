@@ -18,7 +18,13 @@ export function buildClaudeCommand({
     '--max-turns', String(maxTurns),
     '--no-session-persistence'
   ];
-  if (jsonSchema) args.push('--json-schema', JSON.stringify(jsonSchema));
+  if (jsonSchema) {
+    // The claude CLI validates --json-schema with a resolver that cannot fetch
+    // the draft/2020-12 meta-schema, so a $schema declaration kills the worker
+    // before it starts. The keyword vocabulary we use is draft-07-compatible.
+    const { $schema: _metaSchema, ...portableSchema } = jsonSchema;
+    args.push('--json-schema', JSON.stringify(portableSchema));
+  }
   for (const pluginDir of pluginDirs) args.push('--plugin-dir', pluginDir);
   return {
     command: executable,

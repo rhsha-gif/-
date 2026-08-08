@@ -129,8 +129,17 @@ export async function executeTask({
   const result = await runCommand(commandSpec, { cwd, timeoutMs });
   if (result.exitCode !== 0) {
     // The run loop needs the route and raw output to tell a rate-limited
-    // provider apart from a genuine worker failure.
-    const error = new Error(`Worker exited with ${result.exitCode}`);
+    // provider apart from a genuine worker failure. The message carries a
+    // bounded stream tail because a worker that dies before writing its run
+    // directory leaves this as the only diagnosable evidence.
+    const evidence = [result.stderr, result.stdout]
+      .map((stream) => (stream ?? '').trim())
+      .filter(Boolean)
+      .map((stream) => stream.slice(-400))
+      .join('\n');
+    const error = new Error(
+      `Worker exited with ${result.exitCode}${evidence ? `\n${evidence}` : ''}`
+    );
     error.route = route;
     error.result = result;
     throw error;
