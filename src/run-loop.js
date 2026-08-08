@@ -77,8 +77,15 @@ export async function executeWithVerification({
   let currentTask = { ...structuredClone(task), runId };
   let forcedRoute;
 
+  // Capture the baseline once, before any attempt. Escalation retries build on
+  // the tree the previous attempt left behind, so re-snapshotting per attempt
+  // would compare a stronger model's work against an already-dirtied baseline —
+  // its honest file claims then read as "overclaimed" (zero net delta) and the
+  // guard rejects a correct result. The guard validates net change across the
+  // whole run against the pre-run tree.
+  const beforeSnapshot = await captureGitSnapshotImpl({ cwd });
+
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const beforeSnapshot = await captureGitSnapshotImpl({ cwd });
     let execution;
     try {
       execution = await executeTaskImpl({

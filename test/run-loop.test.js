@@ -208,6 +208,55 @@ test('a change guard violation returns immediately without verification or escal
   assert.deepEqual(persisted.changeGuard.unclaimedFiles, ['src/unclaimed.js']);
 });
 
+test('the change guard compares every attempt against the pre-run baseline, not a dirtied one', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  // Clean at the start; the first worker to run leaves the target modified and
+  // it stays modified across retries (a stronger model builds on the prior tree).
+  let treeModified = false;
+  const snapshot = () => ({
+    applicable: true,
+    reason: null,
+    root: dir,
+    head: 'h',
+    entries: treeModified
+      ? { 'src/difficulty.js': { status: ' M', index: '100644 x 0', worktree: 'file:new' } }
+      : {}
+  });
+  const executor = async ({ task, forcedRoute }) => {
+    calls.push({ forcedRoute });
+    treeModified = true;
+    const runDir = path.join(dir, 'task-runs', task.runId ?? 'run', `${task.id}-${calls.length}`);
+    await mkdir(runDir, { recursive: true });
+    return {
+      task,
+      route: forcedRoute
+        ? { provider: 'anthropic', profileId: forcedRoute.profileId, model: forcedRoute.profileId, effort: forcedRoute.effort }
+        : { provider: 'anthropic', profileId: 'claude-sonnet-general', model: 'sonnet', effort: 'medium' },
+      receipt: { status: 'complete', filesChanged: ['src/difficulty.js'] },
+      receiptPath: path.join(runDir, 'receipt.json'),
+      runDir
+    };
+  };
+
+  // Attempt 1 writes the file but verify fails; attempt 2 rewrites the same
+  // content, so a per-attempt baseline sees zero delta and rejects the honest
+  // claim as overclaimed. Against a fixed pre-run baseline the net change matches.
+  const result = await executeLoop({
+    task: baseTask({ write: true, allowedScope: ['src/**'], forbiddenScope: [] }),
+    config: baseConfig(),
+    cwd: dir,
+    observationsPath: path.join(dir, 'obs.jsonl'),
+    executeTaskImpl: executor,
+    runVerificationImpl: stubVerifier([false, true]),
+    appendObservationImpl: stubRecorder([]),
+    captureGitSnapshotImpl: async () => snapshot()
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(result.verification.passed, true);
+});
+
 test('a verify failure escalates on the provider ladder with the failure evidence attached', async (t) => {
   const dir = await temporaryDirectory(t);
   const calls = [];

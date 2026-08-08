@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { lstat, readlink } from 'node:fs/promises';
+import { lstat, readdir, readlink } from 'node:fs/promises';
 import path from 'node:path';
 import { runCommand } from './executor.js';
 
@@ -50,11 +50,11 @@ function parseIndex(output) {
   return entries;
 }
 
-async function worktreeFingerprint(root, file) {
-  const filePath = path.resolve(root, ...file.split('/'));
+async function fingerprintPath(filePath) {
   try {
     const stats = await lstat(filePath);
     if (stats.isSymbolicLink()) return `symlink:${await readlink(filePath)}`;
+    if (stats.isDirectory()) return `dir:${await directoryFingerprint(filePath)}`;
     if (!stats.isFile()) return `type:${stats.mode}`;
   } catch (error) {
     if (error?.code === 'ENOENT') return 'missing';
@@ -69,6 +69,53 @@ async function worktreeFingerprint(root, file) {
   });
 }
 
+async function worktreeFingerprint(root, file) {
+  return fingerprintPath(path.resolve(root, ...file.split('/')));
+}
+
+// One-level digest of a directory's entries: catches a hook file that is added,
+// removed, or rewritten. Sample hooks git ships never change during a run.
+async function directoryFingerprint(dirPath) {
+  let names;
+  try {
+    names = (await readdir(dirPath)).sort();
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 'missing';
+    throw error;
+  }
+  const hash = createHash('sha256');
+  for (const name of names) {
+    hash.update(`${name}\0${await fingerprintPath(path.join(dirPath, name))}\0`);
+  }
+  return hash.digest('hex');
+}
+
+// Persistence surfaces a worker could abuse that Git's status/diff never
+// reports: host-hook install targets (gitignored), the routing control plane,
+// and Git's own hook/config/exclude machinery. Fingerprinted before and after
+// so a change is caught regardless of ignore rules.
+const WORKTREE_CONTROL_PATHS = Object.freeze([
+  '.claude/settings.json',
+  '.claude/settings.local.json',
+  '.codex/hooks.json',
+  '.aorch/config.json',
+  '.aorch/hooks'
+]);
+const GIT_CONTROL_PATHS = Object.freeze(['config', 'info/exclude', 'hooks']);
+
+async function captureControl(root, gitCommonDir) {
+  const control = {};
+  await Promise.all([
+    ...WORKTREE_CONTROL_PATHS.map(async (rel) => {
+      control[rel] = await fingerprintPath(path.resolve(root, ...rel.split('/')));
+    }),
+    ...GIT_CONTROL_PATHS.map(async (rel) => {
+      control[`.git/${rel}`] = await fingerprintPath(path.resolve(gitCommonDir, ...rel.split('/')));
+    })
+  ]);
+  return control;
+}
+
 export async function captureGitSnapshot({ cwd = process.cwd() } = {}) {
   const probe = await runGit(['rev-parse', '--is-inside-work-tree'], cwd);
   if (probe.exitCode !== 0 || probe.stdout.trim() !== 'true') {
@@ -81,32 +128,42 @@ export async function captureGitSnapshot({ cwd = process.cwd() } = {}) {
     };
   }
 
-  const [rootResult, headResult, statusResult, indexResult] = await Promise.all([
+  const [rootResult, headResult, statusResult, indexResult, refsResult, gitDirResult] = await Promise.all([
     runGit(['rev-parse', '--show-toplevel'], cwd),
     runGit(['rev-parse', '--verify', 'HEAD'], cwd),
     runGit(['-c', 'core.quotepath=false', 'status', '--porcelain=v1', '-z', '--untracked-files=all'], cwd),
-    runGit(['ls-files', '--stage', '-z'], cwd)
+    runGit(['ls-files', '--stage', '-z'], cwd),
+    // show-ref exits 1 when a repository has no refs yet; that is an empty ref
+    // set, not a capture failure.
+    runGit(['show-ref'], cwd),
+    runGit(['rev-parse', '--git-common-dir'], cwd)
   ]);
-  if (rootResult.exitCode !== 0 || statusResult.exitCode !== 0 || indexResult.exitCode !== 0) {
+  if (rootResult.exitCode !== 0 || statusResult.exitCode !== 0 || indexResult.exitCode !== 0 || gitDirResult.exitCode !== 0) {
     throw new Error('Unable to capture Git state for change guard');
   }
 
   const root = path.resolve(rootResult.stdout.trim());
+  const gitCommonDir = path.resolve(cwd, gitDirResult.stdout.trim());
   const statuses = parseStatus(statusResult.stdout);
   const indexEntries = parseIndex(indexResult.stdout);
   const entries = {};
-  await Promise.all([...statuses.entries()].map(async ([file, status]) => {
-    entries[file] = {
-      status,
-      index: indexEntries.get(file) ?? null,
-      worktree: await worktreeFingerprint(root, file)
-    };
-  }));
+  const [, control] = await Promise.all([
+    Promise.all([...statuses.entries()].map(async ([file, status]) => {
+      entries[file] = {
+        status,
+        index: indexEntries.get(file) ?? null,
+        worktree: await worktreeFingerprint(root, file)
+      };
+    })),
+    captureControl(root, gitCommonDir)
+  ]);
   return {
     applicable: true,
     reason: null,
     root,
     head: headResult.exitCode === 0 ? headResult.stdout.trim() : null,
+    refs: refsResult.stdout.trim(),
+    control,
     entries
   };
 }
@@ -202,16 +259,25 @@ export function evaluateChangeGuard({ task, receipt, before, after, ignoredPaths
     : [];
   const readOnlyFiles = write ? [] : actualFiles;
   const headChanged = applicable && before.head !== after.head;
+  const refsChanged = applicable && (before.refs ?? '') !== (after.refs ?? '');
+  const beforeControl = before?.control ?? {};
+  const afterControl = after?.control ?? {};
+  const controlPathsChanged = applicable
+    ? [...new Set([...Object.keys(beforeControl), ...Object.keys(afterControl)])]
+        .filter((key) => (beforeControl[key] ?? 'missing') !== (afterControl[key] ?? 'missing'))
+        .sort()
+    : [];
   const violations = [
     invalidClaimedFiles,
     unclaimedFiles,
     overclaimedFiles,
     outOfScopeFiles,
     forbiddenFiles,
-    readOnlyFiles
+    readOnlyFiles,
+    controlPathsChanged
   ];
   const passed = applicable
-    ? !headChanged && violations.every((entries) => entries.length === 0)
+    ? !headChanged && !refsChanged && violations.every((entries) => entries.length === 0)
     : reason === 'not-git-repository'
       && !write
       && claimedFiles.length === 0
@@ -224,6 +290,8 @@ export function evaluateChangeGuard({ task, receipt, before, after, ignoredPaths
     headBefore: before?.head ?? null,
     headAfter: after?.head ?? null,
     headChanged,
+    refsChanged,
+    controlPathsChanged,
     actualFiles,
     claimedFiles,
     invalidClaimedFiles,

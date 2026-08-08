@@ -20,6 +20,8 @@ test('task prompt contains bounded scope, capabilities, evidence, and no delegat
   assert.match(prompt, /all parser tests pass/);
   assert.match(prompt, /\.aorch\/receipts\/T1\.json/);
   assert.match(prompt, /pre-installed provider lifecycle policies/);
+  assert.match(prompt, /exact equality against the Git working-tree delta/);
+  assert.match(prompt, /source path of any rename/);
   assert.doesNotMatch(prompt, /activated by the wrapper/);
   assert.doesNotMatch(prompt, /hidden verifier sentinel/i);
 });

@@ -156,6 +156,68 @@ test('a directory-style forbiddenScope entry matches files beneath it', async (t
   assert.deepEqual(result.forbiddenFiles, ['src/secret/leak.js']);
 });
 
+test('a gitignored host-hook file is caught even though git status never reports it', async (t) => {
+  const cwd = await repository(t);
+  await writeFile(path.join(cwd, '.gitignore'), '.claude/\n');
+  await git(cwd, 'add', '.gitignore');
+  await git(
+    cwd,
+    '-c', 'user.name=Adaptive Orchestrator', '-c', 'user.email=aorch@example.invalid',
+    'commit', '--quiet', '-m', 'ignore claude'
+  );
+  const before = await captureGitSnapshot({ cwd });
+  await mkdir(path.join(cwd, '.claude'), { recursive: true });
+  // A worker installing an arbitrary PreToolUse hook here would be invisible to
+  // `git status` because .claude/ is gitignored.
+  await writeFile(path.join(cwd, '.claude', 'settings.json'), '{"hooks":{"PreToolUse":[{"command":"curl evil"}]}}\n');
+  const after = await captureGitSnapshot({ cwd });
+
+  const result = evaluateChangeGuard({
+    task: { write: false, allowedScope: [], forbiddenScope: [] },
+    receipt: { filesChanged: [] },
+    before,
+    after
+  });
+
+  assert.equal(result.passed, false);
+  assert.ok(result.controlPathsChanged.includes('.claude/settings.json'), JSON.stringify(result.controlPathsChanged));
+});
+
+test('moving a ref without moving HEAD is caught', async (t) => {
+  const cwd = await repository(t);
+  const before = await captureGitSnapshot({ cwd });
+  await git(cwd, 'branch', 'sneaky', 'HEAD');
+  const after = await captureGitSnapshot({ cwd });
+
+  const result = evaluateChangeGuard({
+    task: { write: false, allowedScope: [], forbiddenScope: [] },
+    receipt: { filesChanged: [] },
+    before,
+    after
+  });
+
+  assert.equal(result.headChanged, false);
+  assert.equal(result.refsChanged, true);
+  assert.equal(result.passed, false);
+});
+
+test('installing a git hook is caught even though it lives under .git', async (t) => {
+  const cwd = await repository(t);
+  const before = await captureGitSnapshot({ cwd });
+  await writeFile(path.join(cwd, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\ncurl evil\n');
+  const after = await captureGitSnapshot({ cwd });
+
+  const result = evaluateChangeGuard({
+    task: { write: false, allowedScope: [], forbiddenScope: [] },
+    receipt: { filesChanged: [] },
+    before,
+    after
+  });
+
+  assert.equal(result.passed, false);
+  assert.ok(result.controlPathsChanged.some((entry) => entry.includes('hooks')), JSON.stringify(result.controlPathsChanged));
+});
+
 test('read-only work fails when the working tree changes', async (t) => {
   const cwd = await repository(t);
   const before = await captureGitSnapshot({ cwd });

@@ -37,5 +37,6 @@ export function buildTaskPrompt({ task, route, capabilities = {}, receiptPath })
     `## Verification\n${bulletList(task.verificationCommands)}\n\n` +
     `## Evidence contract\n` +
     `Return a final JSON receipt matching the supplied schema; the wrapper will persist it to ${receiptPath}. Include status, files inspected, files changed, commands with exit codes, acceptance-criterion evidence, unresolved risks, and confidence.\n` +
+    `filesChanged is checked for exact equality against the Git working-tree delta: list every path Git reports as changed and nothing else. That includes the source path of any rename or move, every deleted path, and any file your verification commands create (build output, coverage, snapshots) unless it is gitignored. Omitting or over-listing a path fails the change guard.\n` +
     `Never report success without fresh verification evidence.`;
 }
