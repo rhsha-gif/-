@@ -21,8 +21,7 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  classify  Map a raw objective to a difficulty and a concrete route\n` +
   `  record    Append an independently reviewed model-performance observation\n` +
   `  limits    Show, set, or clear provider usage limits (limits [set <provider> --minutes N | clear [provider]])\n` +
-  `  branch    Show branch status
-` +
+  `  branch    Show branch status\n` +
   `  inventory Print configured providers, models, skills, plugins, and hooks\n` +
   `  install   Install project-local Claude Code and/or Codex integration\n\n` +
   `Common options:\n` +
@@ -40,7 +39,7 @@ const COMMAND_FLAGS = Object.freeze({
   record: [...COMMON_FLAGS, 'input', 'observations'],
   limits: [...COMMON_FLAGS, 'minutes', 'note'],
   inventory: [...COMMON_FLAGS],
-  branch: [...COMMON_FLAGS],
+  branch: [...COMMON_FLAGS, 'action', 'approved', 'confirm-unmerged', 'name', 'observations', 'task'],
   install: ['cwd', 'help', 'h', 'target', 'project', 'force-config']
 });
 
