@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { detectMainBranch } from '../src/branch-status.js';
+import { detectMainBranch, collectBranches } from '../src/branch-status.js';
 
 const execFileAsync = promisify(execFile);
 async function git(cwd, ...args) { return execFileAsync('git', args, { cwd }); }
@@ -34,4 +34,20 @@ test('detectMainBranch is unconfident when it cannot tell', async (t) => {
   const cwd = await repo(t);
   await git(cwd, 'branch', '-m', 'main', 'wip');   // no main/master, no origin
   assert.deepEqual(await detectMainBranch(cwd, null), { mainBranch: null, confident: false });
+});
+
+test('collectBranches reports ahead/behind, merged, and cleanup candidates', async (t) => {
+  const cwd = await repo(t);                 // main has 1 commit
+  await git(cwd, 'checkout', '--quiet', '-b', 'merged-feature');
+  await writeFile(path.join(cwd, 'b.txt'), 'b\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'feature');
+  await git(cwd, 'checkout', '--quiet', 'main');
+  await git(cwd, 'merge', '--no-ff', '--quiet', '-m', 'merge feature', 'merged-feature');
+
+  const { branches, cleanupCandidates } = await collectBranches(cwd, 'main', { staleDays: 30, nowMs: Date.parse('2026-08-09T00:00:00Z') });
+  const merged = branches.find((b) => b.name === 'merged-feature');
+  assert.equal(merged.mergedIntoMain, true);
+  assert.ok(cleanupCandidates.mergedLocal.includes('merged-feature'));
+  assert.ok(!cleanupCandidates.mergedLocal.includes('main'));
 });
