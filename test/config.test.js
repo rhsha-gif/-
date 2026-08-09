@@ -51,6 +51,19 @@ test('independent verification timeout must be positive', () => {
   assert.throws(() => validateConfig(config), /verification\.commandTimeoutMs/i);
 });
 
+test('validateConfig accepts a well-formed branch block and rejects a bad integration', () => {
+  const good = minimalConfig();
+  good.branch = { mainBranch: 'main', namePrefix: true, staleDays: 45, integration: 'direct' };
+  assert.doesNotThrow(() => validateConfig(good));
+
+  const bad = minimalConfig();
+  bad.branch = { integration: 'sometimes' };
+  assert.throws(() => validateConfig(bad), /branch\.integration/);
+
+  const absent = minimalConfig();
+  assert.doesNotThrow(() => validateConfig(absent));   // branch is optional
+});
+
 
 test('routing defaults require a unique supported priority order', () => {
   const config = minimalConfig();

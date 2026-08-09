@@ -250,6 +250,22 @@ export function validateConfig(input) {
     throw new Error('verification.commandTimeoutMs must be positive');
   }
 
+  if (input.branch !== undefined) {
+    const b = input.branch;
+    if (typeof b !== 'object' || b === null || Array.isArray(b)) throw new TypeError('config.branch must be an object');
+    if (b.mainBranch !== undefined && (typeof b.mainBranch !== 'string' || b.mainBranch.trim() === '')) {
+      throw new TypeError('config.branch.mainBranch must be a non-empty string');
+    }
+    if (b.namePrefix !== undefined && typeof b.namePrefix !== 'boolean') throw new TypeError('config.branch.namePrefix must be boolean');
+    if (b.staleDays !== undefined && (!Number.isFinite(b.staleDays) || b.staleDays < 0)) {
+      throw new RangeError('config.branch.staleDays must be a non-negative number');
+    }
+    if (b.integration !== undefined && !['auto', 'pr', 'direct'].includes(b.integration)) {
+      throw new Error("config.branch.integration must be 'auto', 'pr', or 'direct'");
+    }
+    if (b.verificationCommands !== undefined) assertNonEmptyStrings(b.verificationCommands, 'config.branch.verificationCommands');
+  }
+
   return structuredClone({
     ...input,
     providers: normalizedProviders,
