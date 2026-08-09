@@ -48,9 +48,32 @@ const MATRIX = [
   { objective: 'Review the auth token handling for vulnerabilities', kind: 'security', model: 'opus' }
 ];
 
+const KOREAN_MATRIX = [
+  { objective: '리드미 오타를 고치고 주석 블록을 정리', kind: 'documentation', model: 'haiku' },
+  { objective: 'limits 모듈 회귀 테스트 작성', kind: 'testing', model: 'haiku' },
+  { objective: '원자적 쓰기 헬퍼를 공유 모듈로 구현', kind: 'implementation', model: 'haiku' },
+  { objective: '라우팅 결정이 어디서 일어나는지 저장소를 탐색', kind: 'exploration', model: 'haiku' },
+  { objective: 'JSON 스키마 검증 라이브러리 비교 조사', kind: 'research', model: 'haiku' },
+  { objective: '경쟁 상태의 근본 원인을 찾아 디버깅', kind: 'debugging', model: 'opus' },
+  { objective: '위임 서브시스템의 아키텍처 설계', kind: 'architecture', model: 'opus' },
+  { objective: '인증 토큰 처리의 보안 취약점 검토', kind: 'security', model: 'opus' }
+];
+
 test('downshift matrix: advertised targets reach the cheap tier, high kinds keep the deep tier', async () => {
   const catalog = await loadPackagedCatalog();
   for (const expected of MATRIX) {
+    const { classification, route } = routeObjective(catalog, expected.objective);
+    assert.equal(classification.kind, expected.kind, `kind for: ${expected.objective}`);
+    assert.equal(route.model, expected.model,
+      `route for "${expected.objective}" (${classification.kind}/${classification.complexity}) `
+      + `expected ${expected.model}, got ${route.model}`);
+    assert.equal(route.provider, 'anthropic');
+  }
+});
+
+test('downshift matrix (Korean): same kind and tier as the English equivalents', async () => {
+  const catalog = await loadPackagedCatalog();
+  for (const expected of KOREAN_MATRIX) {
     const { classification, route } = routeObjective(catalog, expected.objective);
     assert.equal(classification.kind, expected.kind, `kind for: ${expected.objective}`);
     assert.equal(route.model, expected.model,
