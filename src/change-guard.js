@@ -128,14 +128,11 @@ export async function captureGitSnapshot({ cwd = process.cwd() } = {}) {
     };
   }
 
-  const [rootResult, headResult, statusResult, indexResult, refsResult, gitDirResult] = await Promise.all([
+  const [rootResult, headResult, statusResult, indexResult, gitDirResult] = await Promise.all([
     runGit(['rev-parse', '--show-toplevel'], cwd),
     runGit(['rev-parse', '--verify', 'HEAD'], cwd),
     runGit(['-c', 'core.quotepath=false', 'status', '--porcelain=v1', '-z', '--untracked-files=all'], cwd),
     runGit(['ls-files', '--stage', '-z'], cwd),
-    // show-ref exits 1 when a repository has no refs yet; that is an empty ref
-    // set, not a capture failure.
-    runGit(['show-ref'], cwd),
     runGit(['rev-parse', '--git-common-dir'], cwd)
   ]);
   if (rootResult.exitCode !== 0 || statusResult.exitCode !== 0 || indexResult.exitCode !== 0 || gitDirResult.exitCode !== 0) {
@@ -162,7 +159,6 @@ export async function captureGitSnapshot({ cwd = process.cwd() } = {}) {
     reason: null,
     root,
     head: headResult.exitCode === 0 ? headResult.stdout.trim() : null,
-    refs: refsResult.stdout.trim(),
     control,
     entries
   };
@@ -259,7 +255,6 @@ export function evaluateChangeGuard({ task, receipt, before, after, ignoredPaths
     : [];
   const readOnlyFiles = write ? [] : actualFiles;
   const headChanged = applicable && before.head !== after.head;
-  const refsChanged = applicable && (before.refs ?? '') !== (after.refs ?? '');
   const beforeControl = before?.control ?? {};
   const afterControl = after?.control ?? {};
   const controlPathsChanged = applicable
@@ -277,7 +272,7 @@ export function evaluateChangeGuard({ task, receipt, before, after, ignoredPaths
     controlPathsChanged
   ];
   const passed = applicable
-    ? !headChanged && !refsChanged && violations.every((entries) => entries.length === 0)
+    ? !headChanged && violations.every((entries) => entries.length === 0)
     : reason === 'not-git-repository'
       && !write
       && claimedFiles.length === 0
@@ -290,7 +285,6 @@ export function evaluateChangeGuard({ task, receipt, before, after, ignoredPaths
     headBefore: before?.head ?? null,
     headAfter: after?.head ?? null,
     headChanged,
-    refsChanged,
     controlPathsChanged,
     actualFiles,
     claimedFiles,

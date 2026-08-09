@@ -183,10 +183,13 @@ test('a gitignored host-hook file is caught even though git status never reports
   assert.ok(result.controlPathsChanged.includes('.claude/settings.json'), JSON.stringify(result.controlPathsChanged));
 });
 
-test('moving a ref without moving HEAD is caught', async (t) => {
+test('concurrent ref activity in the shared repo does not fail the guard', async (t) => {
+  // Write tasks run in a linked worktree that shares refs with the main repo,
+  // so the user committing or fetching on another branch mid-run is normal and
+  // must not be read as tampering. HEAD is the integrity anchor, not the ref set.
   const cwd = await repository(t);
   const before = await captureGitSnapshot({ cwd });
-  await git(cwd, 'branch', 'sneaky', 'HEAD');
+  await git(cwd, 'branch', 'concurrent-work', 'HEAD');
   const after = await captureGitSnapshot({ cwd });
 
   const result = evaluateChangeGuard({
@@ -197,8 +200,7 @@ test('moving a ref without moving HEAD is caught', async (t) => {
   });
 
   assert.equal(result.headChanged, false);
-  assert.equal(result.refsChanged, true);
-  assert.equal(result.passed, false);
+  assert.equal(result.passed, true);
 });
 
 test('installing a git hook is caught even though it lives under .git', async (t) => {
