@@ -13,6 +13,7 @@ import { validateTask } from './task.js';
 import { classifyDifficulty } from './difficulty.js';
 import { clearLimits, readLimits, setLimit } from './limits.js';
 
+import { computeBranchStatus } from './branch-status.js';
 const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `Commands:\n` +
   `  route     Select provider, model, and effort for a task JSON file\n` +
@@ -20,6 +21,8 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  classify  Map a raw objective to a difficulty and a concrete route\n` +
   `  record    Append an independently reviewed model-performance observation\n` +
   `  limits    Show, set, or clear provider usage limits (limits [set <provider> --minutes N | clear [provider]])\n` +
+  `  branch    Show branch status
+` +
   `  inventory Print configured providers, models, skills, plugins, and hooks\n` +
   `  install   Install project-local Claude Code and/or Codex integration\n\n` +
   `Common options:\n` +
@@ -37,6 +40,7 @@ const COMMAND_FLAGS = Object.freeze({
   record: [...COMMON_FLAGS, 'input', 'observations'],
   limits: [...COMMON_FLAGS, 'minutes', 'note'],
   inventory: [...COMMON_FLAGS],
+  branch: [...COMMON_FLAGS],
   install: ['cwd', 'help', 'h', 'target', 'project', 'force-config']
 });
 
@@ -77,7 +81,7 @@ function validateCommandArgs(command, flags, positionals) {
   const allowed = COMMAND_FLAGS[command];
   if (!allowed) return;
   // `limits` takes an action and an optional provider as positionals.
-  const positionalBudget = command === 'limits' ? 2 : 0;
+  const positionalBudget = command === 'limits' || command === 'branch' ? 2 : 0;
   if (positionals.length > positionalBudget) {
     throw new Error(`Unexpected argument for ${command}: ${positionals[positionalBudget]}`);
   }
@@ -269,6 +273,18 @@ async function main(argv = process.argv.slice(2)) {
   if (command === 'inventory') {
     process.stdout.write(`${JSON.stringify(getInventory(config), null, 2)}\n`);
     return 0;
+  }
+
+
+  if (command === 'branch') {
+    const sub = positionals[0] ?? 'status';
+    if (sub === 'status') {
+      const status = await computeBranchStatus({ cwd, config });
+      process.stdout.write(`${JSON.stringify(status)}
+`);
+      return 0;
+    }
+    throw new Error(`Unknown branch subcommand: ${sub}`);
   }
 
   throw new Error(`Unknown command: ${command}`);
