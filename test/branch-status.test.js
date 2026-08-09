@@ -72,3 +72,68 @@ test('computeBranchStatus recommends finish when ahead of main on a clean featur
   assert.equal(status.positionRisk, null);
   assert.equal(status.recommendedAction, 'finish');
 });
+
+test('computeBranchStatus recommends cleanup when merged branches exist', async (t) => {
+  const cwd = await repo(t);  // on main with 1 commit
+  // Create and merge a feature branch
+  await git(cwd, 'checkout', '--quiet', '-b', 'feat/to-merge');
+  await writeFile(path.join(cwd, 'b.txt'), 'b\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'work');
+  await git(cwd, 'checkout', '--quiet', 'main');
+  await git(cwd, 'merge', '--no-ff', '--quiet', '-m', 'merge feature', 'feat/to-merge');
+  // Create another branch even with main (no ahead/behind)
+  await git(cwd, 'checkout', '--quiet', '-b', 'feat/current');
+
+  const status = await computeBranchStatus({ cwd, config: {}, nowMs: Date.parse('2026-08-09T00:00:00Z') });
+  // Note: on-main position would set 'start', but we're on feat/current now, so cleanup applies.
+  assert.equal(status.recommendedAction, 'cleanup');
+  assert.ok(status.cleanupCandidates.mergedLocal.includes('feat/to-merge'));
+});
+
+test('computeBranchStatus recommends none for an ahead feature branch with uncommitted changes', async (t) => {
+  const cwd = await repo(t);
+  await git(cwd, 'checkout', '--quiet', '-b', 'feat/wip');
+  // Commit a change (ahead of main)
+  await writeFile(path.join(cwd, 'work.txt'), 'work\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'progress');
+  // Create uncommitted changes (dirty tree)
+  await writeFile(path.join(cwd, 'dirty.txt'), 'dirty\n');
+
+  const status = await computeBranchStatus({ cwd, config: {}, nowMs: Date.parse('2026-08-09T00:00:00Z') });
+  // ahead > 0 but workingTreeClean = false, so not 'finish'
+  // ahead > 0, so not 'sync'
+  // not on-main/detached, no merged candidates
+  assert.equal(status.workingTreeClean, false);
+  assert.ok(status.branches.find((b) => b.name === 'feat/wip').ahead > 0);
+  assert.equal(status.recommendedAction, 'none');
+});
+
+test('computeBranchStatus recommends sync when behind main and not ahead', async (t) => {
+  const cwd = await repo(t);
+  await git(cwd, 'checkout', '--quiet', '-b', 'feat/stale');
+  // Advance main
+  await git(cwd, 'checkout', '--quiet', 'main');
+  await writeFile(path.join(cwd, 'b.txt'), 'b\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'main advance');
+  // Back to feature branch
+  await git(cwd, 'checkout', '--quiet', 'feat/stale');
+
+  const status = await computeBranchStatus({ cwd, config: {}, nowMs: Date.parse('2026-08-09T00:00:00Z') });
+  assert.equal(status.recommendedAction, 'sync');
+  const fstale = status.branches.find((b) => b.name === 'feat/stale');
+  assert.ok(fstale.behind > 0);
+  assert.equal(fstale.ahead, 0);
+});
+
+test('computeBranchStatus flags detached HEAD', async (t) => {
+  const cwd = await repo(t);
+  await git(cwd, 'checkout', '--quiet', '--detach');
+
+  const status = await computeBranchStatus({ cwd, config: {}, nowMs: Date.parse('2026-08-09T00:00:00Z') });
+  assert.equal(status.positionRisk, 'detached');
+  assert.equal(status.currentBranch, null);
+  assert.equal(status.recommendedAction, 'start');
+});
