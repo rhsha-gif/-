@@ -22,7 +22,7 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  classify  Map a raw objective to a difficulty and a concrete route\n` +
   `  record    Append an independently reviewed model-performance observation\n` +
   `  limits    Show, set, or clear provider usage limits (limits [set <provider> --minutes N | clear [provider]])\n` +
-  `  branch    Show branch status\n` +
+  `  branch    Branch lifecycle: status | apply --action <start|finish|cleanup|sync>\n` +
   `  inventory Print configured providers, models, skills, plugins, and hooks\n` +
   `  install   Install project-local Claude Code and/or Codex integration\n\n` +
   `Common options:\n` +

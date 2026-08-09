@@ -40,6 +40,9 @@ async function planStart({ cwd, config, options }) {
   const main = status.mainBranch ?? 'main';
   const blockers = [];
   if (!name) blockers.push('start requires a target branch name');
+  // Reject a name git could mistake for an option; branch names are chosen by
+  // the host, so a leading dash is a bug, not a valid branch.
+  if (name && name.startsWith('-')) blockers.push(`invalid branch name: ${name}`);
   if (!target && status.branches.some((b) => b.name === name)) {
     blockers.push(`branch ${name} already exists; pass checkoutExisting to resume it`);
   }
@@ -117,7 +120,14 @@ async function planFinish({ cwd, config, options }) {
     // Record where main was so the caller can undo the merge if needed.
     const preMerge = await runGit(['rev-parse', main], cwd);
     await must(['switch', main], `switch ${main}`);
-    await must(['merge', '--no-ff', '-m', `Merge ${branch}`, branch], `merge ${branch}`);
+    const merge = await runGit(['merge', '--no-ff', '-m', `Merge ${branch}`, branch], cwd);
+    if (merge.exitCode !== 0) {
+      // Never leave main parked in a conflicted merge; abort so the tree is
+      // clean before reporting the failure (mirrors sync).
+      await runGit(['merge', '--abort'], cwd);
+      throw new Error(`finish stopped: merge conflict merging ${branch} into ${main}: ${(merge.stderr || merge.stdout).trim()}`);
+    }
+    performed.push(`merge ${branch}`);
     if (hasRemote) await must(['push', 'origin', main], `push ${main}`);
     await must(['branch', '-d', branch], `delete ${branch}`);
     return { performed, undo: { preMergeMainSha: preMerge.stdout.trim() } };

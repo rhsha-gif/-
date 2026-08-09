@@ -113,6 +113,46 @@ test('cleanup deletes merged branches but defers unmerged-stale without confirma
   assert.ok(result.deferred.includes('orphan'));
 });
 
+test('finish aborts the merge and leaves a clean tree when it conflicts', async (t) => {
+  const cwd = await repo(t);   // main has a.txt
+  // main edits a.txt one way...
+  await writeFile(path.join(cwd, 'a.txt'), 'main-side\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'main edit');
+  // ...feature edits the same line the other way, branched from the original main
+  await git(cwd, 'checkout', '--quiet', '-b', 'feat/conflict', 'HEAD~1');
+  await writeFile(path.join(cwd, 'a.txt'), 'feature-side\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'feature edit');
+
+  const passingVerify = async () => ({ passed: true, results: [] });
+  await assert.rejects(
+    applyBranchAction({ cwd, config: {}, action: 'finish', approved: true, options: { runVerificationImpl: passingVerify } }),
+    /merge conflict/i
+  );
+  // tree is clean (merge aborted), no in-progress merge left behind
+  assert.equal((await git(cwd, 'status', '--porcelain')).stdout.trim(), '');
+  assert.equal((await git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD')).stdout.trim(), 'main');
+});
+
+test('cleanup force-deletes unmerged-stale branches only with confirmUnmerged', async (t) => {
+  const cwd = await repo(t);
+  await git(cwd, 'checkout', '--quiet', '-b', 'orphan');
+  await writeFile(path.join(cwd, 'o.txt'), 'o\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'o');
+  await git(cwd, 'checkout', '--quiet', 'main');
+
+  const result = await applyBranchAction({
+    cwd, config: { branch: { staleDays: 0 } }, action: 'cleanup', approved: true,
+    options: { confirmUnmerged: true }
+  });
+  const branches = (await git(cwd, 'branch', '--format=%(refname:short)')).stdout;
+  assert.ok(!branches.includes('orphan'));           // force-deleted with confirmation
+  assert.ok(result.performed.some((p) => /orphan/.test(p)));
+  assert.deepEqual(result.deferred, []);             // nothing deferred when confirmed
+});
+
 test('sync brings main commits into the current branch', async (t) => {
   const cwd = await repo(t);
   await git(cwd, 'checkout', '--quiet', '-b', 'feat/behind');

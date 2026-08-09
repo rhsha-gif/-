@@ -90,8 +90,11 @@ export async function computeBranchStatus({ cwd, config = {}, nowMs } = {}) {
   let recommendedAction = 'none';
   if (cleanupCandidates.mergedLocal.length > 0) recommendedAction = 'cleanup';
   if (positionRisk === 'on-main' || positionRisk === 'detached') recommendedAction = 'start';
+  // Catch up before finishing: a branch behind main must sync first, so a
+  // diverged (ahead AND behind) branch is never sent straight into a finish
+  // merge that could conflict on main.
+  else if (current && current.behind > 0) recommendedAction = 'sync';
   else if (current && current.ahead > 0 && workingTreeClean) recommendedAction = 'finish';
-  else if (current && current.behind > 0 && current.ahead === 0) recommendedAction = 'sync';
 
   return {
     currentBranch,
