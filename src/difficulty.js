@@ -1,5 +1,5 @@
 // Maps a raw subtask description to the routing inputs selectRoute consumes.
-// Heuristic (task-kind keywords + token-count), not a trained model ??solo
+// Heuristic (task-kind keywords + token-count), not a trained model — solo
 // volume can't train a router. Borrowed clean-room from claude-code-router's
 // scenario routing. NEVER drops the quality floor to zero (objective = time +
 // limit savings WITH a minimum quality bar).
