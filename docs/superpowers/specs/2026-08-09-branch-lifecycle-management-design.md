@@ -30,7 +30,7 @@
   "mainBranch": "claude/project-critical-review-vtl77d",   // origin/HEAD 자동감지, config.mainBranch 오버라이드, 애매하면 needsConfirmation
   "mainBranchConfident": true,
   "workingTreeClean": false,
-  "positionRisk": "on-main" | "on-foreign-branch" | "detached" | null,
+  "positionRisk": "on-main" | "detached" | null,   // mechanical only; "is this branch foreign to the task" is the host's semantic call, not a status value
   "branches": [
     { "name": "docs-realign", "ahead": 3, "behind": 12, "lastCommitDaysAgo": 41,
       "mergedIntoMain": false, "hasRemote": true, "lastSubject": "Realign README..." }

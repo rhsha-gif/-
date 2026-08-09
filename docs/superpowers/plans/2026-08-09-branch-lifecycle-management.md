@@ -236,7 +236,7 @@ git commit -m "feat: collect per-branch facts and cleanup candidates"
 
 **Interfaces:**
 - Consumes: `detectMainBranch`, `collectBranches`, `runGit`.
-- Produces: `computeBranchStatus({ cwd, config, nowMs }) -> Promise<Status>` where `Status` = `{ currentBranch, mainBranch, mainBranchConfident, workingTreeClean, positionRisk, branches, cleanupCandidates, repoIntegration, recommendedAction }`. `positionRisk` ∈ `'on-main'|'on-foreign-branch'|'detached'|null`. `repoIntegration` ∈ `'pr'|'direct'`. `recommendedAction` ∈ `'start'|'finish'|'cleanup'|'sync'|'none'`.
+- Produces: `computeBranchStatus({ cwd, config, nowMs }) -> Promise<Status>` where `Status` = `{ currentBranch, mainBranch, mainBranchConfident, workingTreeClean, positionRisk, branches, cleanupCandidates, repoIntegration, recommendedAction }`. `positionRisk` ∈ `'on-main'|'detached'|null` (mechanical only; whether a branch is "foreign" to the task is a host semantic judgment, not a status field). `repoIntegration` ∈ `'pr'|'direct'`. `recommendedAction` ∈ `'start'|'finish'|'cleanup'|'sync'|'none'`.
 
 - [ ] **Step 1: Write the failing test**
 
