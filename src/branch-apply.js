@@ -6,7 +6,7 @@ const ACTIONS = new Set(['start', 'finish', 'cleanup', 'sync']);
 
 export async function applyBranchAction({ cwd, config = {}, action, approved = false, options = {} } = {}) {
   if (!ACTIONS.has(action)) throw new Error(`Unknown branch action: ${action}`);
-  const planners = { start: planStart, finish: planFinish, cleanup: planCleanup };   // sync added in a later task
+  const planners = { start: planStart, finish: planFinish, cleanup: planCleanup, sync: planSync };
   const planner = planners[action];
   if (!planner) throw new Error(`Branch action not implemented: ${action}`);
   const { plan, run, blockers, verifyBlocking, deferred = [] } = await planner({ cwd, config, options });
@@ -158,4 +158,24 @@ async function planCleanup({ cwd, config, options }) {
     return performed;
   };
   return { plan, run, blockers: [], deferred };
+}
+
+async function planSync({ cwd, config }) {
+  const status = await computeBranchStatus({ cwd, config });
+  const branch = status.currentBranch;
+  const main = status.mainBranch;
+  const blockers = [];
+  if (!branch || branch === main) blockers.push('sync must run on a feature branch');
+  if (!status.workingTreeClean) blockers.push('sync requires a clean working tree');
+  const plan = [`git merge --no-ff ${main} (into ${branch})`];
+  const run = async () => {
+    const r = await runGit(['merge', '--no-ff', '-m', `Merge ${main} into ${branch}`, main], cwd);
+    if (r.exitCode !== 0) {
+      // Leave the tree clean rather than parked in a conflicted merge.
+      await runGit(['merge', '--abort'], cwd);
+      throw new Error(`sync stopped: merge conflict from ${main}: ${(r.stderr || r.stdout).trim()}`);
+    }
+    return [`merged ${main}`];
+  };
+  return { plan, run, blockers };
 }

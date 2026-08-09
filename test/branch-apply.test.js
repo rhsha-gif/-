@@ -112,3 +112,20 @@ test('cleanup deletes merged branches but defers unmerged-stale without confirma
   assert.ok(branches.includes('orphan'));    // unmerged deferred, not deleted
   assert.ok(result.deferred.includes('orphan'));
 });
+
+test('sync brings main commits into the current branch', async (t) => {
+  const cwd = await repo(t);
+  await git(cwd, 'checkout', '--quiet', '-b', 'feat/behind');
+  // advance main after branching
+  await git(cwd, 'checkout', '--quiet', 'main');
+  await writeFile(path.join(cwd, 'newmain.txt'), 'n\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'main-advance');
+  await git(cwd, 'checkout', '--quiet', 'feat/behind');
+
+  const result = await applyBranchAction({ cwd, config: {}, action: 'sync', approved: true, options: {} });
+  assert.equal(result.executed, true);
+  // the main-only file is now present on feat/behind
+  const ls = (await git(cwd, 'ls-files')).stdout;
+  assert.ok(ls.includes('newmain.txt'));
+});
