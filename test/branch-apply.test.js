@@ -1,0 +1,171 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import { applyBranchAction } from '../src/branch-apply.js';
+
+const execFileAsync = promisify(execFile);
+async function git(cwd, ...args) { return execFileAsync('git', args, { cwd }); }
+async function repo(t) {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aorch-apply-'));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  await git(cwd, 'init', '--quiet', '--initial-branch=main');
+  await writeFile(path.join(cwd, 'a.txt'), 'a\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'init');
+  return cwd;
+}
+
+test('apply refuses to execute without explicit approval', async (t) => {
+  const cwd = await repo(t);
+  const result = await applyBranchAction({
+    cwd, config: {}, action: 'start', approved: false, options: { name: 'feat/x' }
+  });
+  assert.equal(result.executed, false);
+  assert.ok(Array.isArray(result.plan) && result.plan.length > 0);
+  // no new branch created
+  const branches = (await git(cwd, 'branch', '--format=%(refname:short)')).stdout;
+  assert.ok(!branches.includes('feat/x'));
+});
+
+test('start creates the branch from main and carries uncommitted work via stash', async (t) => {
+  const cwd = await repo(t);
+  await writeFile(path.join(cwd, 'wip.txt'), 'wip\n');    // uncommitted
+  const result = await applyBranchAction({
+    cwd, config: {}, action: 'start', approved: true, options: { name: 'feat/y' }
+  });
+  assert.equal(result.executed, true);
+  const current = (await git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD')).stdout.trim();
+  assert.equal(current, 'feat/y');
+  // the uncommitted file followed us onto the new branch
+  const status = (await git(cwd, 'status', '--porcelain')).stdout;
+  assert.ok(status.includes('wip.txt'));
+});
+
+async function bareRemote(t, cwd) {
+  const remote = await mkdtemp(path.join(os.tmpdir(), 'aorch-remote-'));
+  t.after(() => rm(remote, { recursive: true, force: true }));
+  await git(remote, 'init', '--quiet', '--bare');
+  await git(cwd, 'remote', 'add', 'origin', remote);
+  await git(cwd, 'push', '--quiet', '-u', 'origin', 'main');
+  return remote;
+}
+
+test('finish merges to main and pushes only when the verify gate passes', async (t) => {
+  const cwd = await repo(t);
+  await bareRemote(t, cwd);
+  await git(cwd, 'checkout', '--quiet', '-b', 'feat/done');
+  await writeFile(path.join(cwd, 'd.txt'), 'd\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'done');
+
+  const passingVerify = async () => ({ passed: true, results: [] });
+  const result = await applyBranchAction({
+    cwd, config: {}, action: 'finish', approved: true,
+    options: { runVerificationImpl: passingVerify }
+  });
+  assert.equal(result.executed, true);
+  assert.equal((await git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD')).stdout.trim(), 'main');
+  const branches = (await git(cwd, 'branch', '--format=%(refname:short)')).stdout;
+  assert.ok(!branches.includes('feat/done'));            // deleted after merge
+  assert.ok(result.undo && typeof result.undo.preMergeMainSha === 'string');
+});
+
+test('finish is blocked when the verify gate fails', async (t) => {
+  const cwd = await repo(t);
+  await git(cwd, 'checkout', '--quiet', '-b', 'feat/red');
+  await writeFile(path.join(cwd, 'e.txt'), 'e\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'red');
+  const failingVerify = async () => ({ passed: false, results: [{ command: 'npm test', exitCode: 1 }] });
+  const result = await applyBranchAction({
+    cwd, config: {}, action: 'finish', approved: true, options: { runVerificationImpl: failingVerify }
+  });
+  assert.equal(result.executed, false);
+  assert.ok(result.blockers.some((b) => /verif/i.test(b)));
+});
+
+test('cleanup deletes merged branches but defers unmerged-stale without confirmation', async (t) => {
+  const cwd = await repo(t);
+  // merged branch
+  await git(cwd, 'checkout', '--quiet', '-b', 'merged');
+  await writeFile(path.join(cwd, 'm.txt'), 'm\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'm');
+  await git(cwd, 'checkout', '--quiet', 'main');
+  await git(cwd, 'merge', '--no-ff', '--quiet', '-m', 'merge merged', 'merged');
+  // unmerged branch
+  await git(cwd, 'checkout', '--quiet', '-b', 'orphan');
+  await writeFile(path.join(cwd, 'o.txt'), 'o\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'o');
+  await git(cwd, 'checkout', '--quiet', 'main');
+
+  const result = await applyBranchAction({
+    cwd, config: { branch: { staleDays: 0 } }, action: 'cleanup', approved: true, options: {}
+  });
+  const branches = (await git(cwd, 'branch', '--format=%(refname:short)')).stdout;
+  assert.ok(!branches.includes('merged'));   // merged deleted
+  assert.ok(branches.includes('orphan'));    // unmerged deferred, not deleted
+  assert.ok(result.deferred.includes('orphan'));
+});
+
+test('finish aborts the merge and leaves a clean tree when it conflicts', async (t) => {
+  const cwd = await repo(t);   // main has a.txt
+  // main edits a.txt one way...
+  await writeFile(path.join(cwd, 'a.txt'), 'main-side\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'main edit');
+  // ...feature edits the same line the other way, branched from the original main
+  await git(cwd, 'checkout', '--quiet', '-b', 'feat/conflict', 'HEAD~1');
+  await writeFile(path.join(cwd, 'a.txt'), 'feature-side\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'feature edit');
+
+  const passingVerify = async () => ({ passed: true, results: [] });
+  await assert.rejects(
+    applyBranchAction({ cwd, config: {}, action: 'finish', approved: true, options: { runVerificationImpl: passingVerify } }),
+    /merge conflict/i
+  );
+  // tree is clean (merge aborted), no in-progress merge left behind
+  assert.equal((await git(cwd, 'status', '--porcelain')).stdout.trim(), '');
+  assert.equal((await git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD')).stdout.trim(), 'main');
+});
+
+test('cleanup force-deletes unmerged-stale branches only with confirmUnmerged', async (t) => {
+  const cwd = await repo(t);
+  await git(cwd, 'checkout', '--quiet', '-b', 'orphan');
+  await writeFile(path.join(cwd, 'o.txt'), 'o\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'o');
+  await git(cwd, 'checkout', '--quiet', 'main');
+
+  const result = await applyBranchAction({
+    cwd, config: { branch: { staleDays: 0 } }, action: 'cleanup', approved: true,
+    options: { confirmUnmerged: true }
+  });
+  const branches = (await git(cwd, 'branch', '--format=%(refname:short)')).stdout;
+  assert.ok(!branches.includes('orphan'));           // force-deleted with confirmation
+  assert.ok(result.performed.some((p) => /orphan/.test(p)));
+  assert.deepEqual(result.deferred, []);             // nothing deferred when confirmed
+});
+
+test('sync brings main commits into the current branch', async (t) => {
+  const cwd = await repo(t);
+  await git(cwd, 'checkout', '--quiet', '-b', 'feat/behind');
+  // advance main after branching
+  await git(cwd, 'checkout', '--quiet', 'main');
+  await writeFile(path.join(cwd, 'newmain.txt'), 'n\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'main-advance');
+  await git(cwd, 'checkout', '--quiet', 'feat/behind');
+
+  const result = await applyBranchAction({ cwd, config: {}, action: 'sync', approved: true, options: {} });
+  assert.equal(result.executed, true);
+  // the main-only file is now present on feat/behind
+  const ls = (await git(cwd, 'ls-files')).stdout;
+  assert.ok(ls.includes('newmain.txt'));
+});

@@ -135,3 +135,39 @@ test('unknown options and boolean flags with junk values fail instead of being s
   assert.equal(badTimeout.status, 1);
   assert.match(badTimeout.stderr, /--timeout-ms must be/i);
 });
+
+test('branch status prints JSON with the current branch', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-branch-'));
+  // Initialize a git repo with a commit so we have a branch to inspect
+  spawnSync('git', ['init', '-b', 'main'], { cwd: dir, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.name', 'Test User'], { cwd: dir, encoding: 'utf8' });
+  await writeFile(path.join(dir, 'README.md'), '# Test\n');
+  spawnSync('git', ['add', 'README.md'], { cwd: dir, encoding: 'utf8' });
+  spawnSync('git', ['commit', '-m', 'Initial commit'], { cwd: dir, encoding: 'utf8' });
+  
+  const result = spawnSync(process.execPath, [cli, 'branch', 'status', '--config', defaultConfig, '--cwd', dir], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.ok('currentBranch' in parsed);
+  assert.ok('recommendedAction' in parsed);
+});
+
+test('branch apply without --approved prints a plan and changes nothing', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-branch-apply-'));
+  spawnSync('git', ['init', '-b', 'main'], { cwd: dir, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.name', 'Test User'], { cwd: dir, encoding: 'utf8' });
+  await writeFile(path.join(dir, 'README.md'), '# Test\n');
+  spawnSync('git', ['add', 'README.md'], { cwd: dir, encoding: 'utf8' });
+  spawnSync('git', ['commit', '-m', 'Initial commit'], { cwd: dir, encoding: 'utf8' });
+
+  const result = spawnSync(process.execPath, [cli, 'branch', 'apply', '--action', 'start', '--name', 'feat/z', '--config', defaultConfig, '--cwd', dir], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.executed, false);
+  assert.ok(Array.isArray(parsed.plan) && parsed.plan.length > 0);
+  // no new branch was created
+  const branches = spawnSync('git', ['branch', '--format=%(refname:short)'], { cwd: dir, encoding: 'utf8' }).stdout;
+  assert.ok(!branches.includes('feat/z'));
+});

@@ -53,6 +53,17 @@ Model ability is not fixed. Use recent performance evidence from the router. New
 - Pre-existing debt outside the requested scope must be reported to the user rather than silently expanding the task.
 - Do not modify the orchestrator harness, prompts, hooks, skills, plugins, policies, dependencies, or unrelated project debt automatically.
 
+## Branch lifecycle (proactive start)
+
+When the prompt is code-work (implementation/testing/refactor/docs-that-writes) AND the position is risky or ambiguous — you are on the main branch, on a branch unrelated to this task, or the working tree is dirty — proactively help the user pick where to work before writing. Do not trigger this for read-only or simple prompts.
+
+1. Run `aorch branch status` (read-only) to get the facts: current branch, detected main, every local branch's ahead/behind/staleness/merged state, cleanup candidates, and position risk.
+2. Lead with **cleanup** when there are merged/stale candidates, to shrink the choice set.
+3. Then recommend a **start**: you do the semantic match (does this task continue an existing branch, or is it new work off main?) from the branch names and recent commits `status` returned — that judgment is yours, not aorch's.
+4. Warn on **position risk** (on main / detached) before any write.
+
+Execute only after the user approves, via `aorch branch apply --action <start|finish|cleanup|sync> --approved`. Without `--approved` the command performs no git write and prints the plan for preview. One approval runs the whole shown plan (including push and merged-branch deletion). Deleting an **unmerged** branch needs a separate `--confirm-unmerged` — never pass it without an explicit user go-ahead. `finish` re-runs the task's verification gate and refuses to merge unless it is green. Never pass `--approved` without an explicit user click.
+
 ## Scope and safety
 
 Keep delegation depth at one. Do not build a second scheduler inside a worker. Do not add a database, daemon, dashboard, or autonomous source-mutation loop. External publication, deployment, destructive migration, financial execution, push, merge, tag, or release requires explicit user authorization.
