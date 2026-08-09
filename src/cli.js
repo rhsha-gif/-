@@ -14,6 +14,7 @@ import { classifyDifficulty } from './difficulty.js';
 import { clearLimits, readLimits, setLimit } from './limits.js';
 
 import { computeBranchStatus } from './branch-status.js';
+import { applyBranchAction } from './branch-apply.js';
 const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `Commands:\n` +
   `  route     Select provider, model, and effort for a task JSON file\n` +
@@ -29,7 +30,7 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  --cwd <path>          Project working directory\n` +
   `  --observations <path> Reviewed outcomes JSONL\n`;
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h', 'approved', 'confirm-unmerged']);
 
 const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
 const COMMAND_FLAGS = Object.freeze({
@@ -279,8 +280,22 @@ async function main(argv = process.argv.slice(2)) {
     const sub = positionals[0] ?? 'status';
     if (sub === 'status') {
       const status = await computeBranchStatus({ cwd, config });
-      process.stdout.write(`${JSON.stringify(status)}
-`);
+      process.stdout.write(`${JSON.stringify(status)}\n`);
+      return 0;
+    }
+    if (sub === 'apply') {
+      const action = requireFlag(flags, 'action');
+      const result = await applyBranchAction({
+        cwd,
+        config,
+        action,
+        approved: flags.approved === true,
+        options: {
+          name: typeof flags.name === 'string' ? flags.name : undefined,
+          confirmUnmerged: flags['confirm-unmerged'] === true
+        }
+      });
+      process.stdout.write(`${JSON.stringify(result)}\n`);
       return 0;
     }
     throw new Error(`Unknown branch subcommand: ${sub}`);
