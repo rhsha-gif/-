@@ -6,12 +6,12 @@ const ACTIONS = new Set(['start', 'finish', 'cleanup', 'sync']);
 
 export async function applyBranchAction({ cwd, config = {}, action, approved = false, options = {} } = {}) {
   if (!ACTIONS.has(action)) throw new Error(`Unknown branch action: ${action}`);
-  const planners = { start: planStart, finish: planFinish };   // cleanup/sync added in later tasks
+  const planners = { start: planStart, finish: planFinish, cleanup: planCleanup };   // sync added in a later task
   const planner = planners[action];
   if (!planner) throw new Error(`Branch action not implemented: ${action}`);
-  const { plan, run, blockers, verifyBlocking } = await planner({ cwd, config, options });
-  if (blockers.length > 0) return { action, executed: false, plan, performed: [], blockers };
-  if (approved !== true) return { action, executed: false, plan, performed: [], blockers: [] };
+  const { plan, run, blockers, verifyBlocking, deferred = [] } = await planner({ cwd, config, options });
+  if (blockers.length > 0) return { action, executed: false, plan, performed: [], blockers, deferred };
+  if (approved !== true) return { action, executed: false, plan, performed: [], blockers: [], deferred };
   // A finish gates the merge on a green verify run; run it only at execution
   // time (not for a plan-only preview), and treat a red gate as a blocker
   // rather than a thrown error so the caller gets structured evidence.
@@ -25,12 +25,12 @@ export async function applyBranchAction({ cwd, config = {}, action, approved = f
       cwd,
       timeoutMs: config.verification?.commandTimeoutMs
     });
-    if (!gate.passed) return { action, executed: false, plan, performed: [], blockers: ['verification gate failed'] };
+    if (!gate.passed) return { action, executed: false, plan, performed: [], blockers: ['verification gate failed'], deferred };
   }
   const outcome = await run();
   const performed = Array.isArray(outcome) ? outcome : outcome.performed;
   const undo = Array.isArray(outcome) ? undefined : outcome.undo;
-  return { action, executed: true, plan, performed, blockers: [], ...(undo ? { undo } : {}) };
+  return { action, executed: true, plan, performed, blockers: [], deferred, ...(undo ? { undo } : {}) };
 }
 
 async function planStart({ cwd, config, options }) {
@@ -124,4 +124,38 @@ async function planFinish({ cwd, config, options }) {
   };
 
   return { plan, run, blockers, verifyBlocking: { commands, runVerify } };
+}
+
+async function planCleanup({ cwd, config, options }) {
+  const status = await computeBranchStatus({ cwd, config });
+  const { mergedLocal, unmergedStale } = status.cleanupCandidates;
+  const hasRemote = status.branches.some((b) => b.hasRemote);
+  // Deleting an unmerged branch destroys unpushed work, so it needs a second
+  // explicit confirmation beyond `approved`; without it those branches are
+  // reported as deferred and never touched.
+  const willForceDelete = options.confirmUnmerged === true ? unmergedStale : [];
+  const deferred = options.confirmUnmerged === true ? [] : unmergedStale;
+
+  const plan = [
+    ...mergedLocal.map((b) => `git branch -d ${b}`),
+    ...(hasRemote ? ['git remote prune origin'] : []),
+    ...willForceDelete.map((b) => `git branch -D ${b} (unmerged, confirmed)`)
+  ];
+  const run = async () => {
+    const performed = [];
+    for (const b of mergedLocal) {
+      const r = await runGit(['branch', '-d', b], cwd);
+      if (r.exitCode === 0) performed.push(`deleted ${b}`);
+    }
+    if (hasRemote) {
+      await runGit(['remote', 'prune', 'origin'], cwd);
+      performed.push('pruned origin');
+    }
+    for (const b of willForceDelete) {
+      const r = await runGit(['branch', '-D', b], cwd);
+      if (r.exitCode === 0) performed.push(`force-deleted ${b}`);
+    }
+    return performed;
+  };
+  return { plan, run, blockers: [], deferred };
 }

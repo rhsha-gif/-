@@ -87,3 +87,28 @@ test('finish is blocked when the verify gate fails', async (t) => {
   assert.equal(result.executed, false);
   assert.ok(result.blockers.some((b) => /verif/i.test(b)));
 });
+
+test('cleanup deletes merged branches but defers unmerged-stale without confirmation', async (t) => {
+  const cwd = await repo(t);
+  // merged branch
+  await git(cwd, 'checkout', '--quiet', '-b', 'merged');
+  await writeFile(path.join(cwd, 'm.txt'), 'm\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'm');
+  await git(cwd, 'checkout', '--quiet', 'main');
+  await git(cwd, 'merge', '--no-ff', '--quiet', '-m', 'merge merged', 'merged');
+  // unmerged branch
+  await git(cwd, 'checkout', '--quiet', '-b', 'orphan');
+  await writeFile(path.join(cwd, 'o.txt'), 'o\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'o');
+  await git(cwd, 'checkout', '--quiet', 'main');
+
+  const result = await applyBranchAction({
+    cwd, config: { branch: { staleDays: 0 } }, action: 'cleanup', approved: true, options: {}
+  });
+  const branches = (await git(cwd, 'branch', '--format=%(refname:short)')).stdout;
+  assert.ok(!branches.includes('merged'));   // merged deleted
+  assert.ok(branches.includes('orphan'));    // unmerged deferred, not deleted
+  assert.ok(result.deferred.includes('orphan'));
+});
