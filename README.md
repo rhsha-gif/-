@@ -404,7 +404,14 @@ aorch limits     provider 사용 한도 표시/설정/해제 (limits set <provid
 aorch record     독립 검토된 model-performance 관측 추가
 aorch inventory  설정된 provider·model·skill·plugin·hook 출력
 aorch install    프로젝트 로컬 Claude Code / Codex 통합 설치
+aorch branch     브랜치 수명주기: status(읽기 전용 사실·추천) / apply --action <start|finish|cleanup|sync>
 ```
+
+### 브랜치 수명주기 (`aorch branch`)
+
+작업 시작·마감 시 어느 브랜치에서 일할지의 판단을 돕는 층입니다. `status`는 순수 읽기(현재/대상 브랜치, 각 브랜치의 ahead·behind·마지막 활동·머지 여부, 정리 후보, 위치 위험)를 JSON으로 반환하고, 의미 매칭(이 작업이 기존 브랜치를 잇는지/새로 파는지)은 호스트 모델이 합니다.
+
+`apply`는 가드형 실행자입니다. **`--approved` 없이는 어떤 git 쓰기도 하지 않고 계획만 출력**합니다(딸깍 전 미리보기). 한 번의 승인이 표시된 계획 전체를 실행하며, push·merge·머지된 브랜치 삭제도 포함합니다. 단, **미머지 브랜치 삭제는 미푸시 작업 소실 위험 때문에 별도의 `--confirm-unmerged`** 를 요구합니다. `finish`는 작업의 verify 게이트를 다시 돌려 녹색일 때만 main에 merge 커밋 후 push하고 머지된 브랜치를 삭제합니다(되돌리기용 pre-merge SHA 기록). PR 관행 저장소면 status가 `repoIntegration: "pr"`로 알리고, 이 버전의 `finish`는 direct 머지 경로만 자동화합니다 — PR 생성은 호스트가 안내(후속 예정). 설정은 선택적 `config.branch`(mainBranch/namePrefix/staleDays/integration/verificationCommands)로 조정합니다.
 
 ## 프로젝트 상태 파일
 

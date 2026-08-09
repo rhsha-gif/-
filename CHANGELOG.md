@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **브랜치 수명주기 관리** (`aorch branch`): 작업 시작·마감 시 어느 브랜치에서 일할지의 판단을 돕는 서브 기능.
+  - `aorch branch status` — 읽기 전용 사실(현재/대상 브랜치, 각 브랜치의 ahead·behind·staleness·머지 여부, 정리 후보, 위치 위험, repoIntegration)을 JSON으로 반환. 의미 매칭은 호스트 몫.
+  - `aorch branch apply --action <start|finish|cleanup|sync>` — 가드형 실행자. **`--approved` 없이는 git 쓰기 0, 계획만 출력**(딸깍 전 미리보기). `start`(자동 stash→분기→복원), `finish`(verify 녹색 게이트→main merge+push→머지 브랜치 삭제, undo용 pre-merge SHA 기록), `cleanup`(머지된 로컬 자동 삭제+원격추적 prune, 미머지-stale은 `--confirm-unmerged` 필요), `sync`(main을 현재 브랜치에 merge, 충돌 시 abort).
+  - 루트 스킬(Claude·Codex)에 능동적 시작 흐름 추가(위험·애매할 때만 발동, 정리 먼저→시작 추천→위치 경고, 훅 아님).
+  - 선택적 `config.branch`(mainBranch/namePrefix/staleDays/integration/verificationCommands) 검증.
+  - 경계: push·merge·삭제는 `--approved` 뒤에만, 미머지 삭제는 별도 확인. PR 실행 경로는 이 버전에서 감지만(direct 머지 자동화, PR 생성은 후속).
+
 ## 0.5.0 - 2026-08-08
 
 프루닝(대청소) 위에 올린 6-슬라이스 리빌드와, 리빌드 직후 독립 리뷰·실사용 도그푸딩에서 드러난 결함을 경화한 릴리스. 목적함수는 시간·구독 한도 절약(품질 바닥선 유지)이다.
