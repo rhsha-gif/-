@@ -256,7 +256,6 @@ export function validateConfig(input) {
     if (b.mainBranch !== undefined && (typeof b.mainBranch !== 'string' || b.mainBranch.trim() === '')) {
       throw new TypeError('config.branch.mainBranch must be a non-empty string');
     }
-    if (b.namePrefix !== undefined && typeof b.namePrefix !== 'boolean') throw new TypeError('config.branch.namePrefix must be boolean');
     if (b.staleDays !== undefined && (!Number.isFinite(b.staleDays) || b.staleDays < 0)) {
       throw new RangeError('config.branch.staleDays must be a non-negative number');
     }

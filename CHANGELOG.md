@@ -8,7 +8,7 @@
   - `aorch branch status` — 읽기 전용 사실(현재/대상 브랜치, 각 브랜치의 ahead·behind·staleness·머지 여부, 정리 후보, 위치 위험, repoIntegration)을 JSON으로 반환. 의미 매칭은 호스트 몫.
   - `aorch branch apply --action <start|finish|cleanup|sync>` — 가드형 실행자. **`--approved` 없이는 git 쓰기 0, 계획만 출력**(딸깍 전 미리보기). `start`(자동 stash→분기→복원), `finish`(verify 녹색 게이트→main merge+push→머지 브랜치 삭제, undo용 pre-merge SHA 기록), `cleanup`(머지된 로컬 자동 삭제+원격추적 prune, 미머지-stale은 `--confirm-unmerged` 필요), `sync`(main을 현재 브랜치에 merge, 충돌 시 abort).
   - 루트 스킬(Claude·Codex)에 능동적 시작 흐름 추가(위험·애매할 때만 발동, 정리 먼저→시작 추천→위치 경고, 훅 아님).
-  - 선택적 `config.branch`(mainBranch/namePrefix/staleDays/integration/verificationCommands) 검증.
+  - 선택적 `config.branch`(mainBranch/staleDays/integration/verificationCommands) 검증. 브랜치 이름은 호스트가 정하므로 이름 규칙 config는 두지 않음.
   - 경계: push·merge·삭제는 `--approved` 뒤에만, 미머지 삭제는 별도 확인. PR 실행 경로는 이 버전에서 감지만(direct 머지 자동화, PR 생성은 후속).
 
 ## 0.5.0 - 2026-08-08

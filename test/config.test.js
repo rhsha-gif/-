@@ -53,7 +53,7 @@ test('independent verification timeout must be positive', () => {
 
 test('validateConfig accepts a well-formed branch block and rejects a bad integration', () => {
   const good = minimalConfig();
-  good.branch = { mainBranch: 'main', namePrefix: true, staleDays: 45, integration: 'direct' };
+  good.branch = { mainBranch: 'main', staleDays: 45, integration: 'direct' };
   assert.doesNotThrow(() => validateConfig(good));
 
   const bad = minimalConfig();
