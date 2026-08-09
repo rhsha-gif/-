@@ -30,3 +30,17 @@ test('apply refuses to execute without explicit approval', async (t) => {
   const branches = (await git(cwd, 'branch', '--format=%(refname:short)')).stdout;
   assert.ok(!branches.includes('feat/x'));
 });
+
+test('start creates the branch from main and carries uncommitted work via stash', async (t) => {
+  const cwd = await repo(t);
+  await writeFile(path.join(cwd, 'wip.txt'), 'wip\n');    // uncommitted
+  const result = await applyBranchAction({
+    cwd, config: {}, action: 'start', approved: true, options: { name: 'feat/y' }
+  });
+  assert.equal(result.executed, true);
+  const current = (await git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD')).stdout.trim();
+  assert.equal(current, 'feat/y');
+  // the uncommitted file followed us onto the new branch
+  const status = (await git(cwd, 'status', '--porcelain')).stdout;
+  assert.ok(status.includes('wip.txt'));
+});
