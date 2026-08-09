@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { detectMainBranch, collectBranches } from '../src/branch-status.js';
+import { detectMainBranch, collectBranches, computeBranchStatus } from '../src/branch-status.js';
 
 const execFileAsync = promisify(execFile);
 async function git(cwd, ...args) { return execFileAsync('git', args, { cwd }); }
@@ -50,4 +50,25 @@ test('collectBranches reports ahead/behind, merged, and cleanup candidates', asy
   assert.equal(merged.mergedIntoMain, true);
   assert.ok(cleanupCandidates.mergedLocal.includes('merged-feature'));
   assert.ok(!cleanupCandidates.mergedLocal.includes('main'));
+});
+
+test('computeBranchStatus flags on-main position risk and a clean tree', async (t) => {
+  const cwd = await repo(t);   // on main, clean
+  const status = await computeBranchStatus({ cwd, config: {}, nowMs: Date.parse('2026-08-09T00:00:00Z') });
+  assert.equal(status.currentBranch, 'main');
+  assert.equal(status.mainBranch, 'main');
+  assert.equal(status.positionRisk, 'on-main');
+  assert.equal(status.workingTreeClean, true);
+  assert.equal(status.repoIntegration, 'direct');   // no origin remote in temp repo
+});
+
+test('computeBranchStatus recommends finish when ahead of main on a clean feature branch', async (t) => {
+  const cwd = await repo(t);
+  await git(cwd, 'checkout', '--quiet', '-b', 'feat/x');
+  await writeFile(path.join(cwd, 'c.txt'), 'c\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'work');
+  const status = await computeBranchStatus({ cwd, config: {}, nowMs: Date.parse('2026-08-09T00:00:00Z') });
+  assert.equal(status.positionRisk, null);
+  assert.equal(status.recommendedAction, 'finish');
 });

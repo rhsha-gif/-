@@ -57,3 +57,51 @@ export async function collectBranches(cwd, mainBranch, { staleDays = 30, nowMs }
     .map((b) => b.name);
   return { branches, cleanupCandidates: { mergedLocal, unmergedStale } };
 }
+
+async function hasGitHubRemote(cwd) {
+  const remote = await runGit(['remote', 'get-url', 'origin'], cwd);
+  return remote.exitCode === 0 && /github\.com/u.test(remote.stdout);
+}
+
+export async function computeBranchStatus({ cwd, config = {}, nowMs } = {}) {
+  const branchCfg = config.branch ?? {};
+  const headRef = await runGit(['symbolic-ref', '--quiet', '--short', 'HEAD'], cwd);
+  const currentBranch = headRef.exitCode === 0 ? headRef.stdout.trim() : null; // null => detached
+  const { mainBranch, confident } = await detectMainBranch(cwd, branchCfg.mainBranch ?? null);
+
+  const statusResult = await runGit(['status', '--porcelain'], cwd);
+  const workingTreeClean = statusResult.exitCode === 0 && statusResult.stdout.trim() === '';
+
+  const { branches, cleanupCandidates } = await collectBranches(cwd, mainBranch, {
+    staleDays: branchCfg.staleDays ?? 30,
+    nowMs
+  });
+
+  let positionRisk = null;
+  if (currentBranch === null) positionRisk = 'detached';
+  else if (currentBranch === mainBranch) positionRisk = 'on-main';
+
+  const integrationCfg = branchCfg.integration ?? 'auto';
+  const repoIntegration = integrationCfg === 'auto'
+    ? (await hasGitHubRemote(cwd) ? 'pr' : 'direct')
+    : integrationCfg;
+
+  const current = branches.find((b) => b.name === currentBranch);
+  let recommendedAction = 'none';
+  if (cleanupCandidates.mergedLocal.length > 0) recommendedAction = 'cleanup';
+  if (positionRisk === 'on-main' || positionRisk === 'detached') recommendedAction = 'start';
+  else if (current && current.ahead > 0 && workingTreeClean) recommendedAction = 'finish';
+  else if (current && current.behind > 0 && current.ahead === 0) recommendedAction = 'sync';
+
+  return {
+    currentBranch,
+    mainBranch,
+    mainBranchConfident: confident,
+    workingTreeClean,
+    positionRisk,
+    branches,
+    cleanupCandidates,
+    repoIntegration,
+    recommendedAction
+  };
+}
