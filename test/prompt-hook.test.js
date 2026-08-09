@@ -15,7 +15,10 @@ function run(env = {}, options = {}) {
     cwd,
     input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: options.prompt ?? 'fix it', cwd }),
     encoding: 'utf8',
-    env: { ...process.env, ...env }
+    // Clear aorch's control vars first so the suite is hermetic even when it is
+    // run *by* the verify gate, which sets AORCH_VERIFIER=1 (that would make the
+    // hook stand aside and emit nothing). Each test opts into the vars it needs.
+    env: { ...process.env, AORCH_VERIFIER: '', AORCH_WORKER: '', AORCH_NO_ENFORCE: '', ...env }
   });
 }
 
