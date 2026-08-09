@@ -67,3 +67,27 @@ test('stem keywords match inflected forms', () => {
   assert.equal(classifyDifficulty({ objective: 'make the service scalable' }).complexity, 'high');
   assert.equal(classifyDifficulty({ objective: 'fix the indentation' }).complexity, 'low');
 });
+
+test('Korean high-complexity objectives keep the deep tier', () => {
+  assert.equal(classifyDifficulty({ objective: '보안 취약점을 검토' }).kind, 'security');
+  assert.equal(classifyDifficulty({ objective: '보안 취약점을 검토' }).complexity, 'high');
+  assert.equal(classifyDifficulty({ objective: '아키텍처 설계' }).complexity, 'high');
+  assert.equal(classifyDifficulty({ objective: '교착 상태를 디버깅' }).kind, 'debugging');
+  assert.equal(classifyDifficulty({ objective: '교착 상태를 디버깅' }).complexity, 'high');
+});
+
+test('Korean low/standard objectives downshift', () => {
+  assert.equal(classifyDifficulty({ objective: '리드미 오타 수정' }).kind, 'documentation');
+  assert.equal(classifyDifficulty({ objective: '리드미 오타 수정' }).complexity, 'low');
+  assert.equal(classifyDifficulty({ objective: '저장소 구조를 탐색' }).kind, 'exploration');
+  assert.equal(classifyDifficulty({ objective: '라이브러리 비교 조사' }).kind, 'research');
+  assert.equal(classifyDifficulty({ objective: '설정 파서를 구현' }).kind, 'implementation');
+  assert.equal(classifyDifficulty({ objective: '설정 파서를 구현' }).complexity, 'standard');
+});
+
+test('Korean precedence: testing wins over implementation', () => {
+  // '테스트 작성' contains both a testing stem (테스트) and an implementation
+  // stem (작성); testing is higher in KIND_RULES so it must win.
+  assert.equal(classifyDifficulty({ objective: '파서 테스트 작성' }).kind, 'testing');
+  assert.equal(classifyDifficulty({ objective: '파서 테스트 작성' }).complexity, 'standard');
+});
