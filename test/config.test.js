@@ -31,6 +31,29 @@ test('a new provider and model can be added through configuration only', () => {
   assert.equal(config.models[0].provider, 'newco');
 });
 
+test('validateConfig accepts a well-formed usageProbe and rejects malformed ones, and stays optional', () => {
+  const good = minimalConfig();
+  good.providers[0].usageProbe = { command: 'caut', args: ['usage', '--json'], remainingField: 'usage.primary.remainingPercent' };
+  const validated = validateConfig(good);
+  assert.deepEqual(validated.providers[0].usageProbe.args, ['usage', '--json']);
+  assert.equal(validated.providers[0].usageProbe.remainingField, 'usage.primary.remainingPercent');
+
+  const noCommand = minimalConfig();
+  noCommand.providers[0].usageProbe = { command: '', args: [], remainingField: 'x' };
+  assert.throws(() => validateConfig(noCommand), /usageProbe\.command/);
+
+  const badArgs = minimalConfig();
+  badArgs.providers[0].usageProbe = { command: 'caut', args: 'usage --json', remainingField: 'x' };
+  assert.throws(() => validateConfig(badArgs), /usageProbe\.args/);
+
+  const noField = minimalConfig();
+  noField.providers[0].usageProbe = { command: 'caut', args: [], remainingField: '' };
+  assert.throws(() => validateConfig(noField), /usageProbe\.remainingField/);
+
+  const absent = minimalConfig();
+  assert.doesNotThrow(() => validateConfig(absent));   // usageProbe is optional
+});
+
 test('loadConfig reads a project-supplied catalog without core changes', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-config-'));
   const configPath = path.join(dir, 'custom.json');

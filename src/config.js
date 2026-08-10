@@ -183,6 +183,21 @@ export function validateConfig(input) {
     if (provider.adapter === 'generic' && (!provider.executable || !Array.isArray(provider.args))) {
       throw new Error(`Generic provider ${provider.id} requires executable and args`);
     }
+    if (provider.usageProbe !== undefined) {
+      const p = provider.usageProbe;
+      if (typeof p !== 'object' || p === null || Array.isArray(p)) {
+        throw new TypeError(`provider ${provider.id}.usageProbe must be an object`);
+      }
+      if (typeof p.command !== 'string' || p.command.trim() === '') {
+        throw new TypeError(`provider ${provider.id}.usageProbe.command must be a non-empty string`);
+      }
+      if (!Array.isArray(p.args) || p.args.some((arg) => typeof arg !== 'string')) {
+        throw new TypeError(`provider ${provider.id}.usageProbe.args must be an array of strings`);
+      }
+      if (typeof p.remainingField !== 'string' || p.remainingField.trim() === '') {
+        throw new TypeError(`provider ${provider.id}.usageProbe.remainingField must be a non-empty string`);
+      }
+    }
     return {
       ...provider,
       adapterMaturity: adapterMaturity(provider.adapterMaturity, `provider ${provider.id}.adapterMaturity`, provider.adapter === 'generic' ? 'experimental' : 'stable')
