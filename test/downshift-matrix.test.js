@@ -21,7 +21,7 @@ async function loadPackagedCatalog() {
   return validateConfig(raw);
 }
 
-function routeObjective(catalog, objective) {
+function routeObjective(catalog, objective, allowedProviders = ['anthropic']) {
   const classification = classifyDifficulty({ objective });
   const task = validateTask({
     id: 'matrix-probe',
@@ -31,7 +31,7 @@ function routeObjective(catalog, objective) {
     kind: classification.kind,
     complexity: classification.complexity,
     minimumQuality: classification.minimumQuality,
-    allowedProviders: ['anthropic'],
+    allowedProviders,
     routingPriorities: classification.routingPriorities
   });
   return { classification, route: selectRoute({ task, catalog, observations: [] }) };
@@ -87,4 +87,25 @@ test('debug wording is not misclassified as research by the new low-tier rules',
   const classification = classifyDifficulty({ objective: 'Investigate and debug the deadlock root cause' });
   assert.equal(classification.kind, 'debugging');
   assert.equal(classification.complexity, 'high');
+});
+
+// Cross-provider split: when a worker-delegation task leaves both providers in
+// play (allowedProviders unset by the host → probed here as anthropic+openai),
+// cheap/standard work stays on claude-haiku and deep architecture/security work
+// goes to the cost-effective deep model (codex-sol). Pins that the two
+// subscriptions are actually used and that the catalog economics don't drift.
+const CROSS_MATRIX = [
+  { objective: 'Extract the atomic write helper into a shared module', provider: 'anthropic', model: 'haiku' },
+  { objective: 'Fix the typo in the README', provider: 'anthropic', model: 'haiku' },
+  { objective: 'Design the architecture for the delegation subsystem', provider: 'openai', model: 'gpt-5.6-sol' },
+  { objective: 'Review the auth token handling for vulnerabilities', provider: 'openai', model: 'gpt-5.6-sol' }
+];
+
+test('cross-provider routing: cheap stays on claude-haiku, deep goes to codex-sol', async () => {
+  const catalog = await loadPackagedCatalog();
+  for (const expected of CROSS_MATRIX) {
+    const { route } = routeObjective(catalog, expected.objective, ['anthropic', 'openai']);
+    assert.equal(route.provider, expected.provider, `provider for: ${expected.objective}`);
+    assert.equal(route.model, expected.model, `model for: ${expected.objective}`);
+  }
 });

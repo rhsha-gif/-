@@ -25,6 +25,15 @@ The system's purpose is **task decomposition and task-specific capability select
 9. Record independently reviewed route outcomes with `aorch record` so later tasks can adapt to model-performance changes.
 10. Integrate only accepted results and report unresolved uncertainty.
 
+### Cross-provider delegation
+
+Two execution modes route differently, and the difference is structural:
+
+- **Subagent spawn** (the host's own Task/Agent tool): the spawned subagent runs a Claude model — it can never be a Codex model. So the subagent gate classifies these anthropic-only, and that is correct by construction, not a limitation to work around.
+- **Worker delegation** (`aorch exec`): this spawns a headless provider process and CAN be Codex. **Leave `allowedProviders` unset on the task envelope so both providers compete** — the router then routes deep/high work to the strongest cost-effective deep model (currently `codex-sol`) and cheap/standard work to `claude-haiku`, using both subscriptions. Restrict `allowedProviders` only for a concrete reason (e.g. a capability only one provider has).
+
+Prefer `aorch exec` (cross-provider) over a Claude subagent for any bounded, self-contained task that does not need the in-session subagent loop — that is how Codex actually gets work.
+
 ## Capability selection
 
 Choose capabilities by task need, not by habit:
