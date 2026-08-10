@@ -15,6 +15,7 @@ import { clearLimits, readLimits, setLimit } from './limits.js';
 
 import { computeBranchStatus } from './branch-status.js';
 import { applyBranchAction } from './branch-apply.js';
+import { readProviderQuota } from './quota.js';
 const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `Commands:\n` +
   `  route     Select provider, model, and effort for a task JSON file\n` +
@@ -24,6 +25,7 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  limits    Show, set, or clear provider usage limits (limits [set <provider> --minutes N | clear [provider]])\n` +
   `  branch    Branch lifecycle: status | apply --action <start|finish|cleanup|sync>\n` +
   `  inventory Print configured providers, models, skills, plugins, and hooks\n` +
+  `  quota     Report each provider's remaining subscription quota via its usageProbe\n` +
   `  install   Install project-local Claude Code and/or Codex integration\n\n` +
   `Common options:\n` +
   `  --config <path>       Config JSON; defaults to .aorch/config.json or packaged config\n` +
@@ -40,6 +42,7 @@ const COMMAND_FLAGS = Object.freeze({
   record: [...COMMON_FLAGS, 'input', 'observations'],
   limits: [...COMMON_FLAGS, 'minutes', 'note'],
   inventory: [...COMMON_FLAGS],
+  quota: [...COMMON_FLAGS],
   branch: [...COMMON_FLAGS, 'action', 'approved', 'confirm-unmerged', 'name', 'observations', 'task'],
   install: ['cwd', 'help', 'h', 'target', 'project', 'force-config']
 });
@@ -272,6 +275,16 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === 'inventory') {
     process.stdout.write(`${JSON.stringify(getInventory(config), null, 2)}\n`);
+    return 0;
+  }
+
+  if (command === 'quota') {
+    const results = [];
+    for (const provider of config.providers ?? []) {
+      const quota = await readProviderQuota(provider, { cwd });
+      results.push({ provider: provider.id, remainingPercent: quota ? quota.remainingPercent : null });
+    }
+    process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
     return 0;
   }
 

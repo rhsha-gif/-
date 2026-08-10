@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -9,6 +9,26 @@ import path from 'node:path';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cli = path.join(root, 'src/cli.js');
 const defaultConfig = path.join(root, 'config/aorch.config.json');
+
+test('quota command reports remaining percent per provider, null without a probe', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-quota-'));
+  const configPath = path.join(dir, 'aorch.config.json');
+  const base = JSON.parse(await readFile(defaultConfig, 'utf8'));
+  const openai = base.providers.find((p) => p.id === 'openai');
+  openai.usageProbe = {
+    command: process.execPath,
+    args: ['-e', 'process.stdout.write(JSON.stringify({usage:{primary:{remainingPercent:64}}}))'],
+    remainingField: 'usage.primary.remainingPercent'
+  };
+  await writeFile(configPath, JSON.stringify(base));
+
+  const result = spawnSync(process.execPath, [cli, 'quota', '--config', configPath, '--cwd', dir], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  const byId = Object.fromEntries(parsed.map((row) => [row.provider, row.remainingPercent]));
+  assert.equal(byId.openai, 64);
+  assert.equal(byId.anthropic, null);   // no usageProbe configured
+});
 
 test('route command returns a concrete provider, model, and effort', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-cli-'));
