@@ -15,7 +15,7 @@ import { clearLimits, readLimits, setLimit } from './limits.js';
 
 import { computeBranchStatus } from './branch-status.js';
 import { applyBranchAction } from './branch-apply.js';
-import { readProviderQuota } from './quota.js';
+import { readAllProviderQuotas } from './quota.js';
 const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `Commands:\n` +
   `  route     Select provider, model, and effort for a task JSON file\n` +
@@ -180,7 +180,12 @@ async function main(argv = process.argv.slice(2)) {
   if (command === 'route') {
     const task = await applyActiveLimits(validateTask(await readJson(requireFlag(flags, 'task'), cwd)), config, cwd);
     const observations = await readObservations(resolveObservationPath(config, flags, cwd));
-    const route = selectRoute({ task, catalog: config, observations });
+    const quota = await readAllProviderQuotas(config.providers, {
+      stateRoot: resolveStateRoot(config, cwd),
+      ttlMs: (config.routing?.quota?.cacheTtlMinutes ?? 5) * 60_000,
+      cwd
+    });
+    const route = selectRoute({ task, catalog: config, observations, quota });
     process.stdout.write(`${JSON.stringify(cleanRoute(route), null, 2)}\n`);
     return 0;
   }
@@ -229,7 +234,15 @@ async function main(argv = process.argv.slice(2)) {
       allowedProviders,
       routingPriorities: classification.routingPriorities
     });
-    const route = selectRoute({ task, catalog: config, observations: [] });
+    // Cache-only (refresh: false): classify backs the subagent gate, which is
+    // called far too often to ever pay a 10s-per-provider probe on expiry.
+    const quota = await readAllProviderQuotas(config.providers, {
+      stateRoot: resolveStateRoot(config, cwd),
+      ttlMs: (config.routing?.quota?.cacheTtlMinutes ?? 5) * 60_000,
+      refresh: false,
+      cwd
+    });
+    const route = selectRoute({ task, catalog: config, observations: [], quota });
     process.stdout.write(`${JSON.stringify({
       classification,
       route: { provider: route.provider, model: route.model, effort: route.effort }
@@ -279,11 +292,17 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   if (command === 'quota') {
-    const results = [];
-    for (const provider of config.providers ?? []) {
-      const quota = await readProviderQuota(provider, { cwd });
-      results.push({ provider: provider.id, remainingPercent: quota ? quota.remainingPercent : null });
-    }
+    // ttlMs 0: a human asking for quota wants fresh numbers, and the forced
+    // probe doubles as a cache refresh for the routing paths.
+    const quota = await readAllProviderQuotas(config.providers, {
+      stateRoot: resolveStateRoot(config, cwd),
+      ttlMs: 0,
+      cwd
+    });
+    const results = (config.providers ?? []).map((provider) => ({
+      provider: provider.id,
+      remainingPercent: quota[provider.id] ?? null
+    }));
     process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
     return 0;
   }
