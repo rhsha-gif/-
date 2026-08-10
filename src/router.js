@@ -121,6 +121,57 @@ function applyHardConstraints(candidates, task) {
   ));
 }
 
+// Quota is a cost-optimization signal, never a safety gate. Unknown quota
+// (provider absent from the map, or a non-finite value) means "no signal" and
+// leaves the candidate untouched in every quota decision below.
+function quotaThresholds(policy) {
+  return {
+    soft: policy.quota?.softThresholdPercent ?? 40,
+    hard: policy.quota?.hardThresholdPercent ?? 10
+  };
+}
+
+function quotaState(quota, providerId, thresholds) {
+  const remaining = quota?.[providerId];
+  if (typeof remaining !== 'number' || !Number.isFinite(remaining)) return 'unknown';
+  if (remaining < thresholds.hard) return 'depleted';
+  if (remaining < thresholds.soft) return 'low';
+  return 'ok';
+}
+
+// Drop depleted-quota providers only while an alternative survives: an
+// exclusion that would empty the set rolls back, degrading depletion from an
+// exclusion to a preference (the soft stage still disprefers those providers).
+function excludeDepletedProviders(candidates, quota, thresholds) {
+  const surviving = candidates.filter(
+    (candidate) => quotaState(quota, candidate.provider, thresholds) !== 'depleted'
+  );
+  if (surviving.length === 0 || surviving.length === candidates.length) {
+    return { candidates, excludedProviders: [] };
+  }
+  const excludedProviders = [...new Set(
+    candidates
+      .filter((candidate) => quotaState(quota, candidate.provider, thresholds) === 'depleted')
+      .map((candidate) => candidate.provider)
+  )];
+  return { candidates: surviving, excludedProviders };
+}
+
+// Within the tie set left by the first priority metric, prefer providers whose
+// quota is not running low. Placed after the first metric on purpose: the tie
+// set after the full narrowing chain is almost always a single candidate, so a
+// last-place tie-break would never fire, while here the preference decides
+// among candidates the leading metric already considers equivalent.
+function preferComfortableQuota(tier, quota, thresholds) {
+  const comfortable = tier.filter(
+    (candidate) => !['low', 'depleted'].includes(quotaState(quota, candidate.provider, thresholds))
+  );
+  if (comfortable.length === 0 || comfortable.length === tier.length) {
+    return { tier, applied: false };
+  }
+  return { tier: comfortable, applied: true };
+}
+
 function narrowByMetric(candidates, metric, policy) {
   if (candidates.length <= 1) return candidates;
   if (metric === 'quality') {
@@ -168,7 +219,7 @@ export function forceRoute({ catalog, profileId, effort, task = {} }) {
   };
 }
 
-export function selectRoute({ task, catalog, observations = [], now = new Date() }) {
+export function selectRoute({ task, catalog, observations = [], now = new Date(), quota = null }) {
   if (!task?.kind || !task?.role) {
     throw new TypeError('task.kind and task.role are required');
   }
@@ -213,12 +264,28 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
     throw new Error(`No eligible route meets the explicit constraints for task ${task.id ?? '<unknown>'}`);
   }
 
+  // Quota runs after the explicit-constraint filter so a constraint failure is
+  // never misattributed to quota, and its exclusion can only shrink a set that
+  // already satisfies the task's floors.
+  const thresholds = quotaThresholds(policy);
+  let excludedProviders = [];
+  if (quota) {
+    ({ candidates, excludedProviders } = excludeDepletedProviders(candidates, quota, thresholds));
+  }
+
   const priorities = effectivePriorities(task, policy);
   const stageCounts = [];
+  let softQuotaApplied = false;
   let tier = candidates;
-  for (const metric of priorities) {
+  for (const [index, metric] of priorities.entries()) {
     tier = narrowByMetric(tier, metric, policy);
     stageCounts.push({ metric, remaining: tier.length });
+    if (index === 0 && quota) {
+      const preference = preferComfortableQuota(tier, quota, thresholds);
+      tier = preference.tier;
+      softQuotaApplied = preference.applied;
+      stageCounts.push({ metric: 'quota', remaining: tier.length });
+    }
   }
 
   tier.sort(byStableIdentity);
@@ -236,7 +303,16 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
         minimumQuality: task.minimumQuality ?? null,
         maxTokenIndex: task.maxTokenIndex ?? null,
         maxLatencyIndex: task.maxLatencyIndex ?? null
-      }
+      },
+      quota: quota
+        ? {
+          remainingByProvider: { ...quota },
+          excludedProviders,
+          softPreferenceApplied: softQuotaApplied,
+          softThresholdPercent: thresholds.soft,
+          hardThresholdPercent: thresholds.hard
+        }
+        : null
     }
   };
 }
