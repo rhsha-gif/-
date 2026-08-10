@@ -36,7 +36,11 @@ export async function readProviderQuota(provider, { runCommandImpl = runCommand,
   }
 
   const raw = getByPath(parsed, probe.remainingField);
-  const remainingPercent = typeof raw === 'number' ? raw : Number(raw);
-  if (!Number.isFinite(remainingPercent)) return null;
+  // Require a real number (or a numeric string). Reject null / '' / false /
+  // arrays / objects, which Number() would silently coerce to a misleading 0 —
+  // an explicit null is "unknown", not "0% remaining". (typeof null === 'object'.)
+  if (raw === undefined || typeof raw === 'boolean' || typeof raw === 'object') return null;
+  const remainingPercent = Number(raw);
+  if (!Number.isFinite(remainingPercent) || (typeof raw === 'string' && raw.trim() === '')) return null;
   return { provider: provider.id, remainingPercent };
 }

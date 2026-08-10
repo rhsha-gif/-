@@ -37,6 +37,18 @@ test('readProviderQuota fails open (null) when the field is missing or not a num
   assert.equal(await readProviderQuota(notNumber), null);
 });
 
+test('readProviderQuota treats falsy sentinels as unknown (null), not 0%', async () => {
+  // An explicit null / empty / boolean means "no signal" — Number() would
+  // coerce these to a misleading 0, so they must fail open to null.
+  for (const field of ['null', '""', 'false', '[]']) {
+    const provider = probeProvider(`process.stdout.write(JSON.stringify({usage:{primary:{remainingPercent:${field}}}}))`);
+    assert.equal(await readProviderQuota(provider), null, `field ${field} should be null, not 0`);
+  }
+  // A numeric string is still accepted (a probe may stringify the percent).
+  const stringy = probeProvider('process.stdout.write(JSON.stringify({usage:{primary:{remainingPercent:"73"}}}))');
+  assert.deepEqual(await readProviderQuota(stringy), { provider: 'openai', remainingPercent: 73 });
+});
+
 test('readProviderQuota fails open (null) when stdout is not JSON', async () => {
   const provider = probeProvider('process.stdout.write("not json at all")');
   assert.equal(await readProviderQuota(provider), null);
