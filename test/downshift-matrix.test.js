@@ -109,3 +109,25 @@ test('cross-provider routing: cheap stays on claude-haiku, deep goes to codex-so
     assert.equal(route.model, expected.model, `model for: ${expected.objective}`);
   }
 });
+
+// Deep-tier domain split (Part B): the deep tier is not monopolized by one
+// model. Reasoning-heavy debugging goes to claude-opus; systematic
+// architecture/security stays on the cheaper-yet-equal codex-sol. These are
+// deliberate priors — the verify-gate observations refine actual quality over
+// time. Only debugging was moved (the one classifier-reachable reasoning kind);
+// risk-analysis is not emitted by the classifier, so it is not tuned here.
+const DOMAIN_MATRIX = [
+  { objective: 'Find the root cause of the race condition and debug it', provider: 'anthropic', model: 'opus' },
+  { objective: 'Design the architecture for the delegation subsystem', provider: 'openai', model: 'gpt-5.6-sol' },
+  { objective: 'Review the auth token handling for vulnerabilities', provider: 'openai', model: 'gpt-5.6-sol' }
+];
+
+test('deep-tier domain split: debugging → claude-opus, architecture/security → codex-sol', async () => {
+  const catalog = await loadPackagedCatalog();
+  for (const expected of DOMAIN_MATRIX) {
+    const { classification, route } = routeObjective(catalog, expected.objective, ['anthropic', 'openai']);
+    assert.equal(classification.complexity, 'high', `high for: ${expected.objective}`);
+    assert.equal(route.provider, expected.provider, `provider for: ${expected.objective}`);
+    assert.equal(route.model, expected.model, `model for: ${expected.objective}`);
+  }
+});

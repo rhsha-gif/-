@@ -161,7 +161,7 @@
         "default": 0.93,
         "architecture": 0.97,
         "planning": 0.96,
-        "debugging": 0.94,
+        "debugging": 0.97,
         "review": 0.96,
         "implementation": 0.93,
         "security": 0.96,
