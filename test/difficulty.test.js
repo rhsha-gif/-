@@ -85,6 +85,17 @@ test('Korean low/standard objectives downshift', () => {
   assert.equal(classifyDifficulty({ objective: '설정 파서를 구현' }).complexity, 'standard');
 });
 
+test('Korean 설계 alone does not over-escalate to architecture', () => {
+  // '설계' is a common word in routine implementation ("폼 설계"); only genuine
+  // architecture terms (아키텍처 / 시스템 설계) should reach the deep tier.
+  const form = classifyDifficulty({ objective: '로그인 폼 설계' });
+  assert.notEqual(form.kind, 'architecture');
+  assert.notEqual(form.complexity, 'high');
+  // real architecture phrasings still classify high
+  assert.equal(classifyDifficulty({ objective: '시스템 설계' }).kind, 'architecture');
+  assert.equal(classifyDifficulty({ objective: '아키텍처 설계' }).complexity, 'high');
+});
+
 test('Korean precedence: testing wins over implementation', () => {
   // '테스트 작성' contains both a testing stem (테스트) and an implementation
   // stem (작성); testing is higher in KIND_RULES so it must win.
