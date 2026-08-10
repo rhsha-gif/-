@@ -107,6 +107,8 @@ function validateRouting(input = {}) {
     throw new RangeError('routing.criticalMinimumSamples must be a non-negative integer');
   }
 
+  const quota = validateRoutingQuota(input.quota);
+
   return {
     ...input,
     ...tolerances,
@@ -114,9 +116,34 @@ function validateRouting(input = {}) {
     priorWeight,
     uncertaintyPenalty,
     criticalMinimumSamples,
+    quota,
     defaultPriorities: [...defaultPriorities],
     selectionPolicy: input.selectionPolicy ?? 'task-specific-priority-order'
   };
+}
+
+// Thresholds for the quota routing signal. Always normalized (defaults apply
+// even when the block is absent) so the router and the cache layer never need
+// their own fallbacks to agree on.
+function validateRoutingQuota(input) {
+  if (input === undefined) {
+    return { softThresholdPercent: 40, hardThresholdPercent: 10, cacheTtlMinutes: 5 };
+  }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new TypeError('routing.quota must be an object');
+  }
+  const softThresholdPercent = input.softThresholdPercent ?? 40;
+  const hardThresholdPercent = input.hardThresholdPercent ?? 10;
+  for (const [field, value] of Object.entries({ softThresholdPercent, hardThresholdPercent })) {
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+      throw new RangeError(`routing.quota.${field} must be a number between 0 and 100`);
+    }
+  }
+  if (hardThresholdPercent > softThresholdPercent) {
+    throw new RangeError('routing.quota.hardThresholdPercent must not exceed softThresholdPercent');
+  }
+  const cacheTtlMinutes = nonNegativeNumber(input.cacheTtlMinutes, 'routing.quota.cacheTtlMinutes', 5);
+  return { ...input, softThresholdPercent, hardThresholdPercent, cacheTtlMinutes };
 }
 
 // Ladders are same-provider by design: cross-provider fallback is a separate

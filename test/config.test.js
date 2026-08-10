@@ -113,6 +113,35 @@ test('routing defaults are normalized without imposing a task-specific objective
   assert.equal(validated.routing.selectionPolicy, 'task-specific-priority-order');
 });
 
+test('routing.quota is normalized with defaults whether absent or partial', () => {
+  const absent = validateConfig(minimalConfig());
+  assert.deepEqual(absent.routing.quota, {
+    softThresholdPercent: 40, hardThresholdPercent: 10, cacheTtlMinutes: 5
+  });
+
+  const partial = minimalConfig();
+  partial.routing.quota = { softThresholdPercent: 60 };
+  const validated = validateConfig(partial);
+  assert.equal(validated.routing.quota.softThresholdPercent, 60);
+  assert.equal(validated.routing.quota.hardThresholdPercent, 10);
+  assert.equal(validated.routing.quota.cacheTtlMinutes, 5);
+});
+
+test('routing.quota rejects malformed thresholds', () => {
+  for (const quota of [
+    [],
+    { softThresholdPercent: 101 },
+    { hardThresholdPercent: -1 },
+    { softThresholdPercent: 'lots' },
+    { softThresholdPercent: 20, hardThresholdPercent: 30 },
+    { cacheTtlMinutes: -5 }
+  ]) {
+    const config = minimalConfig();
+    config.routing.quota = quota;
+    assert.throws(() => validateConfig(config), /routing\.quota/i, `quota ${JSON.stringify(quota)} should be rejected`);
+  }
+});
+
 test('model cost indices and effort variants reject malformed catalog entries', () => {
   const badToken = minimalConfig();
   badToken.models[0].tokenIndex = 0;
