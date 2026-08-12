@@ -7,6 +7,7 @@ const ROUTE_METRICS = ['quality', 'tokens', 'latency'];
 const TASK_COMPLEXITIES = ['low', 'standard', 'high', 'critical'];
 const RISK_TIERS = ['low', 'standard', 'high', 'critical'];
 const ADAPTER_MATURITIES = ['stable', 'experimental'];
+const QUOTA_GATES = ['premium', 'soft'];
 export const DEFAULT_CONFIG_PATH = path.join(PACKAGE_ROOT, 'config', 'aorch.config.json');
 
 function assertArray(value, name) {
@@ -127,7 +128,7 @@ function validateRouting(input = {}) {
 // their own fallbacks to agree on.
 function validateRoutingQuota(input) {
   if (input === undefined) {
-    return { softThresholdPercent: 40, hardThresholdPercent: 10, cacheTtlMinutes: 5 };
+    return { softThresholdPercent: 40, hardThresholdPercent: 10, premiumThresholdPercent: 60, cacheTtlMinutes: 5 };
   }
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new TypeError('routing.quota must be an object');
@@ -142,8 +143,17 @@ function validateRoutingQuota(input) {
   if (hardThresholdPercent > softThresholdPercent) {
     throw new RangeError('routing.quota.hardThresholdPercent must not exceed softThresholdPercent');
   }
+  // The default tracks a raised soft threshold so an implicit premium floor
+  // can never sit below the explicit soft one.
+  const premiumThresholdPercent = input.premiumThresholdPercent ?? Math.max(60, softThresholdPercent);
+  if (!Number.isFinite(premiumThresholdPercent) || premiumThresholdPercent < 0 || premiumThresholdPercent > 100) {
+    throw new RangeError('routing.quota.premiumThresholdPercent must be a number between 0 and 100');
+  }
+  if (premiumThresholdPercent < softThresholdPercent) {
+    throw new RangeError('routing.quota.premiumThresholdPercent must not be below softThresholdPercent');
+  }
   const cacheTtlMinutes = nonNegativeNumber(input.cacheTtlMinutes, 'routing.quota.cacheTtlMinutes', 5);
-  return { ...input, softThresholdPercent, hardThresholdPercent, cacheTtlMinutes };
+  return { ...input, softThresholdPercent, hardThresholdPercent, premiumThresholdPercent, cacheTtlMinutes };
 }
 
 // Ladders are same-provider by design: cross-provider fallback is a separate
@@ -269,6 +279,15 @@ export function validateConfig(input) {
           || effort.complexities.some((value) => !TASK_COMPLEXITIES.includes(value))) {
           throw new TypeError(`model ${model.id} effort ${effort.name}.complexities must be unique values from low, standard, high, critical`);
         }
+      }
+      if (effort.taskKinds !== undefined) {
+        assertNonEmptyStrings(effort.taskKinds, `model ${model.id} effort ${effort.name}.taskKinds`);
+        if (effort.taskKinds.length === 0 || new Set(effort.taskKinds).size !== effort.taskKinds.length) {
+          throw new TypeError(`model ${model.id} effort ${effort.name}.taskKinds must be unique non-empty strings`);
+        }
+      }
+      if (effort.quotaGate !== undefined && !QUOTA_GATES.includes(effort.quotaGate)) {
+        throw new Error(`model ${model.id} effort ${effort.name}.quotaGate must be one of ${QUOTA_GATES.join(', ')}`);
       }
     }
   }

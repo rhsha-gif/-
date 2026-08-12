@@ -166,3 +166,87 @@ test('the decision snapshot echoes the quota map it was given', () => {
   });
   assert.deepEqual(route.decision.quota.remainingByProvider, { anthropic: 55, openai: 12 });
 });
+
+// --- wide-mode gate (quotaGate efforts: ultra / ultracode) ---
+
+// One profile with a plain effort and a gated fan-out effort whose quality
+// bonus makes it win quality-first routing whenever the gate lets it through.
+function gatedCatalog(routing = baseRouting, quotaGate = 'premium') {
+  return {
+    routing,
+    models: [
+      model({
+        id: 'claude-exec',
+        provider: 'anthropic',
+        efforts: [
+          { name: 'medium', qualityDelta: 0, tokenMultiplier: 1, latencyMultiplier: 1 },
+          {
+            name: 'ultracode', qualityDelta: 0.1, tokenMultiplier: 6, latencyMultiplier: 2.5,
+            quotaGate, taskKinds: ['implementation']
+          }
+        ]
+      })
+    ]
+  };
+}
+
+test('a premium-gated effort is selectable only when quota is confirmed above the premium threshold', () => {
+  const open = selectRoute({ task, catalog: gatedCatalog(), observations: [], quota: { anthropic: 80 } });
+  assert.equal(open.effort, 'ultracode');
+  assert.deepEqual(open.decision.wideGate.excludedCandidates, []);
+
+  const closed = selectRoute({ task, catalog: gatedCatalog(), observations: [], quota: { anthropic: 50 } });
+  assert.equal(closed.effort, 'medium');
+  assert.deepEqual(closed.decision.wideGate.excludedCandidates, [
+    { profileId: 'claude-exec', effort: 'ultracode', quotaGate: 'premium' }
+  ]);
+});
+
+test('unknown or absent quota keeps gated efforts sealed, unlike the depletion rule', () => {
+  for (const quota of [undefined, {}, { anthropic: null }, { anthropic: Number.NaN }]) {
+    const route = selectRoute({ task, catalog: gatedCatalog(), observations: [], quota });
+    assert.equal(route.effort, 'medium', `quota ${JSON.stringify(quota)} must not unlock the gated effort`);
+    assert.equal(route.decision.wideGate.excludedCandidates.length, 1);
+  }
+});
+
+test('a soft-gated effort opens at the soft threshold instead of the premium one', () => {
+  const open = selectRoute({
+    task, catalog: gatedCatalog(baseRouting, 'soft'), observations: [], quota: { anthropic: 45 }
+  });
+  assert.equal(open.effort, 'ultracode');
+
+  const closed = selectRoute({
+    task, catalog: gatedCatalog(baseRouting, 'soft'), observations: [], quota: { anthropic: 35 }
+  });
+  assert.equal(closed.effort, 'medium');
+});
+
+test('the wide gate rolls back rather than empty the candidate set', () => {
+  const onlyGated = {
+    routing: baseRouting,
+    models: [
+      model({
+        id: 'claude-exec',
+        provider: 'anthropic',
+        efforts: [{
+          name: 'ultracode', qualityDelta: 0.1, tokenMultiplier: 6, latencyMultiplier: 2.5,
+          quotaGate: 'premium', taskKinds: ['implementation']
+        }]
+      })
+    ]
+  };
+  const route = selectRoute({ task, catalog: onlyGated, observations: [] });
+  assert.equal(route.effort, 'ultracode');
+  assert.deepEqual(route.decision.wideGate.excludedCandidates, []);
+});
+
+test('routing.quota.premiumThresholdPercent overrides the default gate floor', () => {
+  const catalog = gatedCatalog({
+    ...baseRouting,
+    quota: { softThresholdPercent: 40, hardThresholdPercent: 10, premiumThresholdPercent: 70 }
+  });
+  const route = selectRoute({ task, catalog, observations: [], quota: { anthropic: 65 } });
+  assert.equal(route.effort, 'medium');
+  assert.equal(route.decision.wideGate.premiumThresholdPercent, 70);
+});

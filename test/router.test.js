@@ -324,3 +324,25 @@ test('a critical task whose catalog matches nothing reports generic ineligibilit
     observations: []
   }), /No eligible route/i);
 });
+
+test('an effort with taskKinds is only a candidate for matching task kinds', () => {
+  const catalog = {
+    routing: baseRouting,
+    models: [
+      model({
+        id: 'deep',
+        taskKinds: ['implementation', 'documentation'],
+        quality: { default: 0.8, implementation: 0.8, documentation: 0.8 },
+        efforts: [
+          { name: 'medium', qualityDelta: 0, tokenMultiplier: 1, latencyMultiplier: 1 },
+          { name: 'ultra', qualityDelta: 0.1, tokenMultiplier: 4, latencyMultiplier: 1.6, taskKinds: ['implementation'] }
+        ]
+      })
+    ]
+  };
+  const wide = selectRoute({ task, catalog, observations: [] });
+  assert.equal(wide.effort, 'ultra');
+
+  const narrow = selectRoute({ task: { ...task, kind: 'documentation' }, catalog, observations: [] });
+  assert.equal(narrow.effort, 'medium');
+});

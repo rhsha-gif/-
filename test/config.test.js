@@ -116,7 +116,7 @@ test('routing defaults are normalized without imposing a task-specific objective
 test('routing.quota is normalized with defaults whether absent or partial', () => {
   const absent = validateConfig(minimalConfig());
   assert.deepEqual(absent.routing.quota, {
-    softThresholdPercent: 40, hardThresholdPercent: 10, cacheTtlMinutes: 5
+    softThresholdPercent: 40, hardThresholdPercent: 10, premiumThresholdPercent: 60, cacheTtlMinutes: 5
   });
 
   const partial = minimalConfig();
@@ -125,6 +125,12 @@ test('routing.quota is normalized with defaults whether absent or partial', () =
   assert.equal(validated.routing.quota.softThresholdPercent, 60);
   assert.equal(validated.routing.quota.hardThresholdPercent, 10);
   assert.equal(validated.routing.quota.cacheTtlMinutes, 5);
+
+  // An implicit premium floor rides above a raised soft threshold instead of
+  // failing the soft-vs-premium ordering check.
+  const raisedSoft = minimalConfig();
+  raisedSoft.routing.quota = { softThresholdPercent: 75 };
+  assert.equal(validateConfig(raisedSoft).routing.quota.premiumThresholdPercent, 75);
 });
 
 test('routing.quota rejects malformed thresholds', () => {
@@ -223,3 +229,41 @@ test('control-plane validates the experimental adapter risk ceiling', () => {
   assert.throws(() => validateConfig(config), /experimentalAdapterMaxRisk/i);
 });
 
+
+test('effort taskKinds and quotaGate are validated', () => {
+  const good = minimalConfig();
+  good.models[0].efforts.push({
+    name: 'ultra', qualityDelta: 0.05, tokenMultiplier: 4, latencyMultiplier: 1.6,
+    quotaGate: 'premium', taskKinds: ['review', 'implementation']
+  });
+  assert.doesNotThrow(() => validateConfig(good));
+
+  const badGate = minimalConfig();
+  badGate.models[0].efforts[0].quotaGate = 'always';
+  assert.throws(() => validateConfig(badGate), /quotaGate/);
+
+  const dupKinds = minimalConfig();
+  dupKinds.models[0].efforts[0].taskKinds = ['review', 'review'];
+  assert.throws(() => validateConfig(dupKinds), /taskKinds/);
+
+  const emptyKinds = minimalConfig();
+  emptyKinds.models[0].efforts[0].taskKinds = [];
+  assert.throws(() => validateConfig(emptyKinds), /taskKinds/);
+});
+
+test('premiumThresholdPercent is normalized, ranged, and never below the soft threshold', () => {
+  const defaulted = validateConfig(minimalConfig());
+  assert.equal(defaulted.routing.quota.premiumThresholdPercent, 60);
+
+  const explicit = minimalConfig();
+  explicit.routing.quota = { softThresholdPercent: 40, hardThresholdPercent: 10, premiumThresholdPercent: 55 };
+  assert.equal(validateConfig(explicit).routing.quota.premiumThresholdPercent, 55);
+
+  const belowSoft = minimalConfig();
+  belowSoft.routing.quota = { softThresholdPercent: 40, premiumThresholdPercent: 30 };
+  assert.throws(() => validateConfig(belowSoft), /premiumThresholdPercent/);
+
+  const outOfRange = minimalConfig();
+  outOfRange.routing.quota = { premiumThresholdPercent: 130 };
+  assert.throws(() => validateConfig(outOfRange), /premiumThresholdPercent/);
+});

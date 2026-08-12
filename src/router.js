@@ -73,6 +73,7 @@ function expandCandidates(task, catalog, complexity) {
     .filter((profile) => supportsTask(profile, task, catalog))
     .flatMap((profile) => (profile.efforts ?? [{ name: 'medium' }])
       .filter((effort) => !effort.complexities?.length || effort.complexities.includes(complexity))
+      .filter((effort) => !effort.taskKinds?.length || effort.taskKinds.includes(task.kind))
       .map((effort) => {
         const provider = providerMetadata(catalog, profile.provider);
         const prior = profile.quality?.[task.kind] ?? profile.quality?.default ?? 0.5;
@@ -81,6 +82,7 @@ function expandCandidates(task, catalog, complexity) {
           profileId: profile.id,
           model: profile.model,
           effort: effort.name,
+          quotaGate: effort.quotaGate ?? null,
           maturity: profile.maturity ?? 'stable',
           adapterMaturity: provider.adapterMaturity ?? 'stable',
           priorQuality: clamp01(prior + (effort.qualityDelta ?? 0)),
@@ -127,7 +129,8 @@ function applyHardConstraints(candidates, task) {
 function quotaThresholds(policy) {
   return {
     soft: policy.quota?.softThresholdPercent ?? 40,
-    hard: policy.quota?.hardThresholdPercent ?? 10
+    hard: policy.quota?.hardThresholdPercent ?? 10,
+    premium: policy.quota?.premiumThresholdPercent ?? 60
   };
 }
 
@@ -155,6 +158,29 @@ function excludeDepletedProviders(candidates, quota, thresholds) {
       .map((candidate) => candidate.provider)
   )];
   return { candidates: surviving, excludedProviders };
+}
+
+// Fan-out modes (efforts carrying quotaGate: ultra, ultracode) invert the
+// unknown-quota rule above on purpose. Depletion exclusion refuses to punish a
+// provider for a missing signal; a gated effort is an opt-in luxury that only
+// turns on when the remaining quota is positively confirmed to cover it — an
+// absent or unreadable signal keeps it off. Like depletion, an exclusion that
+// would empty the candidate set rolls back so a task never loses its only
+// route to the gate.
+function applyWideModeGate(candidates, quota, thresholds) {
+  const surviving = candidates.filter((candidate) => {
+    if (!candidate.quotaGate) return true;
+    const remaining = quota?.[candidate.provider];
+    const floor = candidate.quotaGate === 'premium' ? thresholds.premium : thresholds.soft;
+    return typeof remaining === 'number' && Number.isFinite(remaining) && remaining >= floor;
+  });
+  if (surviving.length === 0 || surviving.length === candidates.length) {
+    return { candidates, excludedCandidates: [] };
+  }
+  const excludedCandidates = candidates
+    .filter((candidate) => !surviving.includes(candidate))
+    .map((candidate) => ({ profileId: candidate.profileId, effort: candidate.effort, quotaGate: candidate.quotaGate }));
+  return { candidates: surviving, excludedCandidates };
 }
 
 // Within the tie set left by the first priority metric, prefer providers whose
@@ -273,6 +299,11 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
     ({ candidates, excludedProviders } = excludeDepletedProviders(candidates, quota, thresholds));
   }
 
+  // Runs even without a quota map: gated efforts stay sealed until a reading
+  // positively confirms headroom, so a missing signal never unlocks them.
+  const wideGate = applyWideModeGate(candidates, quota, thresholds);
+  candidates = wideGate.candidates;
+
   const priorities = effectivePriorities(task, policy);
   const stageCounts = [];
   let softQuotaApplied = false;
@@ -312,7 +343,12 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
           softThresholdPercent: thresholds.soft,
           hardThresholdPercent: thresholds.hard
         }
-        : null
+        : null,
+      wideGate: {
+        premiumThresholdPercent: thresholds.premium,
+        softThresholdPercent: thresholds.soft,
+        excludedCandidates: wideGate.excludedCandidates
+      }
     }
   };
 }
