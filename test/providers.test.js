@@ -93,3 +93,38 @@ test('provider executables can be replaced without changing adapter code', () =>
   assert.equal(claude.command, '/opt/claude');
   assert.equal(codex.command, '/opt/codex');
 });
+
+test('ultracode route passes through as a native effort with per-agent guidance and a raised turn budget', () => {
+  const spec = buildClaudeCommand({
+    prompt: 'audit the repo',
+    route: { ...route, model: 'opus', effort: 'ultracode' },
+    write: true
+  });
+  const prompt = spec.args[spec.args.indexOf('-p') + 1];
+  assert.match(prompt, /^Assign each workflow agent/);
+  assert.match(prompt, /reasoning effort by purpose/);
+  assert.match(prompt, /audit the repo/);
+  assert.equal(spec.args[spec.args.indexOf('--effort') + 1], 'ultracode');
+  assert.equal(spec.args[spec.args.indexOf('--max-turns') + 1], '200');
+});
+
+test('an explicit turn budget above the ultracode floor is respected', () => {
+  const spec = buildClaudeCommand({
+    prompt: 'x',
+    route: { ...route, model: 'opus', effort: 'ultracode' },
+    write: false,
+    maxTurns: 300
+  });
+  assert.equal(spec.args[spec.args.indexOf('--max-turns') + 1], '300');
+});
+
+test('codex ultra and max efforts pass through as model_reasoning_effort', () => {
+  for (const effort of ['ultra', 'max']) {
+    const spec = buildCodexCommand({
+      prompt: 'x',
+      route: { provider: 'openai', model: 'gpt-5.6-sol', effort },
+      write: false
+    });
+    assert.ok(spec.args.includes(`model_reasoning_effort="${effort}"`));
+  }
+});
