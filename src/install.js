@@ -1,9 +1,11 @@
-import { access, copyFile, mkdir, readFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeJsonAtomic as writeJson } from './fs-util.js';
+import { computePayloadHash, mergeTargets, readStamp, recordInstall, writeStamp } from './install-registry.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT_PLACEHOLDER = '{{AORCH_ROOT}}';
 
 async function exists(filePath) {
   try { await access(filePath); return true; } catch { return false; }
@@ -35,6 +37,31 @@ function mergeHook(target, fragment, targetPath) {
   return target;
 }
 
+// Installed instruction files cannot know where this package lives, so they
+// carry an {{AORCH_ROOT}} placeholder that is resolved at install time.
+function resolvePlaceholders(content) {
+  if (!content.includes(ROOT_PLACEHOLDER)) return content;
+  return content.replaceAll(ROOT_PLACEHOLDER, PACKAGE_ROOT.replaceAll('\\', '/'));
+}
+
+// Write only when the bytes actually change. Re-installs (and the automatic
+// refresh) must not rewrite an unchanged hook file that a live session is
+// executing, which Windows can reject with EBUSY.
+async function installFile(source, destination) {
+  const raw = await readFile(source);
+  const payload = raw.includes(ROOT_PLACEHOLDER)
+    ? Buffer.from(resolvePlaceholders(raw.toString('utf8')), 'utf8')
+    : raw;
+  try {
+    if ((await readFile(destination)).equals(payload)) return false;
+  } catch {
+    // Destination absent or unreadable: fall through and write it.
+  }
+  await mkdir(path.dirname(destination), { recursive: true });
+  await writeFile(destination, payload);
+  return true;
+}
+
 async function copyTree(source, destination) {
   const { readdir } = await import('node:fs/promises');
   await mkdir(destination, { recursive: true });
@@ -42,17 +69,8 @@ async function copyTree(source, destination) {
     const src = path.join(source, entry.name);
     const dst = path.join(destination, entry.name);
     if (entry.isDirectory()) await copyTree(src, dst);
-    else await copyFile(src, dst);
+    else await installFile(src, dst);
   }
-}
-
-// Installed instruction files cannot know where this package lives, so they
-// carry an {{AORCH_ROOT}} placeholder that is resolved at install time.
-async function resolvePlaceholders(filePath) {
-  const { writeFile } = await import('node:fs/promises');
-  const content = await readFile(filePath, 'utf8');
-  if (!content.includes('{{AORCH_ROOT}}')) return;
-  await writeFile(filePath, content.replaceAll('{{AORCH_ROOT}}', PACKAGE_ROOT.replaceAll('\\', '/')), 'utf8');
 }
 
 export async function installProject({ projectRoot = process.cwd(), target = 'both', forceConfig = false } = {}) {
@@ -73,20 +91,20 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
   const mergedCodexHooks = wantsCodex ? mergeHook(codexHooks, codexFragment, hooksPath) : null;
 
   const installed = [];
+  const warnings = [];
   const aorchDir = path.join(projectRoot, '.aorch');
   await mkdir(path.join(aorchDir, 'hooks'), { recursive: true });
   for (const script of ['gate.mjs', 'user-prompt-submit.mjs', 'subagent-gate.mjs']) {
-    await copyFile(
+    await installFile(
       path.join(PACKAGE_ROOT, 'integrations/shared', script),
       path.join(aorchDir, 'hooks', script)
     );
-    await resolvePlaceholders(path.join(aorchDir, 'hooks', script));
     installed.push(`.aorch/hooks/${script}`);
   }
 
   const projectConfig = path.join(aorchDir, 'config.json');
   if (forceConfig || !(await exists(projectConfig))) {
-    await copyFile(path.join(PACKAGE_ROOT, 'config/aorch.config.json'), projectConfig);
+    await installFile(path.join(PACKAGE_ROOT, 'config/aorch.config.json'), projectConfig);
     installed.push('.aorch/config.json');
   }
 
@@ -97,7 +115,6 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
 
   if (wantsClaude) {
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/skills'), path.join(projectRoot, '.claude/skills'));
-    await resolvePlaceholders(path.join(projectRoot, '.claude/skills/aorch-downshift/SKILL.md'));
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/agents'), path.join(projectRoot, '.claude/agents'));
     await writeJson(settingsPath, mergedSettings);
     installed.push('.claude/skills/adaptive-orchestrate', '.claude/skills/aorch-downshift', '.claude/agents', '.claude/settings.json');
@@ -110,5 +127,17 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
     installed.push('.agents/skills/adaptive-orchestrate', '.codex/agents', '.codex/hooks.json');
   }
 
-  return { projectRoot, target, installed };
+  // Record what this project now holds so `aorch update` and the prompt hook
+  // can tell a current install from a stale one.
+  // A narrower re-install does not remove the other integration, so the stamp
+  // records the union — that is what a later refresh has to keep current.
+  const payloadHash = await computePayloadHash();
+  const stampTarget = mergeTargets((await readStamp(projectRoot))?.target, target);
+  await writeStamp(projectRoot, { target: stampTarget, payloadHash });
+  installed.push('.aorch/install-stamp.json');
+
+  const registry = await recordInstall(projectRoot, target);
+  if (registry.warning) warnings.push(registry.warning);
+
+  return { projectRoot, target, installed, payloadHash, ...(warnings.length ? { warnings } : {}) };
 }

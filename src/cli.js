@@ -9,6 +9,7 @@ import { selectRoute } from './router.js';
 import { executeWithVerification } from './run-loop.js';
 import { discoverCapabilities, getInventory, mergeCapabilities } from './inventory.js';
 import { installProject } from './install.js';
+import { updateInstalls } from './update.js';
 import { validateTask } from './task.js';
 import { classifyDifficulty } from './difficulty.js';
 import { clearLimits, readLimits, setLimit } from './limits.js';
@@ -26,13 +27,14 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  branch    Branch lifecycle: status | apply --action <start|finish|cleanup|sync>\n` +
   `  inventory Print configured providers, models, skills, plugins, and hooks\n` +
   `  quota     Report each provider's remaining subscription quota via its usageProbe\n` +
-  `  install   Install project-local Claude Code and/or Codex integration\n\n` +
+  `  install   Install project-local Claude Code and/or Codex integration\n` +
+  `  update    Refresh installed integrations (update [--project <path>] [--check])\n\n` +
   `Common options:\n` +
   `  --config <path>       Config JSON; defaults to .aorch/config.json or packaged config\n` +
   `  --cwd <path>          Project working directory\n` +
   `  --observations <path> Reviewed outcomes JSONL\n`;
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h', 'approved', 'confirm-unmerged']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h', 'approved', 'confirm-unmerged', 'check']);
 
 const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
 const COMMAND_FLAGS = Object.freeze({
@@ -44,7 +46,8 @@ const COMMAND_FLAGS = Object.freeze({
   inventory: [...COMMON_FLAGS],
   quota: [...COMMON_FLAGS],
   branch: [...COMMON_FLAGS, 'action', 'approved', 'confirm-unmerged', 'name', 'observations', 'task'],
-  install: ['cwd', 'help', 'h', 'target', 'project', 'force-config']
+  install: ['cwd', 'help', 'h', 'target', 'project', 'force-config'],
+  update: ['cwd', 'help', 'h', 'project', 'check']
 });
 
 function coerceBoolean(rawKey, value) {
@@ -169,6 +172,15 @@ async function main(argv = process.argv.slice(2)) {
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return 0;
+  }
+
+  // Refresh runs before config loading on purpose: it must work from any
+  // directory, including one with no .aorch config of its own.
+  if (command === 'update') {
+    const explicit = typeof flags.project === 'string' ? [path.resolve(cwd, flags.project)] : undefined;
+    const result = await updateInstalls({ projects: explicit, check: flags.check === true });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return result.failed > 0 ? 1 : 0;
   }
 
   const config = await loadConfig({ cwd, configPath: flags.config });

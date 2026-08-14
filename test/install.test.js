@@ -6,6 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { installProject } from '../src/install.js';
 
+// Installs record themselves in a user-level registry; keep these tests out of
+// the real home directory.
+process.env.AORCH_HOME = await mkdtemp(path.join(os.tmpdir(), 'aorch-home-install-'));
+
 test('installs both CLI integrations idempotently without editing root instruction files', async () => {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-install-'));
   await installProject({ projectRoot, target: 'both' });

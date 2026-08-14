@@ -4,6 +4,12 @@
 
 ### Added
 
+- **설치본 갱신** (`aorch update`): 설치본은 패키지 스냅샷이라 패키지가 바뀌면 낡는데, 지금까지는 대상 프로젝트마다 `aorch install`을 손으로 다시 돌려야 했다.
+  - 설치 시 프로젝트 경로를 사용자 레벨 레지스트리(`~/.aorch/installs.json`, `AORCH_HOME` override)에 기록하고, 프로젝트에는 payload 내용 해시를 담은 `.aorch/install-stamp.json`을 남긴다. 버전 문자열이 아니라 내용 해시인 이유는 패키지가 버전보다 훨씬 자주 바뀌기 때문.
+  - `aorch update [--project <path>] [--check]` — 등록된 설치본을 일괄 갱신. `config.json`은 보존하고, 사라졌거나(`missing`) 통합이 제거된(`unmanaged`) 항목은 레지스트리에서 정리한다.
+  - **자동 갱신**: 설치된 `user-prompt-submit` 훅이 매 프롬프트마다 해시를 대조하고, 낡았으면 분리된 프로세스로 갱신을 띄운다(훅 3초 제한 안에 머물기 위해 복사는 훅 밖에서 — 반영은 다음 프롬프트부터). 프로젝트당 60초 락으로 중복 스폰을 막고, 모든 실패 경로는 fail-open, 스탬프도 통합도 없는 프로젝트에는 설치하지 않는다. 탈출구는 `AORCH_NO_AUTOUPDATE=1`.
+  - 설치가 내용이 바뀐 파일만 쓰도록 바꿨다(Windows에서 실행 중인 훅 파일을 덮어써 EBUSY가 나는 것을 피하기 위함).
+
 - **브랜치 수명주기 관리** (`aorch branch`): 작업 시작·마감 시 어느 브랜치에서 일할지의 판단을 돕는 서브 기능.
   - `aorch branch status` — 읽기 전용 사실(현재/대상 브랜치, 각 브랜치의 ahead·behind·staleness·머지 여부, 정리 후보, 위치 위험, repoIntegration)을 JSON으로 반환. 의미 매칭은 호스트 몫.
   - `aorch branch apply --action <start|finish|cleanup|sync>` — 가드형 실행자. **`--approved` 없이는 git 쓰기 0, 계획만 출력**(딸깍 전 미리보기). `start`(자동 stash→분기→복원), `finish`(verify 녹색 게이트→main merge+push→머지 브랜치 삭제, undo용 pre-merge SHA 기록), `cleanup`(머지된 로컬 자동 삭제+원격추적 prune, 미머지-stale은 `--confirm-unmerged` 필요), `sync`(main을 현재 브랜치에 merge, 충돌 시 abort).

@@ -177,6 +177,7 @@ aorch install --target codex --project /path/to/project
 project/
 ├─ .aorch/
 │  ├─ config.json
+│  ├─ install-stamp.json
 │  ├─ schemas/
 │  └─ hooks/
 │     ├─ gate.mjs
@@ -204,6 +205,20 @@ project/
 cd /path/to/project
 aorch inventory
 ```
+
+## 설치본 갱신
+
+설치본은 이 패키지의 스냅샷이라 패키지가 바뀌면 낡습니다. 설치 시 프로젝트 경로가 사용자 레벨 레지스트리(`~/.aorch/installs.json`, `AORCH_HOME`으로 변경 가능)에 기록되고, 프로젝트에는 payload 해시를 담은 `.aorch/install-stamp.json`이 남습니다.
+
+```bash
+aorch update              # 등록된 모든 설치본 갱신
+aorch update --check      # 갱신하지 않고 current/stale만 보고
+aorch update --project /path/to/project
+```
+
+갱신은 훅·스킬·에이전트·스키마만 다시 쓰고 `.aorch/config.json`은 건드리지 않습니다. 경로가 사라졌거나 통합이 제거된 항목은 레지스트리에서 자동으로 정리됩니다.
+
+**자동 갱신** — 설치된 `user-prompt-submit` 훅이 매 프롬프트마다 payload 해시를 대조하고, 낡았으면 분리된 프로세스로 `aorch update --project <root>`를 띄웁니다(훅의 3초 제한 안에 머물기 위한 구조라 갱신은 다음 프롬프트부터 반영). 실패는 전부 fail-open이고, 스탬프가 없는(설치된 적 없는) 프로젝트에는 절대 설치하지 않습니다. 끄려면 `AORCH_NO_AUTOUPDATE=1`.
 
 ## 평상시 사용
 
@@ -404,6 +419,7 @@ aorch limits     provider 사용 한도 표시/설정/해제 (limits set <provid
 aorch record     독립 검토된 model-performance 관측 추가
 aorch inventory  설정된 provider·model·skill·plugin·hook 출력
 aorch install    프로젝트 로컬 Claude Code / Codex 통합 설치
+aorch update     설치본 갱신 (--project로 한 곳만, --check로 검사만)
 aorch branch     브랜치 수명주기: status(읽기 전용 사실·추천) / apply --action <start|finish|cleanup|sync>
 ```
 
@@ -418,6 +434,7 @@ aorch branch     브랜치 수명주기: status(읽기 전용 사실·추천) / 
 ```text
 .aorch/
 ├─ config.json
+├─ install-stamp.json          설치된 payload 해시·target (갱신 판정용)
 ├─ observations.jsonl          독립 검토 + verify-gate 자동 관측
 ├─ limits.json                 provider 사용 한도 (만료 타임스탬프)
 ├─ schemas/
