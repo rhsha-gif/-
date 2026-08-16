@@ -267,3 +267,48 @@ test('premiumThresholdPercent is normalized, ranged, and never below the soft th
   outOfRange.routing.quota = { premiumThresholdPercent: 130 };
   assert.throws(() => validateConfig(outOfRange), /premiumThresholdPercent/);
 });
+
+test('roleAgents defaults to the shipped presets so older configs keep loading', () => {
+  const config = validateConfig(minimalConfig());
+  assert.deepEqual(config.roleAgents.worker, { claude: 'aorch-worker', codex: 'aorch-worker' });
+  assert.deepEqual(Object.keys(config.roleAgents), ['worker', 'reviewer', 'fixer']);
+});
+
+test('a declared roleAgents block is checked strictly rather than partially merged', () => {
+  const base = minimalConfig();   // single provider, adapter 'generic'
+  const good = validateConfig({
+    ...base,
+    roleAgents: {
+      worker: { generic: 'my-worker' },
+      reviewer: { generic: 'my-reviewer' },
+      fixer: { generic: 'my-fixer' }
+    }
+  });
+  assert.equal(good.roleAgents.worker.generic, 'my-worker');
+
+  // A half-declared block is a mistake, not an override of one role.
+  assert.throws(() => validateConfig({
+    ...base,
+    roleAgents: { worker: { generic: 'my-worker' } }
+  }), /roleAgents\.reviewer/);
+
+  // Every adapter actually in use must be covered.
+  assert.throws(() => validateConfig({
+    ...base,
+    roleAgents: { worker: {}, reviewer: { generic: 'r' }, fixer: { generic: 'f' } }
+  }), /roleAgents\.worker\.generic/);
+
+  assert.throws(() => validateConfig({
+    ...base,
+    roleAgents: {
+      worker: { generic: '  ' }, reviewer: { generic: 'r' }, fixer: { generic: 'f' }
+    }
+  }), /roleAgents\.worker\.generic/);
+
+  assert.throws(() => validateConfig({
+    ...base,
+    roleAgents: {
+      worker: { generic: 'w' }, reviewer: { generic: 'r' }, fixer: { generic: 'f' }, scout: { generic: 's' }
+    }
+  }), /Unsupported config\.roleAgents key: scout/);
+});

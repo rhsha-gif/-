@@ -52,6 +52,47 @@ function adapterMaturity(value, name, fallback) {
   return resolved;
 }
 
+// Which role agent each agentRole spawns, keyed by adapter rather than by
+// provider id: the presets live in integrations/<adapter>/agents/, so the agent
+// belongs to the CLI that runs it, not to the subscription account behind it.
+// Absent means "the shipped presets", so an existing .aorch/config.json written
+// before this block existed keeps loading. Present means it is checked strictly:
+// a half-declared block is a mistake, not a partial override. Dispatch still
+// fails closed when it needs a pair this map does not carry.
+const AGENT_ROLE_KEYS = ['worker', 'reviewer', 'fixer'];
+const DEFAULT_ROLE_AGENTS = Object.freeze({
+  worker: Object.freeze({ claude: 'aorch-worker', codex: 'aorch-worker' }),
+  reviewer: Object.freeze({ claude: 'aorch-reviewer', codex: 'aorch-reviewer' }),
+  fixer: Object.freeze({ claude: 'aorch-fixer', codex: 'aorch-fixer' })
+});
+
+function validateRoleAgents(input, providers) {
+  if (input === undefined) return structuredClone(DEFAULT_ROLE_AGENTS);
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new TypeError('config.roleAgents must be an object');
+  }
+  const adapters = [...new Set(providers.map((provider) => provider.adapter))];
+  const result = {};
+  for (const key of AGENT_ROLE_KEYS) {
+    const entry = input[key];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new TypeError(`config.roleAgents.${key} must be an object keyed by adapter`);
+    }
+    for (const adapter of adapters) {
+      if (typeof entry[adapter] !== 'string' || entry[adapter].trim() === '') {
+        throw new TypeError(`config.roleAgents.${key}.${adapter} must be a non-empty agent name`);
+      }
+    }
+    result[key] = { ...entry };
+  }
+  for (const key of Object.keys(input)) {
+    if (!AGENT_ROLE_KEYS.includes(key)) {
+      throw new Error(`Unsupported config.roleAgents key: ${key}`);
+    }
+  }
+  return result;
+}
+
 function validateControlPlane(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new TypeError('controlPlane must be an object');
@@ -303,6 +344,7 @@ export function validateConfig(input) {
     };
   });
   const routing = validateRouting(input.routing ?? {});
+  const roleAgents = validateRoleAgents(input.roleAgents, normalizedProviders);
   const controlPlane = validateControlPlane(input.controlPlane ?? {});
   const escalation = validateEscalation(input.escalation ?? {}, normalizedProviders, normalizedModels);
 
@@ -332,6 +374,7 @@ export function validateConfig(input) {
     models: normalizedModels,
     capabilities: normalizedCapabilities,
     routing,
+    roleAgents,
     controlPlane,
     escalation,
     verification: { ...(input.verification ?? {}), commandTimeoutMs: verificationTimeoutMs },

@@ -128,3 +128,27 @@ test('codex ultra and max efforts pass through as model_reasoning_effort', () =>
     assert.ok(spec.args.includes(`model_reasoning_effort="${effort}"`));
   }
 });
+
+test('a role preset reaches claude as --agent and is absent when no role is set', () => {
+  const route = { model: 'sonnet', effort: 'high' };
+  const without = buildClaudeCommand({ prompt: 'do it', route });
+  assert.equal(without.args.includes('--agent'), false);
+
+  const with_ = buildClaudeCommand({ prompt: 'do it', route, agent: 'aorch-reviewer' });
+  const at = with_.args.indexOf('--agent');
+  assert.notEqual(at, -1);
+  assert.equal(with_.args[at + 1], 'aorch-reviewer');
+  // The router still supplies the tier; the preset supplies behaviour and tools.
+  assert.equal(with_.args[with_.args.indexOf('--model') + 1], 'sonnet');
+});
+
+test('codex has no agent flag, so the preset arrives as prompt instructions', () => {
+  const route = { model: 'gpt-5.6-terra', effort: 'high' };
+  const without = buildCodexCommand({ prompt: 'do it', route });
+  assert.equal(without.stdin, 'do it');
+  assert.equal(without.args.includes('--agent'), false);
+
+  const with_ = buildCodexCommand({ prompt: 'do it', route, agentInstructions: 'Fix only the named cause.' });
+  assert.equal(with_.stdin, 'Fix only the named cause.\n\ndo it');
+  assert.equal(with_.args.includes('--agent'), false);
+});

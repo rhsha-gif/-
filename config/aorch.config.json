@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "qualitySemantics": "Each models[].quality.<kind> is the probability that this profile clears the task's verification gate on its FIRST attempt for that kind — not an abstract capability score. The objective function is minimizing the user's own intervention, so a cheaper tier is only cheaper when it does not come back for a second pass. Values move as verify-gate observations accumulate; edit them by hand only from evidence that isolates the model, not a single hard task that failed on every tier.",
   "routing": {
     "qualityTolerance": 0.01,
     "tokenTolerance": 0.08,
@@ -19,6 +20,20 @@
       "hardThresholdPercent": 10,
       "cacheTtlMinutes": 5,
       "premiumThresholdPercent": 60
+    }
+  },
+  "roleAgents": {
+    "worker": {
+      "claude": "aorch-worker",
+      "codex": "aorch-worker"
+    },
+    "reviewer": {
+      "claude": "aorch-reviewer",
+      "codex": "aorch-reviewer"
+    },
+    "fixer": {
+      "claude": "aorch-fixer",
+      "codex": "aorch-fixer"
     }
   },
   "providers": [
