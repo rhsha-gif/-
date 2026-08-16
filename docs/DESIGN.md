@@ -2,9 +2,9 @@
 
 ## 1. 최상위 목표
 
-이 도구는 개인용 두 구독 CLI(Claude Code + Codex CLI)를 위한 **다운시프트 판단 층**이다. 목적함수는 시간과 구독 한도 절약이며, 품질 바닥선(`minimumQuality`)이 그 하한을 지킨다.
+이 도구는 개인용 두 구독 CLI(Claude Code + Codex CLI)를 위한 **다운시프트 판단 층**이다. 목적함수는 **사용자 개입 최소화**와 구독 한도 절약이며, 품질 바닥선(`minimumQuality`)이 그 하한을 지킨다. 2026-08-16에 "시간과 구독 한도 절약"에서 개정됐다 — 벽시계 시간보다 사람이 다시 손대는 횟수를 줄이는 쪽을 택한다.
 
-사용자는 호스트 CLI에 일반 프롬프트를 입력한다. 얇은 정책 게이트가 요청을 분류하고, substantive work라면 호스트 모델(리드)이 요청을 독립 검증 가능한 작업으로 분해한다. aorch는 분해된 각 작업에 대해 다음 조합을 판단하고 실행한다.
+사용자는 호스트 CLI에 일반 프롬프트를 입력한다. 얇은 정책 게이트가 요청을 분류하고, substantive work라면 호스트 모델(리드)이 요청을 독립 검증 가능한 작업으로 분해해 **aorch가 정한 계획 스키마**(`schemas/task-plan.schema.json`)로 낸다. `aorch decompose`가 그 계획을 검증하고 `aorch dispatch`가 각 작업을 역할 에이전트에 배정해 실행한다. aorch는 계획의 각 작업에 대해 다음 조합을 판단하고 실행한다.
 
 ```text
 provider
@@ -50,7 +50,7 @@ Thin UserPromptSubmit gate
   ├─ read-only / development / high-risk 분류
   └─ 최소 정책 context 주입
   ↓
-Host CLI + adaptive-orchestrate skill (호스트 모델이 분해)
+Host CLI + adaptive-orchestrate skill (리드가 분해 → aorch 스키마로 강제)
   ↓
 서브태스크마다: aorch classify → 등급 판정
   ├─ 리드가 서브에이전트를 직접 띄우면 PreToolUse subagent-gate가 등급 강제
@@ -73,7 +73,7 @@ blocking hook은 inventory, route scoring, provider execution을 수행하지 �
 LLM이 담당하는 부분:
 
 - 사용자 의도 해석
-- 의미 단위 task decomposition
+- 의미 단위 task decomposition (형식과 실행은 aorch가, 의미 분해는 리드가)
 - 필요한 capability 선택
 
 Node.js가 담당하는 부분:

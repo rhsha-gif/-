@@ -107,3 +107,48 @@ test('install refuses to run when an existing settings file is malformed, before
   );
   await assert.rejects(() => access(path.join(projectRoot, '.aorch')), /ENOENT/);
 });
+
+test('role agents install without a pinned model, and scout keeps its own', async () => {
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-agents-'));
+  await installProject({ projectRoot, target: 'both' });
+
+  const read = (rel) => readFile(path.join(projectRoot, rel), 'utf8');
+
+  // Dispatch injects the model for the three dispatchable roles, so a preset
+  // that pinned one would silently override the router's decision.
+  for (const role of ['worker', 'reviewer', 'fixer']) {
+    const claude = await read(`.claude/agents/aorch-${role}.md`);
+    assert.doesNotMatch(claude, /^model:/m, `.claude aorch-${role} must not pin a model`);
+    assert.doesNotMatch(claude, /^effort:/m, `.claude aorch-${role} must not pin an effort`);
+
+    const codex = await read(`.codex/agents/aorch_${role}.toml`.replace(`aorch_${role}`, `aorch-${role}`));
+    assert.doesNotMatch(codex, /^model\s*=/m, `.codex aorch-${role} must not pin a model`);
+    assert.doesNotMatch(codex, /^model_reasoning_effort\s*=/m, `.codex aorch-${role} must not pin an effort`);
+  }
+
+  // Scouting is deliberately not delegated (reconnaissance stays with the lead),
+  // so the scout preset is a lead tool and keeps its fixed cheap tier.
+  const scout = await read('.claude/agents/aorch-scout.md');
+  assert.match(scout, /^model: haiku$/m);
+  assert.match(await read('.codex/agents/aorch-scout.toml'), /^model\s*=/m);
+});
+
+test('the installed root skill directs the lead through the plan pipeline', async () => {
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-skill-'));
+  await installProject({ projectRoot, target: 'both' });
+
+  for (const rel of ['.claude/skills/adaptive-orchestrate/SKILL.md', '.agents/skills/adaptive-orchestrate/SKILL.md']) {
+    const skill = await readFile(path.join(projectRoot, rel), 'utf8');
+    assert.match(skill, /aorch decompose --print-schema/, `${rel} must point at the plan contract`);
+    assert.match(skill, /aorch dispatch --plan/, `${rel} must dispatch the plan`);
+    assert.match(skill, /`agentRole`/, `${rel} must ask for agentRole`);
+    assert.match(skill, /Never write `role` yourself/, `${rel} must forbid a hand-written role`);
+    assert.match(skill, /Do not delegate reconnaissance/, `${rel} must keep scouting with the lead`);
+
+    // The old per-task envelope loop must not survive as a second instruction:
+    // two routes through the same decision is how the lead ends up skipping the
+    // validated one.
+    assert.doesNotMatch(skill, /Write each task envelope to JSON/, `${rel} still teaches the old loop`);
+    assert.doesNotMatch(skill, /Dispatch with `aorch exec --task/, `${rel} still teaches the old loop`);
+  }
+});

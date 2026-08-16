@@ -1,8 +1,8 @@
 # Adaptive Orchestrator
 
-> **리빌드 릴리스** — 개인용 두 구독(Claude Code + Codex CLI)을 위한 **다운시프트 판단 층**입니다. 목적함수는 시간·구독 한도 절약이고, 품질 바닥선(`minimumQuality`)이 하한을 지킵니다. 프루닝(판단 코어 릴리스)으로 걷어낸 기반 위에 다운시프트 실효화, verify 게이트 + escalation, 서브에이전트 등급 강제 훅, provider limits + 크로스 fallback을 증축했습니다. 내역은 [`CHANGELOG.md`](CHANGELOG.md)를 보세요.
+> **리빌드 릴리스** — 개인용 두 구독(Claude Code + Codex CLI)을 위한 **다운시프트 판단 층**입니다. 목적함수는 **사용자 개입 최소화**와 구독 한도 절약이고, 품질 바닥선(`minimumQuality`)이 하한을 지킵니다. 벽시계 시간이 다소 늘더라도 사람이 다시 손대는 횟수가 줄면 이득으로 칩니다 — 그래서 다운시프트의 기준은 "바닥선을 넘는 가장 싼 모델"이 아니라 "한 번에 검증을 통과할 모델"입니다. 프루닝(판단 코어 릴리스)으로 걷어낸 기반 위에 다운시프트 실효화, verify 게이트 + escalation, 서브에이전트 등급 강제 훅, provider limits + 크로스 fallback을 증축했습니다. 내역은 [`CHANGELOG.md`](CHANGELOG.md)를 보세요.
 
-Adaptive Orchestrator는 Claude Code 또는 Codex CLI 아래에서 동작하는 소형 라우팅 런타임입니다. **작업을 대신 분해하지 않습니다.** 분해는 호스트 모델(리드)이 자기 네이티브 능력으로 하고, aorch는 그렇게 나온 각 작업에 대해 다음 조합을 판단하고 강제합니다.
+Adaptive Orchestrator는 Claude Code 또는 Codex CLI 아래에서 동작하는 소형 라우팅 런타임입니다. 분해 **문장을 지어내는 것은 호스트 모델(리드)의 네이티브 능력**이지만, 그 결과의 **형식은 aorch가 스키마로 강제하고 검증하며 실행까지 책임집니다**. 분해기를 따로 짓지 않고 리드의 분해에 올라타되, "성실히 따라주기"에 의존하지는 않는다는 뜻입니다. aorch는 계획의 각 작업에 대해 다음 조합을 판단하고 강제합니다.
 
 ```text
 provider
@@ -18,16 +18,21 @@ provider
 ```text
 사용자 프롬프트
 → 얇은 UserPromptSubmit 정책 게이트
-→ adaptive-orchestrate root skill (호스트 모델이 분해)
-→ 서브태스크마다 등급 판정                 (aorch classify)
-   ├─ 서브에이전트 스폰이면 PreToolUse 훅이 등급 강제
-   └─ 워커 위임이면 task envelope 작성
-→ bounded worker 실행 + change/verify 게이트 (aorch exec)
+→ adaptive-orchestrate root skill
+   └─ 리드가 분해해 계획 파일 하나로 쓴다 (aorch decompose --print-schema)
+→ 계획 검증                                (aorch decompose --plan)
+   ├─ agentRole 필수, role은 손으로 못 쓴다(파생됨)
+   └─ decomposed:false면 작업 1개 — 분해 안 하는 것도 정상 결과
+→ 계획 전체 실행                              (aorch dispatch --plan)
+   ├─ 작업마다 등급 판정 + 역할 에이전트 배정(worker/reviewer/fixer)
    ├─ receipt.filesChanged ↔ 실제 Git 변경·scope·HEAD 대조
    ├─ verificationCommands 실제 실행, 실패 시 escalation 사다리 상향
+   ├─ 선언 순서대로 진행하고 첫 실패에서 멈춘다
    └─ rate-limit 시 남은 provider로 재선택 (aorch limits)
 → 호스트 모델이 evidence와 실제 diff의 의미를 검토
 → 결과 통합
+
+(서브에이전트를 리드가 직접 띄우는 경로는 그대로 — PreToolUse 훅이 aorch classify로 등급을 강제한다)
 ```
 
 ## 제작 우선순위와 런타임 정책
