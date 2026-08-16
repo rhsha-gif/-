@@ -11,17 +11,25 @@ import { discoverCapabilities, getInventory, mergeCapabilities } from './invento
 import { installProject } from './install.js';
 import { updateInstalls } from './update.js';
 import { validateTask } from './task.js';
+import { validateTaskPlan } from './decompose.js';
+import { dispatchPlan } from './dispatch.js';
 import { classifyDifficulty } from './difficulty.js';
 import { clearLimits, readLimits, setLimit } from './limits.js';
 
 import { computeBranchStatus } from './branch-status.js';
 import { applyBranchAction } from './branch-apply.js';
 import { readAllProviderQuotas } from './quota.js';
+
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const TASK_PLAN_SCHEMA_PATH = path.join(PACKAGE_ROOT, 'schemas', 'task-plan.schema.json');
+
 const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `Commands:\n` +
   `  route     Select provider, model, and effort for a task JSON file\n` +
   `  exec      Route and dispatch one bounded task\n` +
   `  classify  Map a raw objective to a difficulty and a concrete route\n` +
+  `  decompose Print the task-plan contract (--print-schema) or validate a plan (--plan <path>)\n` +
+  `  dispatch  Route and run every task in a plan, in order, stopping at the first failure\n` +
   `  record    Append an independently reviewed model-performance observation\n` +
   `  limits    Show, set, or clear provider usage limits (limits [set <provider> --minutes N | clear [provider]])\n` +
   `  branch    Branch lifecycle: status | apply --action <start|finish|cleanup|sync>\n` +
@@ -34,13 +42,15 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  --cwd <path>          Project working directory\n` +
   `  --observations <path> Reviewed outcomes JSONL\n`;
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h', 'approved', 'confirm-unmerged', 'check']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h', 'approved', 'confirm-unmerged', 'check', 'print-schema']);
 
 const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
 const COMMAND_FLAGS = Object.freeze({
   route: [...COMMON_FLAGS, 'task', 'observations'],
   exec: [...COMMON_FLAGS, 'task', 'observations', 'timeout-ms', 'dry-run'],
-  classify: [...COMMON_FLAGS, 'objective', 'role', 'risk', 'providers'],
+  classify: [...COMMON_FLAGS, 'objective', 'role', 'risk', 'providers', 'observations'],
+  decompose: [...COMMON_FLAGS, 'plan', 'print-schema'],
+  dispatch: [...COMMON_FLAGS, 'plan', 'observations', 'timeout-ms', 'dry-run'],
   record: [...COMMON_FLAGS, 'input', 'observations'],
   limits: [...COMMON_FLAGS, 'minutes', 'note'],
   inventory: [...COMMON_FLAGS],
@@ -254,12 +264,70 @@ async function main(argv = process.argv.slice(2)) {
       refresh: false,
       cwd
     });
-    const route = selectRoute({ task, catalog: config, observations: [], quota });
+    // classify used to pass observations: [], which meant the subagent gate —
+    // the one routing decision made on nearly every prompt — could never see
+    // that a tier had been failing verification. Reading them is what makes
+    // "downshift to what actually passes first time" possible at all.
+    // Fail-open on a bad ledger: this gate is a cost optimization, and a
+    // corrupt observations file must not block a spawn.
+    let observations = [];
+    try {
+      observations = await readObservations(resolveObservationPath(config, flags, cwd));
+    } catch (error) {
+      process.stderr.write(`aorch classify: ignoring unreadable observations (${error.message})\n`);
+    }
+    const route = selectRoute({ task, catalog: config, observations, quota });
     process.stdout.write(`${JSON.stringify({
       classification,
       route: { provider: route.provider, model: route.model, effort: route.effort }
     })}\n`);
     return 0;
+  }
+
+  if (command === 'decompose') {
+    // --print-schema is what the host model reads before it decomposes. Keeping
+    // the contract printable means the lead never has to guess the shape, and
+    // the shape has exactly one source of truth.
+    if (flags['print-schema'] === true) {
+      process.stdout.write(`${await readFile(TASK_PLAN_SCHEMA_PATH, 'utf8')}`);
+      return 0;
+    }
+    if (!flags.plan) {
+      process.stderr.write('aorch decompose requires --print-schema or --plan <path>\n');
+      return 1;
+    }
+    try {
+      const plan = validateTaskPlan(await readJson(requireFlag(flags, 'plan'), cwd));
+      process.stdout.write(`${JSON.stringify({
+        ok: true,
+        decomposed: plan.decomposed,
+        taskCount: plan.tasks.length,
+        agentRoles: plan.tasks.map((entry) => entry.agentRole)
+      }, null, 2)}\n`);
+      return 0;
+    } catch (error) {
+      process.stderr.write(`aorch decompose: ${error.message}\n`);
+      return 1;
+    }
+  }
+
+  if (command === 'dispatch') {
+    const timeoutMs = numericFlag(flags, 'timeout-ms');
+    const plan = await readJson(requireFlag(flags, 'plan'), cwd);
+    const observationsPath = resolveObservationPath(config, flags, cwd);
+    const result = await dispatchPlan({
+      plan,
+      config,
+      observations: await readObservations(observationsPath),
+      observationsPath,
+      cwd,
+      dryRun: flags['dry-run'] === true,
+      forbiddenProviders: Object.keys(await readLimits(resolveStateRoot(config, cwd))),
+      ...(timeoutMs === undefined ? {} : { timeoutMs })
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    // A stopped plan must not read as success to a caller checking exit codes.
+    return result.ok ? 0 : 1;
   }
 
   if (command === 'limits') {

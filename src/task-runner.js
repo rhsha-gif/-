@@ -13,6 +13,7 @@ import { buildCodexCommand } from './providers/codex-cli.js';
 import { buildGenericCommand } from './providers/generic-cli.js';
 import { resolveWindowsCommandSpec, runCommand } from './executor.js';
 import { validateTask } from './task.js';
+import { resolveRoleAgent } from './role-agent.js';
 import { runGit } from './change-guard.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -99,6 +100,14 @@ export async function executeTask({
   const outputPath = path.join(runDir, 'worker-output.json');
   const schema = JSON.parse(await readFile(RECEIPT_SCHEMA_PATH, 'utf8'));
   const prompt = buildTaskPrompt({ task, route, capabilities, receiptPath });
+  // A task without agentRole keeps the pre-pipeline behaviour exactly: no
+  // preset is resolved and the adapters build the same command as before.
+  const rolePreset = await resolveRoleAgent({
+    config,
+    agentRole: task.agentRole,
+    adapter: provider.adapter,
+    cwd
+  });
 
   let commandSpec;
   if (provider.adapter === 'claude') {
@@ -109,6 +118,7 @@ export async function executeTask({
       jsonSchema: schema,
       pluginDirs: capabilities.plugins.map((plugin) => plugin.path).filter(Boolean),
       maxTurns: task.maxTurns ?? 80,
+      ...(rolePreset.agent ? { agent: rolePreset.agent } : {}),
       executable: provider.executable ?? 'claude'
     });
   } else if (provider.adapter === 'codex') {
@@ -118,6 +128,7 @@ export async function executeTask({
       write: task.write === true,
       schemaPath: RECEIPT_SCHEMA_PATH,
       outputPath,
+      ...(rolePreset.agentInstructions ? { agentInstructions: rolePreset.agentInstructions } : {}),
       executable: provider.executable ?? 'codex'
     });
   } else {

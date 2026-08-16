@@ -24,6 +24,14 @@ const COMPLEXITY_RANK = Object.freeze({ low: 0, standard: 1, high: 2 });
 // floor filter, not a reordering. Low/standard work downshifts to the
 // cheapest tier that still clears the floor; high-complexity work keeps
 // quality as the primary tiebreak.
+//
+// The floors stay at 0.72/0.80/0.88 under the first-pass-rate reading of
+// quality (see config qualitySemantics). Standard work deliberately keeps
+// tokens-first: flipping it to quality-first would move every implementation
+// and testing task off the cheap tier regardless of evidence, which both
+// discards the subscription-limit half of the objective and makes the
+// observation ledger irrelevant. Tiers that actually keep failing get pushed
+// up by that ledger instead — classify reads it now.
 const PRIORITIES_BY_COMPLEXITY = Object.freeze({
   low: Object.freeze(['tokens', 'quality', 'latency']),
   standard: Object.freeze(['tokens', 'quality', 'latency']),

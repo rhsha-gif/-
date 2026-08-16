@@ -1,19 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const hook = path.resolve(here, '../integrations/shared/subagent-gate.mjs');
 
-function run(toolInput, { env = {}, toolName = 'Agent', raw } = {}) {
+// classify reads the project's observation ledger, so running the gate against
+// the repo root would make these assertions depend on whatever this checkout
+// happens to have recorded. A clean directory pins the packaged priors, which
+// is what a fresh install actually gets. Ledger-driven routing is covered by
+// test/downshift-matrix.test.js instead.
+const cleanCwd = mkdtempSync(path.join(os.tmpdir(), 'aorch-gate-'));
+
+function run(toolInput, { env = {}, toolName = 'Agent', raw, cwd = cleanCwd } = {}) {
   return spawnSync(process.execPath, [hook], {
     input: raw ?? JSON.stringify({
       hook_event_name: 'PreToolUse',
       tool_name: toolName,
       tool_input: toolInput,
-      cwd: process.cwd()
+      cwd
     }),
     encoding: 'utf8',
     env: { ...process.env, AORCH_NO_ENFORCE: '', AORCH_WORKER: '', AORCH_VERIFIER: '', ...env },

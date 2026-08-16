@@ -17,6 +17,7 @@ export function buildClaudeCommand({
   jsonSchema,
   pluginDirs = [],
   maxTurns = 80,
+  agent,
   executable = 'claude'
 }) {
   if (!route?.model || !route?.effort) throw new TypeError('route.model and route.effort are required');
@@ -37,6 +38,11 @@ export function buildClaudeCommand({
     const { $schema: _metaSchema, ...portableSchema } = jsonSchema;
     args.push('--json-schema', JSON.stringify(portableSchema));
   }
+  // A role preset carries hard constraints the prompt cannot enforce — a
+  // reviewer that lacks Write cannot "helpfully" edit the code it is judging.
+  // Passing the model separately is deliberate: the preset supplies behaviour
+  // and tool limits, the router supplies the tier.
+  if (agent) args.push('--agent', agent);
   for (const pluginDir of pluginDirs) args.push('--plugin-dir', pluginDir);
   return {
     command: executable,

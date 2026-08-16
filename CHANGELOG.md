@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Changed
+
+- **목적함수 개정**: "시간 + 구독 한도 절약" → **"사용자 개입 최소화 + 구독 한도 절약"**(품질 바닥선 유지). 벽시계 시간이 늘더라도 사람이 다시 손대는 횟수가 줄면 이득으로 친다. 귀결로 다운시프트의 기준이 "바닥선을 넘는 가장 싼 모델"에서 **"한 번에 검증을 통과할 모델"**이 됐고, `config`의 `quality.<kind>`는 `qualitySemantics` 필드로 그 의미(1회 통과 확률)를 명시한다.
+
+- **`aorch classify`가 관측을 읽는다**: 이전에는 `observations: []`를 하드코딩해, 거의 모든 프롬프트에서 발동하는 서브에이전트 게이트가 학습된 성과를 **한 번도 쓰지 못했다**. 이제 관측 원장을 읽으므로 반복 실패한 티어가 다운시프트 대상에서 밀려난다. 원장이 깨져 있으면 fail-open으로 prior에 의존하고 stderr에 한 줄 남긴다 — 이 게이트는 비용 최적화이지 안전장치가 아니다.
+  - 다운시프트 우선순위(`standard`의 tokens-first)는 **의도적으로 유지**했다. quality-first로 뒤집으면 구현·테스트가 이력과 무관하게 상위 티어로 가면서 관측 메커니즘이 무의미해지고 한도 절약도 사라진다.
+
+### Added
+
+- **분해–분배 파이프라인** (`aorch decompose` / `aorch dispatch`): 이전에는 리드가 작업마다 15필드 엔벨로프를 손으로 쓰고 `aorch exec`를 반복 호출해야 했다. 분해는 여전히 리드(호스트 모델)가 하지만, **결과의 형식을 aorch가 스키마로 강제하고 검증하며 실행까지 책임진다.** 2026-07-24 설계의 "분해기 non-goal"을 폐기한 것이 아니라, 그 문서가 스스로 지목한 "권고지 강제가 아니다"라는 약점을 제거한 것이다.
+  - `aorch decompose --print-schema` — 리드가 채워야 할 계획 계약(`schemas/task-plan.schema.json`)을 출력. `--plan <path>`로 검증하며 위반 시 exit 1.
+  - `aorch dispatch --plan <path> [--dry-run]` — 계획의 모든 작업을 **선언 순서대로** 라우팅·실행하고 첫 실패에서 멈춘다(뒤 작업이 반쯤 적용된 트리 위에서 돌지 않도록). 활성 rate-limit은 첫 작업뿐 아니라 모든 작업에 적용된다.
+  - `decomposed: false`는 작업이 정확히 1개여야 한다 — "분해하지 않음"을 적극적으로 선언하게 해서 불필요한 분해를 억제한다.
+
+- **역할 에이전트 자동 배정**: 계획의 각 작업이 `agentRole`(`worker`/`reviewer`/`fixer`)을 선언하면 dispatch가 해당 역할 에이전트로 띄운다.
+  - 라우팅 `role`은 `agentRole`에서 **파생**된다(worker·fixer→`executor`, reviewer→`reviewer`). 계획에 `role`을 손으로 쓰면 거부한다 — 둘이 어긋날 수 없게.
+  - `aorch-fixer` 신설(검증 실패한 작업을 실패 출력과 기존 diff로 최소 수정). `aorch-worker`/`aorch-reviewer`/`aorch-fixer`에서 **모델·effort 고정을 제거**했다 — 프리셋은 행동과 도구 제한을, 라우터는 등급을 담당한다.
+  - **정찰은 위임하지 않는다.** `scout` agentRole은 의도적으로 없고, `aorch-scout`은 리드 도구로 남아 모델 고정도 유지한다(검증이 스팟체크≈직접하기라 순이득 ~0).
+  - 프리셋 전달 경로가 provider마다 다르다: Claude는 `--agent`로 지정되어 **도구 제한까지 적용**되지만, `codex exec`에는 에이전트 플래그가 없어 프리셋의 `developer_instructions`를 프롬프트에 주입하고 도구 제한은 `--sandbox`까지만이다. 도구 경계가 중요한 작업(편집 못 하는 reviewer)은 Claude에 둘 것.
+  - `config.roleAgents`로 adapter별 에이전트 이름을 선언한다. 블록이 없으면 shipped 기본값을 쓰고(기존 설치본 호환), 선언하면 엄격 검증한다. dispatch는 매핑에 없는 adapter에서 **어떤 프로세스도 띄우기 전에** 실패한다.
+
 ### Added
 
 - **설치본 갱신** (`aorch update`): 설치본은 패키지 스냅샷이라 패키지가 바뀌면 낡는데, 지금까지는 대상 프로젝트마다 `aorch install`을 손으로 다시 돌려야 했다.

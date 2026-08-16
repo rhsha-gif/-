@@ -191,3 +191,45 @@ test('branch apply without --approved prints a plan and changes nothing', async 
   const branches = spawnSync('git', ['branch', '--format=%(refname:short)'], { cwd: dir, encoding: 'utf8' }).stdout;
   assert.ok(!branches.includes('feat/z'));
 });
+
+test('decompose prints the plan contract the host model must fill in', () => {
+  const result = spawnSync(process.execPath, [cli, 'decompose', '--print-schema'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const schema = JSON.parse(result.stdout);
+  assert.equal(schema.title, 'aorch task plan');
+  assert.deepEqual(schema.$defs.task.properties.agentRole.enum, ['worker', 'reviewer', 'fixer']);
+  assert.deepEqual(schema.required, ['objective', 'decomposed', 'tasks']);
+});
+
+test('decompose validates a plan and rejects a hand-written role', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-plan-'));
+  const base = {
+    id: 'T1', objective: 'Implement the parser', kind: 'implementation',
+    risk: 'standard', write: true, allowedScope: ['src/**'], acceptanceCriteria: ['tests pass']
+  };
+  const goodPath = path.join(dir, 'good.json');
+  await writeFile(goodPath, JSON.stringify({
+    objective: 'Add a parser',
+    decomposed: true,
+    tasks: [{ ...base, agentRole: 'worker' }, { ...base, id: 'T2', write: false, agentRole: 'reviewer' }]
+  }));
+  const good = spawnSync(process.execPath, [cli, 'decompose', '--plan', goodPath, '--cwd', dir], { encoding: 'utf8' });
+  assert.equal(good.status, 0, good.stderr);
+  assert.deepEqual(JSON.parse(good.stdout).agentRoles, ['worker', 'reviewer']);
+
+  const badPath = path.join(dir, 'bad.json');
+  await writeFile(badPath, JSON.stringify({
+    objective: 'Add a parser',
+    decomposed: true,
+    tasks: [{ ...base, agentRole: 'worker', role: 'executor' }]
+  }));
+  const bad = spawnSync(process.execPath, [cli, 'decompose', '--plan', badPath, '--cwd', dir], { encoding: 'utf8' });
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /role must not be set/i);
+});
+
+test('decompose without a target fails closed rather than doing nothing quietly', () => {
+  const result = spawnSync(process.execPath, [cli, 'decompose'], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--print-schema or --plan/);
+});
