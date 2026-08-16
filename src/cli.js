@@ -319,6 +319,7 @@ async function main(argv = process.argv.slice(2)) {
       plan,
       config,
       observations: await readObservations(observationsPath),
+      observationsPath,
       cwd,
       dryRun: flags['dry-run'] === true,
       forbiddenProviders: Object.keys(await readLimits(resolveStateRoot(config, cwd))),

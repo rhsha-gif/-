@@ -161,3 +161,23 @@ test('codex presets are parsed for developer_instructions without a TOML depende
     /cannot apply agentRole/
   );
 });
+
+test('the verify gate gets an observations path, or every dispatched task loses its evidence', async () => {
+  const seen = [];
+  await dispatchPlan({
+    plan: plan([
+      { ...baseTask, id: 'T1', agentRole: 'worker' },
+      { ...baseTask, id: 'T2', agentRole: 'worker' }
+    ]),
+    config,
+    observationsPath: '/ledger/observations.jsonl',
+    selectRouteImpl: stubRoute('anthropic', 'claude-sonnet-general'),
+    executeImpl: async ({ task, observationsPath }) => {
+      seen.push(observationsPath);
+      return { route: { provider: 'anthropic', profileId: 'p', model: 'm', effort: 'high' }, runDir: `/runs/${task.id}` };
+    }
+  });
+  // run-loop skips the observation append when this is undefined, so a missing
+  // path is not a cosmetic omission — it is the ledger never filling up.
+  assert.deepEqual(seen, ['/ledger/observations.jsonl', '/ledger/observations.jsonl']);
+});

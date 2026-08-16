@@ -28,6 +28,10 @@ export async function dispatchPlan({
   cwd = process.cwd(),
   dryRun = false,
   timeoutMs,
+  // Where the verify gate appends its quality observation. run-loop skips the
+  // append entirely when this is absent, so omitting it silently costs every
+  // dispatched task its routing evidence — the thing the whole ledger is for.
+  observationsPath,
   // Providers currently rate-limited. Applied to every task exactly as `aorch
   // exec` applies it to one, so a limit hit does not mean half a plan routes to
   // an exhausted subscription.
@@ -83,6 +87,7 @@ export async function dispatchPlan({
         config,
         observations,
         cwd,
+        ...(observationsPath === undefined ? {} : { observationsPath }),
         ...(timeoutMs === undefined ? {} : { timeoutMs })
       });
       results.push({
