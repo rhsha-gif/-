@@ -1,0 +1,63 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { agentRoles, routingRoleFor, validateTaskPlan } from '../src/decompose.js';
+
+const task = {
+  id: 'T1', objective: 'Implement the parser', kind: 'implementation', agentRole: 'worker',
+  risk: 'standard', write: true, allowedScope: ['src/**'], acceptanceCriteria: ['tests pass'],
+  verificationCommands: ['npm test']
+};
+
+const plan = { objective: 'Build the parser', decomposed: true, tasks: [task] };
+
+test('a well-formed plan validates and carries agentRole through', () => {
+  const result = validateTaskPlan(plan);
+  assert.equal(result.tasks.length, 1);
+  assert.equal(result.tasks[0].agentRole, 'worker');
+  assert.equal(result.tasks[0].role, 'executor');
+  assert.equal(result.objective, 'Build the parser');
+});
+
+test('agentRole maps onto the routing roles the router already filters on', () => {
+  assert.deepEqual(agentRoles(), ['worker', 'reviewer', 'fixer']);
+  assert.equal(routingRoleFor('worker'), 'executor');
+  assert.equal(routingRoleFor('fixer'), 'executor');
+  assert.equal(routingRoleFor('reviewer'), 'reviewer');
+  assert.throws(() => routingRoleFor('scout'), /agentRole/i);
+  assert.throws(() => routingRoleFor(undefined), /agentRole/i);
+});
+
+test('a task must declare agentRole and must not declare role by hand', () => {
+  assert.throws(() => validateTaskPlan({ ...plan, tasks: [{ ...task, agentRole: undefined }] }), /agentRole/i);
+  assert.throws(() => validateTaskPlan({ ...plan, tasks: [{ ...task, agentRole: 'planner' }] }), /agentRole/i);
+  assert.throws(() => validateTaskPlan({ ...plan, tasks: [{ ...task, role: 'executor' }] }), /role must not be set/i);
+});
+
+test('duplicate task ids are rejected because run directories are named by id', () => {
+  const tasks = [task, { ...task, objective: 'Something else' }];
+  assert.throws(() => validateTaskPlan({ ...plan, tasks }), /duplicate task id T1/);
+});
+
+test('decomposed:false asserts a single task and contradicting itself fails', () => {
+  const single = validateTaskPlan({ ...plan, decomposed: false });
+  assert.equal(single.tasks.length, 1);
+  const tasks = [task, { ...task, id: 'T2' }];
+  assert.throws(() => validateTaskPlan({ objective: 'x', decomposed: false, tasks }), /exactly one task/i);
+  // The same two tasks are fine once the plan admits it decomposed.
+  assert.equal(validateTaskPlan({ objective: 'x', decomposed: true, tasks }).tasks.length, 2);
+});
+
+test('plan-level fields are required', () => {
+  assert.throws(() => validateTaskPlan(null), /plan must be an object/i);
+  assert.throws(() => validateTaskPlan([]), /plan must be an object/i);
+  assert.throws(() => validateTaskPlan({ ...plan, objective: '  ' }), /plan.objective/i);
+  assert.throws(() => validateTaskPlan({ ...plan, decomposed: 'yes' }), /plan.decomposed/i);
+  assert.throws(() => validateTaskPlan({ ...plan, tasks: [] }), /plan.tasks/i);
+});
+
+test('task-level validation failures name the offending index', () => {
+  const tasks = [task, { ...task, id: 'T2', acceptanceCriteria: [] }];
+  assert.throws(() => validateTaskPlan({ ...plan, tasks }), /plan\.tasks\[1\].*acceptance/is);
+  const escaping = [{ ...task, id: '../escape' }];
+  assert.throws(() => validateTaskPlan({ ...plan, tasks: escaping }), /plan\.tasks\[0\].*task\.id/is);
+});

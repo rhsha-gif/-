@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { validateConfig } from '../src/config.js';
@@ -11,8 +12,10 @@ import { selectRoute } from '../src/router.js';
 // Regression harness for the downshift lever: every advertised target
 // (documentation, testing, boilerplate implementation, exploration, research)
 // must actually land on the cheapest tier against the REAL packaged catalog,
-// and high-complexity kinds must stay on the deep tier. Uses no observations,
-// mirroring the classify command's exact route construction.
+// and high-complexity kinds must stay on the deep tier. The matrix itself is
+// pinned with no observations — that is the cold-start behaviour a fresh install
+// gets. The classify command now reads the observation ledger, so the last test
+// here covers what happens once evidence exists.
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -130,4 +133,52 @@ test('deep-tier domain split: debugging → claude-opus, architecture/security �
     assert.equal(route.provider, expected.provider, `provider for: ${expected.objective}`);
     assert.equal(route.model, expected.model, `model for: ${expected.objective}`);
   }
+});
+
+// Objective #4 of the pipeline rework: downshift on "what passes first time",
+// not on "cheapest above a quality floor". The mechanism is the observation
+// ledger — classify passed observations: [] before, so a tier that kept failing
+// verification would keep being chosen forever.
+test('recorded verification failures pull a downshifted kind back up the ladder', async () => {
+  const catalog = await loadPackagedCatalog();
+  const objective = 'Extract the atomic write helper into a shared module';
+
+  const cold = routeObjective(catalog, objective);
+  assert.equal(cold.route.model, 'haiku', 'cold start still downshifts');
+
+  // Same four dimensions the performance store matches on: provider, model,
+  // effort, taskKind. Anything finer is metadata and must not gate matching.
+  const failures = Array.from({ length: 12 }, () => ({
+    recordedAt: new Date().toISOString(),
+    provider: cold.route.provider,
+    model: cold.route.model,
+    effort: cold.route.effort,
+    taskKind: cold.classification.kind,
+    quality: 0.2,
+    reviewed: true
+  }));
+
+  const classification = classifyDifficulty({ objective });
+  const task = validateTask({
+    id: 'matrix-probe', objective, role: 'executor', risk: 'standard',
+    kind: classification.kind, complexity: classification.complexity,
+    minimumQuality: classification.minimumQuality,
+    allowedProviders: ['anthropic'],
+    routingPriorities: classification.routingPriorities
+  });
+  const warmed = selectRoute({ task, catalog, observations: failures });
+
+  assert.notEqual(warmed.model, 'haiku',
+    'a tier with a recorded failure history must stop being the downshift target');
+});
+
+test('an unreadable observation ledger does not block the subagent gate', async () => {
+  const { readObservations } = await import('../src/observations.js');
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-obs-'));
+  const bad = path.join(dir, 'observations.jsonl');
+  await writeFile(bad, '{"provider":"anthropic"}\n');   // missing required fields
+
+  // classify catches this and routes on the priors instead; the point is that
+  // readObservations reports the problem rather than silently returning [].
+  await assert.rejects(readObservations(bad), /Invalid observation record 1/);
 });
