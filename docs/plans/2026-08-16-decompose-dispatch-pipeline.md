@@ -166,4 +166,14 @@ node --test test/<파일>.test.js   # 슬라이스별 집중 검증
 - [x] `npm run check` 전체 통과 — 258 테스트, 257 pass / 0 fail / 1 skip(symlink 권한, 기존 환경 제약)
 - [x] `aorch decompose --print-schema | node -e "JSON.parse(require('fs').readFileSync(0))"`가 오류 없이 끝난다
 - [x] 서브태스크 2개짜리 계획 파일로 `aorch dispatch --plan <file> --dry-run`을 실행하면 두 task가 서로 다른 에이전트로 배정된 결과가 출력된다
-- [ ] 도그푸딩 1회: 실제 작업 하나를 이 파이프라인으로 끝까지 통과시키고 `.aorch/observations.jsonl`에 새 관측이 기록되는 것을 확인한다
+- [x] 도그푸딩 1회 — `T-dogfood-obs`(exploration/low → claude-haiku) 통과, 관측 9행 → 10행(`quality: 1`, `source: verify-gate`)
+
+## 도그푸딩이 드러낸 것
+
+**고침 — dispatch가 `observationsPath`를 안 넘겼다** (커밋 `e1f16e0`). `src/run-loop.js:196`이 `if (observationsPath)`로 append를 가드하는데 dispatch가 그걸 전달하지 않아, 파이프라인으로 돈 모든 작업이 검증은 실행하고 escalation도 정상 동작하면서 **라우팅 증거만 조용히 버리고 있었다.** 1차 도그푸딩에서 통과 후에도 원장이 9행 그대로인 것으로 발견. 회귀 테스트 추가.
+
+**미해결 — 읽기 전용 Claude 워커가 plan 모드에 갇힌다** (기존 결함, 이번 변경과 무관):
+`src/providers/claude-cli.js`는 `write: false`에 `--permission-mode plan`을 준다. 1차 도그푸딩 워커의 실제 반환: *"이 세션은 플랜 모드로 시작되어 읽기 전용 조사만 허용하고 ... `ExitPlanMode` 도구가 이 세션에서는 비활성화되어 있습니다"*. 결과로 워커는 검증 명령도 못 돌리고 receipt도 못 썼으며, `structured_output`이 없어 `parseClaudeOutput`이 CLI 봉투 전체를 `receipt.json`으로 저장했다.
+- **`--agent` 추가와 무관함을 확인**: `--permission-mode`는 agentRole 유무와 무관하게 동일하게 `plan`이다.
+- **위험**: `receipt.filesChanged`가 존재하지 않으므로 read-only Claude 경로에서 change guard의 claim 대조가 실질적으로 무력하다. 이번 도그푸딩은 write가 없어 드러나지 않았다.
+- 후속 작업으로 분리 — 이 계획의 범위 밖이다.
