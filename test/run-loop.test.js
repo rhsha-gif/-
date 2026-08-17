@@ -283,6 +283,50 @@ test('a verify failure escalates on the provider ladder with the failure evidenc
   assert.deepEqual(records.map((entry) => entry.input.quality), [0.2, 1]);
 });
 
+test('a read-only task fails fast on verify failure: no ladder, no observation', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const records = [];
+  // A read-only worker cannot change what the commands measure — but only an
+  // APPLICABLE change guard proves the tree is untouched, so the fail-fast
+  // needs a git snapshot, not the non-git default.
+  const cleanSnapshot = { applicable: true, reason: null, root: dir, head: 'h', entries: {} };
+  await assert.rejects(
+    executeLoop({
+      task: baseTask({ write: false }),
+      config: baseConfig(),
+      cwd: dir,
+      observationsPath: path.join(dir, 'obs.jsonl'),
+      executeTaskImpl: stubExecutor(dir, calls),
+      runVerificationImpl: stubVerifier([false, true]),
+      appendObservationImpl: stubRecorder(records),
+      captureGitSnapshotImpl: async () => cleanSnapshot
+    }),
+    /read-only task.*Evidence:/s
+  );
+  assert.equal(calls.length, 1, 'no escalation attempt may run');
+  assert.equal(records.length, 0, 'no verify-gate observation may be recorded');
+});
+
+test('a read-only task that passes verification records no observation either', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const records = [];
+  const cleanSnapshot = { applicable: true, reason: null, root: dir, head: 'h', entries: {} };
+  const result = await executeLoop({
+    task: baseTask({ write: false }),
+    config: baseConfig(),
+    cwd: dir,
+    observationsPath: path.join(dir, 'obs.jsonl'),
+    executeTaskImpl: stubExecutor(dir, calls),
+    runVerificationImpl: stubVerifier([true]),
+    appendObservationImpl: stubRecorder(records),
+    captureGitSnapshotImpl: async () => cleanSnapshot
+  });
+  assert.equal(result.verification.passed, true);
+  assert.equal(records.length, 0, 'a pass grades the repository, not the model');
+});
+
 test('exhausting the attempt budget returns the human an error with evidence', async (t) => {
   const dir = await temporaryDirectory(t);
   const calls = [];

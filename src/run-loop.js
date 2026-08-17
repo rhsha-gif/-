@@ -193,7 +193,13 @@ export async function executeWithVerification({
       results: verification.results,
       changeGuard
     });
-    if (observationsPath) {
+    // A read-only worker whose tree the guard just proved untouched cannot
+    // have influenced what the commands measure, so the outcome would grade
+    // the repository's state, not the model (measured: three tiers each
+    // earned a false 0.2 judging a book that genuinely failed QA). Without an
+    // applicable guard there is no such proof, so behavior stays unchanged.
+    const provenUninvolved = changeGuard.applicable && !task.write;
+    if (observationsPath && !provenUninvolved) {
       await appendObservationImpl(observationsPath, {
         provider: execution.route.provider,
         model: execution.route.model,
@@ -209,6 +215,18 @@ export async function executeWithVerification({
     if (verification.passed) return { ...execution, verification, attempts };
 
     const failed = verification.results[verification.results.length - 1];
+    if (provenUninvolved) {
+      // Same invariant: no retry on any tier can change the verify outcome,
+      // so climbing the ladder is provably wasted spend. Return the evidence
+      // to the human immediately.
+      const error = new Error(
+        'Verification failed on a read-only task; escalation cannot change what the commands measure. ' +
+        `Last failing command: ${failed?.command} (exit ${failed?.exitCode}). Evidence: ${evidencePath}`
+      );
+      error.attempts = attempts;
+      error.runDir = execution.runDir;
+      throw error;
+    }
     forcedRoute = nextLadderStep(config, execution.route.provider, triedRoutes);
     if (!forcedRoute || attempt === maxAttempts) {
       const error = new Error(
