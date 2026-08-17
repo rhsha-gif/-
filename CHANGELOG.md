@@ -20,7 +20,8 @@
   - 라우팅 `role`은 `agentRole`에서 **파생**된다(worker·fixer→`executor`, reviewer→`reviewer`). 계획에 `role`을 손으로 쓰면 거부한다 — 둘이 어긋날 수 없게.
   - `aorch-fixer` 신설(검증 실패한 작업을 실패 출력과 기존 diff로 최소 수정). `aorch-worker`/`aorch-reviewer`/`aorch-fixer`에서 **모델·effort 고정을 제거**했다 — 프리셋은 행동과 도구 제한을, 라우터는 등급을 담당한다.
   - **정찰은 위임하지 않는다.** `scout` agentRole은 의도적으로 없고, `aorch-scout`은 리드 도구로 남아 모델 고정도 유지한다(검증이 스팟체크≈직접하기라 순이득 ~0).
-  - 프리셋 전달 경로가 provider마다 다르다: Claude는 `--agent`로 지정되어 **도구 제한까지 적용**되지만, `codex exec`에는 에이전트 플래그가 없어 프리셋의 `developer_instructions`를 프롬프트에 주입하고 도구 제한은 `--sandbox`까지만이다. 도구 경계가 중요한 작업(편집 못 하는 reviewer)은 Claude에 둘 것.
+  - 프리셋 전달 경로가 provider마다 다르다: Claude는 `--agent`로, `codex exec`는 에이전트 플래그가 없어 `developer_instructions`를 프롬프트에 주입한다. 양쪽 모두 역할의 **행동**을 얻는다.
+  - **정정(2026-08-17)**: 최초 릴리스 노트는 "Claude는 --agent로 도구 제한까지 적용되어 reviewer가 편집하지 못한다"고 적었으나 실측이 반박했다. 편집 도구를 CLI와 프리셋 양쪽에서 막아도 워커는 **셸로 파일을 만들 수 있고**(실측), 셸은 검증 실행에 필요해 뺄 수 없다. read-only의 실질 보장은 **change guard의 사후 git 트리 대조** 하나뿐이다. `write: false`는 샌드박스가 아니라 change guard가 검사하는 주장으로 취급할 것.
   - `config.roleAgents`로 adapter별 에이전트 이름을 선언한다. 블록이 없으면 shipped 기본값을 쓰고(기존 설치본 호환), 선언하면 엄격 검증한다. dispatch는 매핑에 없는 adapter에서 **어떤 프로세스도 띄우기 전에** 실패한다.
 
 ### Added
