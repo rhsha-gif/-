@@ -147,7 +147,7 @@ test('codex presets are parsed for developer_instructions without a TOML depende
   // Claude resolves to a name; codex resolves to the shipped preset's text.
   assert.deepEqual(
     await resolveRoleAgent({ config, agentRole: 'reviewer', adapter: 'claude', cwd: root }),
-    { agent: 'aorch-reviewer' }
+    { agent: 'aorch-reviewer', maxTurns: 60 }
   );
   const codex = await resolveRoleAgent({ config, agentRole: 'fixer', adapter: 'codex', cwd: root });
   assert.match(codex.agentInstructions, /State the cause before changing anything/);
@@ -180,4 +180,29 @@ test('the verify gate gets an observations path, or every dispatched task loses 
   // run-loop skips the observation append when this is undefined, so a missing
   // path is not a cosmetic omission — it is the ledger never filling up.
   assert.deepEqual(seen, ['/ledger/observations.jsonl', '/ledger/observations.jsonl']);
+});
+
+test('a Claude preset is resolved for existence and its turn budget, before anything spawns', async () => {
+  const { resolveRoleAgent, parseFrontmatterNumber } = await import('../src/role-agent.js');
+
+  // Shipped presets carry their own budgets; the flag would otherwise override
+  // them to a single value for every role.
+  const worker = await resolveRoleAgent({ config, agentRole: 'worker', adapter: 'claude', cwd: root });
+  assert.equal(worker.agent, 'aorch-worker');
+  assert.equal(worker.maxTurns, 80);
+
+  const reviewer = await resolveRoleAgent({ config, agentRole: 'reviewer', adapter: 'claude', cwd: root });
+  assert.equal(reviewer.maxTurns, 60);
+
+  assert.equal(parseFrontmatterNumber('---\nname: x\nmaxTurns: 25\n---\nbody\n', 'maxTurns'), 25);
+  assert.equal(parseFrontmatterNumber('---\nname: x\n---\nmaxTurns: 25\n', 'maxTurns'), undefined);
+  assert.equal(parseFrontmatterNumber('no frontmatter', 'maxTurns'), undefined);
+
+  // A project that never ran `aorch install` must be told that, not handed an
+  // opaque exit 1 from the CLI after the worker process has already started.
+  const missing = { ...config, roleAgents: { ...config.roleAgents, worker: { claude: 'aorch-nonexistent', codex: 'aorch-worker' } } };
+  await assert.rejects(
+    resolveRoleAgent({ config: missing, agentRole: 'worker', adapter: 'claude', cwd: root }),
+    /aorch-nonexistent\.md not found.*aorch install/s
+  );
 });

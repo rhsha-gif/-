@@ -41,6 +41,17 @@ export function extractCodexInstructions(toml) {
   return match ? match[1].trim() : '';
 }
 
+// Only key we read out of a Claude preset's frontmatter. A YAML parser would be
+// a dependency; the presets are ours and this is the one field aorch has to
+// forward, because --max-turns beats the preset's own maxTurns (measured: preset
+// 2, flag 8, ran 9 turns) and a per-role turn budget is otherwise inert.
+export function parseFrontmatterNumber(text, key) {
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!frontmatter) return undefined;
+  const match = new RegExp(`^${key}:\\s*(\\d+)\\s*$`, 'm').exec(frontmatter[1]);
+  return match ? Number(match[1]) : undefined;
+}
+
 async function readFirstExisting(candidates) {
   for (const candidate of candidates) {
     try {
@@ -67,7 +78,21 @@ export async function resolveRoleAgent({ config, agentRole, adapter, cwd = proce
 
   const name = roleAgentName({ config, agentRole, adapter });
 
-  if (adapter === 'claude') return { agent: name };
+  if (adapter === 'claude') {
+    // The CLI already fails closed on an unknown --agent, but it does so after
+    // the process has started and reports it as an opaque exit 1. Checking here
+    // keeps both adapters failing at the same point, before anything spawns,
+    // and lets the message name the fix.
+    const locations = PRESET_LOCATIONS.claude.map((resolve) => resolve(cwd, name));
+    const preset = await readFirstExisting(locations);
+    if (preset === null) {
+      throw new Error(
+        `Claude agent preset ${name}.md not found for agentRole ${agentRole}; run \`aorch install\``
+      );
+    }
+    const maxTurns = parseFrontmatterNumber(preset, 'maxTurns');
+    return { agent: name, ...(maxTurns === undefined ? {} : { maxTurns }) };
+  }
 
   const locations = PRESET_LOCATIONS.codex.map((resolve) => resolve(cwd, name));
   const toml = await readFirstExisting(locations);

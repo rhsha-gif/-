@@ -152,3 +152,33 @@ test('the installed root skill directs the lead through the plan pipeline', asyn
     assert.doesNotMatch(skill, /Dispatch with `aorch exec --task/, `${rel} still teaches the old loop`);
   }
 });
+
+test('no preset declares a tools allowlist, because that silently kills the receipt', async () => {
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-tools-'));
+  await installProject({ projectRoot, target: 'both' });
+
+  for (const role of ['worker', 'reviewer', 'fixer', 'scout']) {
+    const preset = await readFile(path.join(projectRoot, `.claude/agents/aorch-${role}.md`), 'utf8');
+    // A frontmatter tools allowlist omits the internal structured-output tool,
+    // so --json-schema returns nothing and parseClaudeOutput stores the raw CLI
+    // envelope as the receipt. Measured; do not reintroduce.
+    assert.doesNotMatch(preset, /^tools:/m, `aorch-${role} must not declare a tools allowlist`);
+    assert.match(preset, /^disallowedTools:/m, `aorch-${role} must state its restrictions as a denylist`);
+  }
+
+  const reviewer = await readFile(path.join(projectRoot, '.claude/agents/aorch-reviewer.md'), 'utf8');
+  assert.match(reviewer, /^disallowedTools:.*\bNotebookEdit\b/m, 'reviewer must deny every editing tool');
+});
+
+test('the installed skill does not promise a no-write guarantee the tools cannot give', async () => {
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-claims-'));
+  await installProject({ projectRoot, target: 'both' });
+
+  for (const rel of ['.claude/skills/adaptive-orchestrate/SKILL.md', '.agents/skills/adaptive-orchestrate/SKILL.md']) {
+    const skill = await readFile(path.join(projectRoot, rel), 'utf8');
+    // Measured: a worker with a shell writes files whether or not Write/Edit
+    // were withheld, so the preset never gave this guarantee.
+    assert.doesNotMatch(skill, /genuinely cannot write/i, `${rel} overstates the tool boundary`);
+    assert.match(skill, /change guard/i, `${rel} must name what actually enforces read-only`);
+  }
+});

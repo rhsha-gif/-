@@ -18,6 +18,11 @@ export function buildCodexCommand({
     '--model', route.model,
     '--sandbox', write ? 'workspace-write' : 'read-only',
     '-c', `model_reasoning_effort="${route.effort}"`,
+    // `codex exec` rejects --search (that flag is interactive-only: "unexpected
+    // argument"). --enable web_search is the exec-side equivalent and was
+    // measured working — it produced a web search tool call and returned the
+    // right answer with its source URL. Do not "fix" this back to --search.
+    '--enable', 'web_search',
     '--json'
   ];
   if (schemaPath) args.push('--output-schema', schemaPath);
