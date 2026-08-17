@@ -50,6 +50,18 @@
     "ponytail": {
       "claude": "aorch-ponytail",
       "codex": "aorch-ponytail"
+    },
+    "writer": {
+      "claude": "aorch-writer",
+      "codex": "aorch-writer"
+    },
+    "editor": {
+      "claude": "aorch-editor",
+      "codex": "aorch-editor"
+    },
+    "qa-analyst": {
+      "claude": "aorch-qa-analyst",
+      "codex": "aorch-qa-analyst"
     }
   },
   "providers": [
@@ -138,7 +150,8 @@
         "review",
         "research",
         "qa",
-        "documentation"
+        "documentation",
+        "writing"
       ],
       "quality": {
         "default": 0.88,
@@ -192,7 +205,8 @@
         "review",
         "implementation",
         "security",
-        "risk-analysis"
+        "risk-analysis",
+        "writing"
       ],
       "quality": {
         "default": 0.93,
@@ -278,7 +292,8 @@
         "implementation",
         "testing",
         "security",
-        "risk-analysis"
+        "risk-analysis",
+        "writing"
       ],
       "quality": {
         "default": 0.96,
@@ -410,7 +425,8 @@
         "review",
         "research",
         "qa",
-        "documentation"
+        "documentation",
+        "writing"
       ],
       "quality": {
         "default": 0.89,
@@ -510,7 +526,8 @@
         "research",
         "security",
         "qa",
-        "risk-analysis"
+        "risk-analysis",
+        "writing"
       ],
       "quality": {
         "default": 0.94,

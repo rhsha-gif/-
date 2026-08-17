@@ -1,0 +1,62 @@
+{
+  "objective": "Produce one chapter of a repository book: draft it at the deep tier, edit its wording at the middle tier, and accept it on machine-computed QA. Copy this template, replace every <book-id> and <chapter> placeholder, and run dispatch from the book workspace root. The write tasks run in place (allowInPlaceWrite) because the workspace's npm verification commands need its installed node_modules, which a linked worktree does not have; git history and the change guard are the safety net. Full `npm run book:qa` is a milestone command run by hand before sharing or release, not part of this per-chapter plan.",
+  "decomposed": true,
+  "tasks": [
+    {
+      "id": "B1-draft",
+      "title": "Draft the chapter",
+      "objective": "Draft the pages of chapter <chapter> in books/<book-id>/ as the chapter plan defines them. Read .agents/skills/page-manuscript-writer/SKILL.md and follow it as the drafting procedure. Never invent sources, quotations, statistics, claim support, rights status, or approvals; report missing facts in the receipt instead of writing them. Declared kind writing and complexity high on purpose: drafting is the step where quality is bought, so it must land on a deep model — raise complexity to critical for a chapter the whole book hinges on, and never lower it.",
+      "kind": "writing",
+      "agentRole": "writer",
+      "risk": "standard",
+      "complexity": "high",
+      "write": true,
+      "allowInPlaceWrite": true,
+      "allowedScope": ["books/<book-id>/**"],
+      "forbiddenScope": ["tools/**", ".agents/**"],
+      "verificationCommands": ["npm run book:check -- --book books/<book-id>"],
+      "acceptanceCriteria": [
+        "Every page the chapter plan assigns to chapter <chapter> exists with drafted prose.",
+        "No source, quotation, statistic, rights status or approval was invented; gaps are reported in the receipt.",
+        "book:check passes for the book."
+      ]
+    },
+    {
+      "id": "B2-edit",
+      "title": "Edit the wording",
+      "objective": "Edit chapter <chapter> in books/<book-id>/ for wording, phrasing, grammar and typos only, using .agents/skills/manuscript-writing-review/SKILL.md as the review standard. Do not change substance, structure, facts or scope — report each such concern in unresolvedRisks as input for a follow-up writer task. When filling this template, set allowedProviders to the provider the dry run did NOT give B1-draft: an editor from the other stable catches what the drafter's own family reads past, which is the cross-provider refutation pattern that earned its keep in practice. Declared complexity standard on purpose: sentence-level editing belongs on the middle tier, not the deep one.",
+      "kind": "writing",
+      "agentRole": "editor",
+      "risk": "standard",
+      "complexity": "standard",
+      "write": true,
+      "allowInPlaceWrite": true,
+      "allowedScope": ["books/<book-id>/**"],
+      "forbiddenScope": ["tools/**", ".agents/**"],
+      "verificationCommands": ["npm run book:check -- --book books/<book-id>"],
+      "acceptanceCriteria": [
+        "Every direct edit is at or below the sentence level.",
+        "Substance, structure and factual concerns appear in unresolvedRisks, not in the diff.",
+        "book:check passes for the book."
+      ]
+    },
+    {
+      "id": "B3-accept",
+      "title": "Render the QA verdict",
+      "objective": "Judge chapter <chapter> of books/<book-id>/ from what the QA commands computed. The verification command runs browser-only QA; read its report and the existing digest audits rather than recomputing anything. Open screenshots only for pages whose digest changed in this chapter's work and for pages the machine checks flagged; record in the receipt which pages you opened and why. Pages you remain uncertain about go in unresolvedRisks with page numbers, as input for a deep-tier follow-up review of exactly those pages. Declared kind log-analysis and complexity low on purpose: the commands did the work, and this verdict must stay on the cheap tier.",
+      "kind": "log-analysis",
+      "agentRole": "qa-analyst",
+      "risk": "standard",
+      "complexity": "low",
+      "write": false,
+      "routingPriorities": ["tokens", "quality", "latency"],
+      "minimumQuality": 0.75,
+      "verificationCommands": ["npm run book:quickqa -- --book books/<book-id>"],
+      "acceptanceCriteria": [
+        "The verdict cites the QA report and digest evidence, not a full-book visual pass.",
+        "The receipt lists exactly which page screenshots were opened and why.",
+        "Uncertain pages are listed in unresolvedRisks with page numbers, or their absence is stated."
+      ]
+    }
+  ]
+}

@@ -60,7 +60,8 @@ function adapterMaturity(value, name, fallback) {
 // a half-declared block is a mistake, not a partial override. Dispatch still
 // fails closed when it needs a pair this map does not carry.
 const AGENT_ROLE_KEYS = [
-  'worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail'
+  'worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail',
+  'writer', 'editor', 'qa-analyst'
 ];
 const preset = (name) => Object.freeze({ claude: name, codex: name });
 const DEFAULT_ROLE_AGENTS = Object.freeze({
@@ -70,7 +71,10 @@ const DEFAULT_ROLE_AGENTS = Object.freeze({
   researcher: preset('aorch-researcher'),
   analyst: preset('aorch-analyst'),
   'license-reviewer': preset('aorch-license-reviewer'),
-  ponytail: preset('aorch-ponytail')
+  ponytail: preset('aorch-ponytail'),
+  writer: preset('aorch-writer'),
+  editor: preset('aorch-editor'),
+  'qa-analyst': preset('aorch-qa-analyst')
 });
 
 function validateRoleAgents(input, providers) {

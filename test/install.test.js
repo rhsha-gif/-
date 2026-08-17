@@ -184,6 +184,30 @@ test('the installed skill does not promise a no-write guarantee the tools cannot
   }
 });
 
+test('the book-production presets install on both hosts with the right pen boundaries', async () => {
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-book-'));
+  await installProject({ projectRoot, target: 'both' });
+
+  for (const role of ['writer', 'editor', 'qa-analyst']) {
+    const claude = await readFile(path.join(projectRoot, `.claude/agents/aorch-${role}.md`), 'utf8');
+    const codex = await readFile(path.join(projectRoot, `.codex/agents/aorch-${role}.toml`), 'utf8');
+    assert.doesNotMatch(claude, /^tools:/m, `aorch-${role} must not declare a tools allowlist`);
+    assert.match(claude, /^disallowedTools:/m, `aorch-${role} must state its restrictions as a denylist`);
+    assert.match(codex, /developer_instructions = """/, `codex aorch-${role} must carry instructions`);
+  }
+
+  // Only the judge is denied the pen; writer and editor hold it, and their
+  // narrower mandates live in the instructions, not the tool list.
+  const qa = await readFile(path.join(projectRoot, '.claude/agents/aorch-qa-analyst.md'), 'utf8');
+  assert.match(qa, /^disallowedTools:.*\bWrite\b.*\bEdit\b.*\bNotebookEdit\b/m, 'qa-analyst must deny every editing tool');
+  for (const role of ['writer', 'editor']) {
+    const preset = await readFile(path.join(projectRoot, `.claude/agents/aorch-${role}.md`), 'utf8');
+    assert.doesNotMatch(preset, /^disallowedTools:.*\bWrite\b/m, `aorch-${role} must keep the pen`);
+  }
+  const codexQa = await readFile(path.join(projectRoot, '.codex/agents/aorch-qa-analyst.toml'), 'utf8');
+  assert.match(codexQa, /sandbox_mode = "read-only"/, 'codex qa-analyst must stay read-only');
+});
+
 test('the adoption presets install on both hosts and carry their attribution', async () => {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-adopt-'));
   await installProject({ projectRoot, target: 'both' });

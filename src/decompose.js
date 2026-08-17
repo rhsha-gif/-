@@ -22,7 +22,15 @@ const AGENT_ROLES = Object.freeze({
   researcher: 'executor',
   analyst: 'executor',
   'license-reviewer': 'reviewer',
-  ponytail: 'reviewer'
+  ponytail: 'reviewer',
+  // The book-production roles. writer and editor both hold the pen, so they
+  // route as executors — editor's narrower mandate (wording only, never
+  // substance) lives in its preset, not in the routing axis. qa-analyst reads
+  // what the QA commands already computed and renders a verdict, which is
+  // reviewer work.
+  writer: 'executor',
+  editor: 'executor',
+  'qa-analyst': 'reviewer'
 });
 
 export function routingRoleFor(agentRole) {

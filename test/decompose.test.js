@@ -19,7 +19,7 @@ test('a well-formed plan validates and carries agentRole through', () => {
 });
 
 test('agentRole maps onto the routing roles the router already filters on', () => {
-  assert.equal(agentRoles().length, 7);
+  assert.equal(agentRoles().length, 10);
   assert.equal(routingRoleFor('worker'), 'executor');
   assert.equal(routingRoleFor('fixer'), 'executor');
   assert.equal(routingRoleFor('reviewer'), 'reviewer');
@@ -64,7 +64,8 @@ test('task-level validation failures name the offending index', () => {
 
 test('the adoption roles derive routing roles that the profiles already declare', () => {
   assert.deepEqual(agentRoles(), [
-    'worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail'
+    'worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail',
+    'writer', 'editor', 'qa-analyst'
   ]);
 
   // Evidence-producing roles route as executors; judging roles route as
@@ -76,6 +77,12 @@ test('the adoption roles derive routing roles that the profiles already declare'
   // ponytail judges rather than edits; the repair it recommends is a separate
   // fixer task declared after it.
   assert.equal(routingRoleFor('ponytail'), 'reviewer');
+
+  // Book-production roles: both pen-holders route as executors; the judge of
+  // machine-computed QA output routes as a reviewer.
+  assert.equal(routingRoleFor('writer'), 'executor');
+  assert.equal(routingRoleFor('editor'), 'executor');
+  assert.equal(routingRoleFor('qa-analyst'), 'reviewer');
 
   const plan = {
     objective: 'Adopt something',

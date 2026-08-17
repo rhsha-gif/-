@@ -135,6 +135,44 @@ test('deep-tier domain split: debugging → claude-opus, architecture/security �
   }
 });
 
+// The writing kind carries book-production prose. It is deliberately absent
+// from the cheap tier (haiku, luna): drafting is declared high or critical and
+// must land on a deep model, editing is declared standard and lands on the
+// middle tier, and even a low-complexity writing task lands mid — the cheap
+// tier can never hold the pen. The classifier never emits 'writing' — plans
+// declare it explicitly — so these probes build the task by hand.
+function writingTask(complexity) {
+  return validateTask({
+    id: 'writing-probe',
+    objective: 'Draft the assigned chapter of the book',
+    role: 'executor',
+    risk: 'standard',
+    kind: 'writing',
+    complexity,
+    allowedProviders: ['anthropic', 'openai']
+  });
+}
+
+test('writing kind: drafting lands deep, editing lands mid, low has no route', async () => {
+  const catalog = await loadPackagedCatalog();
+
+  const drafting = selectRoute({ task: writingTask('high'), catalog, observations: [] });
+  assert.ok(['opus', 'gpt-5.6-sol', 'fable'].includes(drafting.model),
+    `writing/high must land on a deep model, got ${drafting.model}`);
+
+  const critical = selectRoute({ task: writingTask('critical'), catalog, observations: [] });
+  assert.ok(['opus', 'gpt-5.6-sol', 'fable'].includes(critical.model),
+    `writing/critical must land on a deep model, got ${critical.model}`);
+
+  const editing = selectRoute({ task: writingTask('standard'), catalog, observations: [] });
+  assert.ok(['sonnet', 'gpt-5.6-terra'].includes(editing.model),
+    `writing/standard must land on the middle tier, got ${editing.model}`);
+
+  const low = selectRoute({ task: writingTask('low'), catalog, observations: [] });
+  assert.ok(['sonnet', 'gpt-5.6-terra'].includes(low.model),
+    `writing/low must still land mid — the cheap tier never holds the pen — got ${low.model}`);
+});
+
 // Objective #4 of the pipeline rework: downshift on "what passes first time",
 // not on "cheapest above a quality floor". The mechanism is the observation
 // ledger — classify passed observations: [] before, so a tier that kept failing

@@ -74,6 +74,21 @@ reviews agrees too easily.
 Licence obligations are a finding, not paperwork. If reuse requires a notice,
 the plan that acts on it must add that notice in the same change.
 
+### Producing a book chapter
+
+When the request is to draft, edit, or accept a chapter of a repository book,
+copy `examples/plan-book-chapter.json`, replace the `<book-id>` and `<chapter>`
+placeholders, and dispatch from the book workspace root rather than inventing a
+plan. It declares three roles in pipeline order: `writer` drafts at the deep
+tier (kind `writing`, complexity high — never lower it), `editor` fixes wording
+only at the middle tier and reports substance concerns instead of rewriting
+them, and `qa-analyst` renders a cheap verdict from what `book:quickqa` and the
+digest audits already computed, opening only changed or machine-flagged pages.
+After the dry run, pin the editor's `allowedProviders` to the provider the
+drafter did not get — same cross-provider reasoning as the refutation task
+above. Full `book:qa` is a milestone command run by hand before sharing or
+release, not a per-chapter step.
+
 ## Capability selection
 
 Choose capabilities by task need, not by habit:
