@@ -152,3 +152,52 @@ test('codex has no agent flag, so the preset arrives as prompt instructions', ()
   assert.equal(with_.stdin, 'Fix only the named cause.\n\ndo it');
   assert.equal(with_.args.includes('--agent'), false);
 });
+
+test('a Claude worker is granted the tools it needs, since no mode grants them', () => {
+  const route = { model: 'haiku', effort: 'medium' };
+  const readOnly = buildClaudeCommand({ prompt: 'survey', route, write: false });
+  const writer = buildClaudeCommand({ prompt: 'build', route, write: true });
+
+  const listAfter = (spec, flag) => {
+    const at = spec.args.indexOf(flag);
+    if (at === -1) return null;
+    const out = [];
+    for (let i = at + 1; i < spec.args.length && !spec.args[i].startsWith('--'); i += 1) out.push(spec.args[i]);
+    return out;
+  };
+
+  // Measured on claude 2.1.233: every permission mode denies Bash headlessly,
+  // so without an allowlist the worker returns prose asking for approval and
+  // never produces a receipt. Bash is granted to both because verification
+  // runs through it.
+  const READ = ['Read', 'Grep', 'Glob', 'Bash', 'PowerShell', 'WebSearch', 'WebFetch'];
+  assert.deepEqual(listAfter(readOnly, '--allowed-tools'), READ);
+  assert.deepEqual(listAfter(writer, '--allowed-tools'), [...READ, 'Write', 'Edit']);
+
+  // PowerShell is a separate tool name on Windows; omitting it costs the worker
+  // its turn budget in denials. The web tools go to every role, researcher
+  // included, so research does not need a role-conditional allowlist.
+  for (const spec of [readOnly, writer]) {
+    for (const tool of ['PowerShell', 'WebSearch', 'WebFetch']) {
+      assert.ok(spec.args.includes(tool), `${tool} must be granted to every role`);
+    }
+  }
+
+  // A read-only worker is handed no editing tools at all; the change guard
+  // still compares the tree afterwards.
+  assert.deepEqual(listAfter(readOnly, '--disallowed-tools'), ['Write', 'Edit', 'NotebookEdit']);
+  assert.equal(writer.args.includes('--disallowed-tools'), false, 'a write task keeps its editing tools');
+
+  const mode = (spec) => spec.args[spec.args.indexOf('--permission-mode') + 1];
+  assert.equal(mode(readOnly), 'auto');
+  assert.equal(mode(writer), 'auto');
+});
+
+test('codex workers get web search through the flag exec actually accepts', () => {
+  const spec = buildCodexCommand({ prompt: 'find it', route: { model: 'gpt-5.6-terra', effort: 'high' } });
+  const at = spec.args.indexOf('--enable');
+  assert.notEqual(at, -1, 'exec needs --enable web_search');
+  assert.equal(spec.args[at + 1], 'web_search');
+  // --search exists only on the interactive command; exec exits 2 on it.
+  assert.equal(spec.args.includes('--search'), false);
+});
