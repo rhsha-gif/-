@@ -117,7 +117,10 @@ export async function executeTask({
       write: task.write === true,
       jsonSchema: schema,
       pluginDirs: capabilities.plugins.map((plugin) => plugin.path).filter(Boolean),
-      maxTurns: task.maxTurns ?? 80,
+      // An explicit task budget wins; otherwise the role's own budget applies —
+      // a scout should not get a worker's 80 turns just because the flag always
+      // overrides the preset.
+      maxTurns: task.maxTurns ?? rolePreset.maxTurns ?? 80,
       ...(rolePreset.agent ? { agent: rolePreset.agent } : {}),
       executable: provider.executable ?? 'claude'
     });
