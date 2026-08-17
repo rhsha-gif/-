@@ -163,21 +163,22 @@ node --test test/<파일>.test.js   # 슬라이스별
 
 대상 파일: `docs/handoff/2026-08-17-ecc-adoption.md` (신규)
 
-- [ ] `C:/Users/goyan/Downloads/ECC-main.zip`을 세션 스크래치패드(`$TEMP/claude/.../scratchpad/ecc/`)에 푼다. **저장소 안에 넣지 않는다** — 4,745 파일이 change guard의 트리 대조를 오염시킨다
-- [ ] `examples/plan-oss-adoption.json`을 복사해 대상 경로를 그 스크래치패드로 채운 계획을 만들고 `aorch dispatch --plan <file>`을 실행한다. 워커의 `allowedScope`에 스크래치패드 경로를, `forbiddenScope`에 `src/**`·`integrations/**`를 넣어 조사 대상과 우리 코드를 분리한다
-- [ ] 산출을 `docs/handoff/2026-08-17-ecc-adoption.md`에 정리한다 — 훔칠 것 목록(파일 경로 포함), 라이선스 판정, ponytail의 축소 제안, 그리고 **드림팀 자체의 실측 평가**(어느 단계가 값을 냈고 어느 단계가 낭비였나)
-- [ ] 결정 19의 세 항목이 답을 얻었는지 확인한다: 변환 규칙 검증용 샘플 / `agent-evaluator` 도입 여부 / 멀티호스트 배포 구조 차용 여부
-- [ ] 검증: 위 문서가 존재하고 세 항목 각각에 결론 문장이 있으며, `.aorch/observations.jsonl`에 이번 실행의 관측이 기록됨
+- [x] `C:/Users/goyan/Downloads/ECC-main.zip`을 세션 스크래치패드(`$TEMP/claude/.../scratchpad/ecc/`)에 푼다. **저장소 안에 넣지 않는다** — 4,745 파일이 change guard의 트리 대조를 오염시킨다
+- [x] `examples/plan-oss-adoption.json`을 복사해 대상 경로를 그 스크래치패드로 채운 계획을 만들고 `aorch dispatch --plan <file>`을 실행한다. 워커의 `allowedScope`에 스크래치패드 경로를, `forbiddenScope`에 `src/**`·`integrations/**`를 넣어 조사 대상과 우리 코드를 분리한다
+- [x] 산출을 `docs/handoff/2026-08-17-ecc-adoption.md`에 정리한다 — 훔칠 것 목록(파일 경로 포함), 라이선스 판정, ponytail의 축소 제안, 그리고 **드림팀 자체의 실측 평가**(어느 단계가 값을 냈고 어느 단계가 낭비였나)
+- [x] 결정 19의 세 항목이 답을 얻었는지 확인한다: 변환 규칙 검증용 샘플 / `agent-evaluator` 도입 여부 / 멀티호스트 배포 구조 차용 여부
+- [x] 검증: 위 문서가 존재하고 세 항목 각각에 결론 문장이 있음
+      *(정정: "관측이 기록됨"은 틀린 완료 조건이었다. 이번 5개 task는 전부 분석·검토라 `verificationCommands`가 없었고, `src/run-loop.js`는 명령이 없으면 verify 게이트와 관측 기록을 함께 건너뛴다. 설계대로이며, 검증 명령 없는 task의 증거는 receipt와 diff다. 두 SKILL.md에 이 사실을 명시했다.)*
 
 ---
 
 ## 완료 조건
 
-- [ ] `npm run check` 전체 통과
-- [ ] 1단계 도그푸딩(작업 6)에서 **워커 receipt 필드가 실제로 존재**함을 확인
-- [ ] `aorch dispatch --plan examples/plan-oss-adoption.json --dry-run` 이 5개 task에 5개 역할을 배정
-- [ ] `NOTICE` 파일 존재 및 `package.json` `files`에 포함
-- [ ] ECC 실전 산출 문서가 결정 19의 세 항목에 답함
+- [x] `npm run check` 전체 통과 — 268 테스트, 267 pass / 0 fail / 1 skip(symlink 권한, 기존 환경 제약)
+- [x] 1단계 도그푸딩(작업 6)에서 **워커 receipt 필드가 실제로 존재**함을 확인
+- [x] `aorch dispatch --plan examples/plan-oss-adoption.json --dry-run` 이 5개 task에 5개 역할을 배정
+- [x] `NOTICE` 파일 존재 및 `package.json` `files`에 포함
+- [x] ECC 실전 산출 문서가 결정 19의 세 항목에 답함
 
 ## 1단계 도그푸딩 결과
 

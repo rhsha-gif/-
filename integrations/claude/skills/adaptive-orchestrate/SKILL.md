@@ -39,6 +39,20 @@ Prefer dispatch (cross-provider) over a Claude subagent for any bounded, self-co
 
 The role preset reaches the two providers differently: Claude receives it as `--agent`, while Codex has no agent flag and receives the preset's instructions at the head of its prompt. Both get the role's behaviour. Neither gets an enforced no-write guarantee from the preset — tool grants are set per run by aorch, and a granted shell can write regardless of which editing tools were withheld. Treat `write: false` as a claim that the change guard checks, not as a sandbox.
 
+**While a dispatch is running, do not commit in that repository.** The change
+guard compares the tree against a snapshot taken before the first worker
+started and refuses a run whose HEAD moved underneath it. That refusal is not
+recoverable by escalation — it returns to a human immediately — so a commit
+made mid-run discards the whole dispatch. Measured: one five-task run lost that
+way.
+
+**A task with no `verificationCommands` records no routing observation.** The
+verify gate is what appends the quality observation, and it is skipped entirely
+when there is nothing to run. Analysis and review tasks are the usual case.
+That is intended, but do not write a plan whose success condition assumes the
+ledger grew — for those tasks the evidence is the receipt and the diff, and
+judging them is yours.
+
 ### Borrowing from an open-source project
 
 When the request is "can we use / steal / adapt <project>", copy
