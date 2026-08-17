@@ -100,7 +100,7 @@ test('update prunes registry entries whose project is gone or uninstalled', asyn
 
 test('auto-refresh never installs into a project that never opted in', async () => {
   const bare = await newProject('aorch-autoupdate-bare-');
-  const result = await refreshIfStale({ projectRoot: bare, wait: true });
+  const result = await refreshIfStale({ projectRoot: bare, wait: true, env: {} });
   assert.equal(result.status, 'unmanaged');
   await assert.rejects(() => readFile(path.join(bare, '.claude/settings.json'), 'utf8'), /ENOENT/);
 });
