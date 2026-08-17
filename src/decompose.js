@@ -12,7 +12,17 @@ import { validateTask } from './task.js';
 const AGENT_ROLES = Object.freeze({
   worker: 'executor',
   reviewer: 'reviewer',
-  fixer: 'executor'
+  fixer: 'executor',
+  // The adoption roles. researcher and analyst produce evidence, so they route
+  // as executors; license-reviewer and ponytail render judgements, so they
+  // route as reviewers and get the reviewer's stricter candidate rules.
+  // ponytail judges rather than edits — "the best code is the code you never
+  // wrote" loses its point if the agent applying it starts writing — so the
+  // repair it recommends belongs to a fixer task declared after it.
+  researcher: 'executor',
+  analyst: 'executor',
+  'license-reviewer': 'reviewer',
+  ponytail: 'reviewer'
 });
 
 export function routingRoleFor(agentRole) {

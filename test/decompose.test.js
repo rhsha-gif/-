@@ -19,7 +19,7 @@ test('a well-formed plan validates and carries agentRole through', () => {
 });
 
 test('agentRole maps onto the routing roles the router already filters on', () => {
-  assert.deepEqual(agentRoles(), ['worker', 'reviewer', 'fixer']);
+  assert.equal(agentRoles().length, 7);
   assert.equal(routingRoleFor('worker'), 'executor');
   assert.equal(routingRoleFor('fixer'), 'executor');
   assert.equal(routingRoleFor('reviewer'), 'reviewer');
@@ -60,4 +60,31 @@ test('task-level validation failures name the offending index', () => {
   assert.throws(() => validateTaskPlan({ ...plan, tasks }), /plan\.tasks\[1\].*acceptance/is);
   const escaping = [{ ...task, id: '../escape' }];
   assert.throws(() => validateTaskPlan({ ...plan, tasks: escaping }), /plan\.tasks\[0\].*task\.id/is);
+});
+
+test('the adoption roles derive routing roles that the profiles already declare', () => {
+  assert.deepEqual(agentRoles(), [
+    'worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail'
+  ]);
+
+  // Evidence-producing roles route as executors; judging roles route as
+  // reviewers, which is also what earns them the reviewer-only exemption the
+  // router applies to challenger models on critical work.
+  assert.equal(routingRoleFor('researcher'), 'executor');
+  assert.equal(routingRoleFor('analyst'), 'executor');
+  assert.equal(routingRoleFor('license-reviewer'), 'reviewer');
+  // ponytail judges rather than edits; the repair it recommends is a separate
+  // fixer task declared after it.
+  assert.equal(routingRoleFor('ponytail'), 'reviewer');
+
+  const plan = {
+    objective: 'Adopt something',
+    decomposed: true,
+    tasks: ['researcher', 'analyst', 'license-reviewer', 'ponytail'].map((agentRole, i) => ({
+      id: `T${i}`, objective: 'do it', kind: 'research', risk: 'standard',
+      write: false, acceptanceCriteria: ['evidence recorded'], agentRole
+    }))
+  };
+  const result = validateTaskPlan(plan);
+  assert.deepEqual(result.tasks.map((t) => t.role), ['executor', 'executor', 'reviewer', 'reviewer']);
 });

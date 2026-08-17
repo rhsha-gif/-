@@ -1,0 +1,37 @@
+Adaptive Orchestrator
+Copyright (c) 2026 the Adaptive Orchestrator authors.
+
+This product includes work adapted from third-party open-source projects.
+Their licences and copyright notices follow.
+
+--------------------------------------------------------------------------------
+ponytail — https://github.com/DietrichGebert/ponytail
+
+The behavioural rules of the `aorch-ponytail` role preset
+(`integrations/claude/agents/aorch-ponytail.md` and
+`integrations/codex/agents/aorch-ponytail.toml`) are adapted from ponytail.
+The wording is our own; the approach — refusing to write code before asking
+whether it needs to exist, and climbing a fixed ladder of questions first — is
+theirs.
+
+MIT License
+
+Copyright (c) 2026 DietrichGebert
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

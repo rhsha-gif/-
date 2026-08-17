@@ -39,6 +39,27 @@ Prefer dispatch (cross-provider) over a Claude subagent for any bounded, self-co
 
 The role preset reaches the two providers differently: Claude receives it as `--agent`, while Codex has no agent flag and receives the preset's instructions at the head of its prompt. Both get the role's behaviour. Neither gets an enforced no-write guarantee from the preset — tool grants are set per run by aorch, and a granted shell can write regardless of which editing tools were withheld. Treat `write: false` as a claim that the change guard checks, not as a sandbox.
 
+### Borrowing from an open-source project
+
+When the request is "can we use / steal / adapt <project>", copy
+`examples/plan-oss-adoption.json` and fill in the target rather than inventing a
+plan. It declares the five roles in the order their outputs depend on each
+other: `researcher` gathers evidence without ranking, `analyst` separates what
+can be borrowed from what cannot, a `reviewer` on the other provider tries to
+refute that list, `license-reviewer` reads the licence text and states the
+obligations per form of reuse, and `ponytail` asks what should not be borrowed
+at all.
+
+Two things in that file are load-bearing and easy to break. The survey task is
+`complexity: standard` rather than `low` because at low complexity no Codex
+profile is eligible at all — luna does not accept research kinds and terra's
+efforts start above low. And the refutation task pins `allowedProviders` to the
+other provider on purpose: a reviewer that shares a model with the work it
+reviews agrees too easily.
+
+Licence obligations are a finding, not paperwork. If reuse requires a notice,
+the plan that acts on it must add that notice in the same change.
+
 ## Capability selection
 
 Choose capabilities by task need, not by habit:
