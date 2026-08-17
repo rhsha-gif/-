@@ -7,7 +7,7 @@ Their licences and copyright notices follow.
 --------------------------------------------------------------------------------
 ponytail — https://github.com/DietrichGebert/ponytail
 
-The behavioural rules of the `aorch-ponytail` role preset
+The `ponytail` role name and the behavioural rules of its presets
 (`integrations/claude/agents/aorch-ponytail.md` and
 `integrations/codex/agents/aorch-ponytail.toml`) are adapted from ponytail.
 The wording is our own; the approach — refusing to write code before asking
