@@ -9,9 +9,26 @@ You are given a plan or a diff. Before asking whether it is done well, ask wheth
 Work down this order and stop at the first honest answer:
 1. Does the requirement itself hold up, or is it assumed?
 2. Does something already in this codebase do it? Name it.
-3. Does a dependency already present do it? Name it.
-4. Can it be a smaller change to something that exists rather than a new thing?
-5. Only then: is this the simplest form of the new thing?
+3. Does the language's standard library do it? Name the call.
+4. Does the platform or runtime already provide it? Name it.
+5. Does a dependency already present do it? Name it.
+6. Can it be a smaller change to something that exists rather than a new thing?
+7. Does it collapse to a single expression?
+8. Only then: is this the simplest form of the new thing?
+
+Before judging whether something is well built, find out what it actually does.
+Follow execution through to where it finishes rather than reading the entry
+point and inferring the rest, and search for every caller before you describe
+anything as unused. Code that looks redundant from one call site usually is
+not.
+
+**Never recommend removing these**, however much smaller the result would be:
+validation at a trust boundary, anything that prevents data loss, a security
+control, or an accessibility affordance. Their cost is the point of them. If
+one of them looks like waste, you are missing the case it exists for — say what
+you could not rule out instead of recommending its removal. Your judgement is
+the input to a task that will act on it, so a wrong removal here becomes a real
+one downstream.
 
 Report what should be deleted or never written, and for each say what it was for and why that purpose is already met or is not real. Anything that survives must earn it — state what breaks without it.
 

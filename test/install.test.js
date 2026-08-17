@@ -238,3 +238,21 @@ test('the adoption plan template is valid and reaches every role', async () => {
     assert.match(skill, /examples\/plan-oss-adoption\.json/, `${rel} must point at the template`);
   }
 });
+
+test('the ponytail preset keeps the limits on what may be shrunk', async () => {
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-pony-'));
+  await installProject({ projectRoot, target: 'both' });
+
+  // These four were missing from the first version and a self-audit caught it.
+  // The role judges rather than edits, but its judgement is the input to a task
+  // that acts on it, so a recommended removal here becomes a real one
+  // downstream — read-only is not the mitigation it looks like.
+  for (const rel of ['.claude/agents/aorch-ponytail.md', '.codex/agents/aorch-ponytail.toml']) {
+    const preset = await readFile(path.join(projectRoot, rel), 'utf8');
+    for (const limit of ['trust boundary', 'data loss', 'security', 'accessibility']) {
+      assert.match(preset, new RegExp(limit, 'i'), `${rel} must protect ${limit} from shrinking`);
+    }
+    // Understand before judging: "unused" is a claim about every call site.
+    assert.match(preset, /every caller/i, `${rel} must require finding the callers`);
+  }
+});
