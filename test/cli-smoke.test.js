@@ -197,7 +197,8 @@ test('decompose prints the plan contract the host model must fill in', () => {
   assert.equal(result.status, 0, result.stderr);
   const schema = JSON.parse(result.stdout);
   assert.equal(schema.title, 'aorch task plan');
-  assert.deepEqual(schema.$defs.task.properties.agentRole.enum, ['worker', 'reviewer', 'fixer']);
+  assert.deepEqual(schema.$defs.task.properties.agentRole.enum,
+    ['worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail']);
   assert.deepEqual(schema.required, ['objective', 'decomposed', 'tasks']);
 });
 

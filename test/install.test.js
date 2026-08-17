@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { installProject } from '../src/install.js';
 
@@ -180,5 +181,60 @@ test('the installed skill does not promise a no-write guarantee the tools cannot
     // were withheld, so the preset never gave this guarantee.
     assert.doesNotMatch(skill, /genuinely cannot write/i, `${rel} overstates the tool boundary`);
     assert.match(skill, /change guard/i, `${rel} must name what actually enforces read-only`);
+  }
+});
+
+test('the adoption presets install on both hosts and carry their attribution', async () => {
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-adopt-'));
+  await installProject({ projectRoot, target: 'both' });
+
+  for (const role of ['researcher', 'analyst', 'license-reviewer', 'ponytail']) {
+    const claude = await readFile(path.join(projectRoot, `.claude/agents/aorch-${role}.md`), 'utf8');
+    const codex = await readFile(path.join(projectRoot, `.codex/agents/aorch-${role}.toml`), 'utf8');
+    assert.doesNotMatch(claude, /^tools:/m, `aorch-${role} must not declare a tools allowlist`);
+    assert.match(claude, /^disallowedTools:.*\bNotebookEdit\b/m, `aorch-${role} must deny every editing tool`);
+    assert.match(codex, /developer_instructions = """/, `codex aorch-${role} must carry instructions`);
+    assert.match(codex, /sandbox_mode = "read-only"/, `codex aorch-${role} must stay read-only`);
+  }
+
+  // ponytail is adapted from an MIT project; the notice travels with the file
+  // as well as living in NOTICE, so a preset copied on its own stays compliant.
+  for (const rel of ['.claude/agents/aorch-ponytail.md', '.codex/agents/aorch-ponytail.toml']) {
+    const preset = await readFile(path.join(projectRoot, rel), 'utf8');
+    assert.match(preset, /MIT License/, `${rel} must name the licence`);
+    assert.match(preset, /DietrichGebert/, `${rel} must name the copyright holder`);
+  }
+});
+
+test('NOTICE exists and ships, because attribution left out of the package is a breach', async () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const notice = await readFile(path.join(root, 'NOTICE'), 'utf8');
+  assert.match(notice, /MIT License/);
+  assert.match(notice, /DietrichGebert/);
+
+  const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+  assert.ok(pkg.files.includes('NOTICE'), 'NOTICE must be in the published files list');
+});
+
+test('the adoption plan template is valid and reaches every role', async () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const { validateTaskPlan } = await import('../src/decompose.js');
+  const plan = validateTaskPlan(JSON.parse(await readFile(path.join(root, 'examples/plan-oss-adoption.json'), 'utf8')));
+
+  assert.deepEqual(plan.tasks.map((t) => t.agentRole),
+    ['researcher', 'analyst', 'reviewer', 'license-reviewer', 'ponytail']);
+  assert.ok(plan.tasks.every((t) => t.write !== true), 'the adoption plan reads; it does not write');
+
+  // At low complexity no Codex profile is eligible for research at all, so the
+  // survey task would have nowhere to route.
+  assert.equal(plan.tasks[0].complexity, 'standard');
+  // A reviewer sharing a model with the work it reviews agrees too easily.
+  assert.deepEqual(plan.tasks[2].allowedProviders, ['openai']);
+
+  for (const rel of ['.claude/skills/adaptive-orchestrate/SKILL.md', '.agents/skills/adaptive-orchestrate/SKILL.md']) {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-tmpl-'));
+    await installProject({ projectRoot, target: 'both' });
+    const skill = await readFile(path.join(projectRoot, rel), 'utf8');
+    assert.match(skill, /examples\/plan-oss-adoption\.json/, `${rel} must point at the template`);
   }
 });

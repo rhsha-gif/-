@@ -34,6 +34,22 @@
     "fixer": {
       "claude": "aorch-fixer",
       "codex": "aorch-fixer"
+    },
+    "researcher": {
+      "claude": "aorch-researcher",
+      "codex": "aorch-researcher"
+    },
+    "analyst": {
+      "claude": "aorch-analyst",
+      "codex": "aorch-analyst"
+    },
+    "license-reviewer": {
+      "claude": "aorch-license-reviewer",
+      "codex": "aorch-license-reviewer"
+    },
+    "ponytail": {
+      "claude": "aorch-ponytail",
+      "codex": "aorch-ponytail"
     }
   },
   "providers": [

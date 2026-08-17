@@ -268,21 +268,26 @@ test('premiumThresholdPercent is normalized, ranged, and never below the soft th
   assert.throws(() => validateConfig(outOfRange), /premiumThresholdPercent/);
 });
 
+// Every agentRole must be declared once a roleAgents block exists at all — a
+// half-declared block is a mistake, not a per-role override.
+const ALL_ROLES = ['worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail'];
+function fullBlock(overrides = {}) {
+  return Object.fromEntries(ALL_ROLES.map((r) => [r, overrides[r] ?? { generic: `my-${r}` }]));
+}
+
 test('roleAgents defaults to the shipped presets so older configs keep loading', () => {
   const config = validateConfig(minimalConfig());
   assert.deepEqual(config.roleAgents.worker, { claude: 'aorch-worker', codex: 'aorch-worker' });
-  assert.deepEqual(Object.keys(config.roleAgents), ['worker', 'reviewer', 'fixer']);
+  assert.deepEqual(Object.keys(config.roleAgents), ALL_ROLES);
+  assert.deepEqual(config.roleAgents['license-reviewer'],
+    { claude: 'aorch-license-reviewer', codex: 'aorch-license-reviewer' });
 });
 
 test('a declared roleAgents block is checked strictly rather than partially merged', () => {
   const base = minimalConfig();   // single provider, adapter 'generic'
   const good = validateConfig({
     ...base,
-    roleAgents: {
-      worker: { generic: 'my-worker' },
-      reviewer: { generic: 'my-reviewer' },
-      fixer: { generic: 'my-fixer' }
-    }
+    roleAgents: fullBlock({ worker: { generic: 'my-worker' } })
   });
   assert.equal(good.roleAgents.worker.generic, 'my-worker');
 
@@ -295,20 +300,16 @@ test('a declared roleAgents block is checked strictly rather than partially merg
   // Every adapter actually in use must be covered.
   assert.throws(() => validateConfig({
     ...base,
-    roleAgents: { worker: {}, reviewer: { generic: 'r' }, fixer: { generic: 'f' } }
+    roleAgents: fullBlock({ worker: {} })
   }), /roleAgents\.worker\.generic/);
 
   assert.throws(() => validateConfig({
     ...base,
-    roleAgents: {
-      worker: { generic: '  ' }, reviewer: { generic: 'r' }, fixer: { generic: 'f' }
-    }
+    roleAgents: fullBlock({ worker: { generic: '  ' } })
   }), /roleAgents\.worker\.generic/);
 
   assert.throws(() => validateConfig({
     ...base,
-    roleAgents: {
-      worker: { generic: 'w' }, reviewer: { generic: 'r' }, fixer: { generic: 'f' }, scout: { generic: 's' }
-    }
+    roleAgents: { ...fullBlock(), scout: { generic: 's' } }
   }), /Unsupported config\.roleAgents key: scout/);
 });

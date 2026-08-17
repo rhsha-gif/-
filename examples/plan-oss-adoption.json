@@ -1,0 +1,81 @@
+{
+  "objective": "Decide what to borrow from an open-source project, and on what terms.",
+  "decomposed": true,
+  "tasks": [
+    {
+      "id": "T1-survey",
+      "title": "Find candidates",
+      "objective": "Find open-source projects that address the stated need. For each, record the repository URL, the licence as stated in the repository itself, the date of the most recent commit, and any activity signal actually observed. Do not rank them. This is judgement work, not a keyword lookup, so it is declared standard complexity rather than low: at low complexity no Codex profile is eligible at all, because luna does not accept research kinds and terra's efforts start above low.",
+      "kind": "research",
+      "agentRole": "researcher",
+      "risk": "low",
+      "complexity": "standard",
+      "write": false,
+      "acceptanceCriteria": [
+        "Every candidate carries a URL, a licence read from the repository, and a last-commit date.",
+        "Rejected candidates are listed with the reason.",
+        "Nothing is ranked or recommended."
+      ]
+    },
+    {
+      "id": "T2-analyse",
+      "title": "Separate what can be borrowed from what cannot",
+      "objective": "Read the chosen repository and produce a borrow list and a leave list. Every borrow item carries exact file paths, its dependencies, and what would have to change to fit our structure. Every leave item carries a reason. Name the places where their design and ours actively disagree, and state what you did not read. Declared high complexity: tracing dependencies through an unfamiliar codebase and judging adaptation cost is the hardest reasoning in this plan, and everything after it is built on its output.",
+      "kind": "exploration",
+      "agentRole": "analyst",
+      "risk": "standard",
+      "complexity": "high",
+      "write": false,
+      "acceptanceCriteria": [
+        "Borrow items carry file paths and traced dependencies.",
+        "Leave items carry reasons.",
+        "Conflicts with our existing design are named.",
+        "The boundary of what was read is stated."
+      ]
+    },
+    {
+      "id": "T3-challenge",
+      "title": "Independently refute the analysis",
+      "objective": "Take T2-analyse's borrow list and try to refute it. For each borrow item, look for an untraced dependency, an adaptation cost larger than writing it ourselves, or something our codebase already does. Report items that survive the attempt and items that do not. Do not restate the analysis you were given; disagree with it or confirm it against the repository itself.",
+      "kind": "review",
+      "agentRole": "reviewer",
+      "risk": "standard",
+      "complexity": "high",
+      "write": false,
+      "allowedProviders": ["openai"],
+      "acceptanceCriteria": [
+        "Each borrow item is marked survived or refuted with a stated reason.",
+        "At least one claim is checked against the repository rather than against the analysis."
+      ]
+    },
+    {
+      "id": "T4-licence",
+      "title": "State the obligations each form of reuse carries",
+      "objective": "Read the licence text itself and state the obligations separately for copying verbatim, copying with modification, and writing independently after study. Say which file must carry which notice. Report anything unclear as unclear rather than resolving it by guessing.",
+      "kind": "risk-analysis",
+      "agentRole": "license-reviewer",
+      "risk": "standard",
+      "complexity": "high",
+      "write": false,
+      "acceptanceCriteria": [
+        "The licence text is quoted, not just named.",
+        "Obligations are stated per form of reuse, naming files and notice text.",
+        "Unresolved ambiguities are reported as unresolved."
+      ]
+    },
+    {
+      "id": "T5-shrink",
+      "title": "Ask what does not need to be borrowed at all",
+      "objective": "Take the surviving borrow list and ask, for each item, whether it needs to exist here: whether the requirement holds, whether something in this codebase or its dependencies already does it, and whether a smaller change to what exists would serve. Report what should not be borrowed and what breaks without each survivor.",
+      "kind": "review",
+      "agentRole": "ponytail",
+      "risk": "standard",
+      "complexity": "high",
+      "write": false,
+      "acceptanceCriteria": [
+        "Every surviving item states what breaks without it.",
+        "Items already covered by existing code or dependencies are named with that code."
+      ]
+    }
+  ]
+}

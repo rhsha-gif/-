@@ -125,11 +125,11 @@ node --test test/<파일>.test.js   # 슬라이스별
 
 대상 파일: `src/decompose.js`, `schemas/task-plan.schema.json`, `config/aorch.config.json`, `src/config.js`, `test/decompose.test.js`, `test/config.test.js`
 
-- [ ] `src/decompose.js`의 `AGENT_ROLES`를 7개로 확장한다: `worker→executor`, `fixer→executor`, `reviewer→reviewer`, `researcher→executor`, `analyst→executor`, `license-reviewer→reviewer`, `ponytail→reviewer`. ponytail이 reviewer 파생인 이유는 판정 역할이기 때문이고, 실제 수정은 뒤따르는 fixer task가 한다(결정 11)
-- [ ] `schemas/task-plan.schema.json`의 `agentRole` enum을 같은 7개로 갱신하고, 각 값의 용도를 `description`에 한 줄씩 적는다
-- [ ] `src/config.js`의 `AGENT_ROLE_KEYS`와 `DEFAULT_ROLE_AGENTS`를 7개로 확장한다 — 신규 4개의 기본 에이전트명은 `aorch-researcher`, `aorch-analyst`, `aorch-license-reviewer`, `aorch-ponytail`
-- [ ] `config/aorch.config.json`의 `roleAgents` 블록에 4개를 추가한다(claude·codex 양쪽)
-- [ ] 검증: `node --test test/decompose.test.js test/config.test.js` — 7개 매핑 확인, enum 밖 값 거부, roleAgents 부분 선언 거부
+- [x] `src/decompose.js`의 `AGENT_ROLES`를 7개로 확장한다: `worker→executor`, `fixer→executor`, `reviewer→reviewer`, `researcher→executor`, `analyst→executor`, `license-reviewer→reviewer`, `ponytail→reviewer`. ponytail이 reviewer 파생인 이유는 판정 역할이기 때문이고, 실제 수정은 뒤따르는 fixer task가 한다(결정 11)
+- [x] `schemas/task-plan.schema.json`의 `agentRole` enum을 같은 7개로 갱신하고, 각 값의 용도를 `description`에 한 줄씩 적는다
+- [x] `src/config.js`의 `AGENT_ROLE_KEYS`와 `DEFAULT_ROLE_AGENTS`를 7개로 확장한다 — 신규 4개의 기본 에이전트명은 `aorch-researcher`, `aorch-analyst`, `aorch-license-reviewer`, `aorch-ponytail`
+- [x] `config/aorch.config.json`의 `roleAgents` 블록에 4개를 추가한다(claude·codex 양쪽)
+- [x] 검증: `node --test test/decompose.test.js test/config.test.js` — 7개 매핑 확인, enum 밖 값 거부, roleAgents 부분 선언 거부
 
 ### 작업 9: 신규 프리셋 4종 작성
 
@@ -137,45 +137,48 @@ node --test test/<파일>.test.js   # 슬라이스별
 
 모든 신규 프리셋은 `tools:`를 쓰지 않고 `disallowedTools:`만 쓴다(작업 2와 동일 규칙).
 
-- [ ] `aorch-researcher` — 웹에서 후보를 찾고 **URL·라이선스·최근 커밋일·스타수를 증거로 남긴다**. 판단이 아니라 수집이 임무이며 추천 순위를 매기지 않는다. 차단: `Write, Edit, NotebookEdit, Agent`
-- [ ] `aorch-analyst` — 지목된 저장소를 읽고 **훔칠 수 있는 것과 없는 것을 구조 단위로 가른다**. 각 항목에 파일 경로와 의존성을 붙이고, 우리 구조와 충돌하는 지점을 명시한다. 차단: `Write, Edit, NotebookEdit, Agent`
-- [ ] `aorch-license-reviewer` — 라이선스 원문을 확인하고 **차용 형태별로 의무를 판정한다**(그대로 복사 / 수정 후 복사 / 아이디어만). 고지 의무가 있으면 어디에 무엇을 써야 하는지 문장으로 제시한다. 불확실하면 "불확실"로 답하고 추정하지 않는다. 차단: `Write, Edit, NotebookEdit, Agent`
-- [ ] `aorch-ponytail` — 계획이나 diff를 받아 **"이건 안 써도 된다"를 먼저 찾는다**. 삭제·미작성 제안을 우선하고, 남겨야 할 것에는 이유를 붙인다. 코드를 직접 고치지 않고 판정만 낸다. 차단: `Write, Edit, NotebookEdit, Agent`
-- [ ] `aorch-ponytail` 두 파일 상단에 출처 주석을 넣는다: `Adapted from ponytail (https://github.com/DietrichGebert/ponytail), MIT License, Copyright (c) 2026 DietrichGebert.`
-- [ ] 저장소 루트에 `NOTICE` 파일을 만들어 ponytail의 MIT 전문과 저작권 고지를 싣는다
-- [ ] `package.json`의 `files` 배열에 `"NOTICE"`를 추가한다 — 배포물에 고지가 빠지면 MIT 의무 위반이다
-- [ ] `test/install.test.js`에 단언 추가: 신규 4종이 claude·codex 양쪽에 설치되고, `tools:`가 없고, `aorch-ponytail`에 `MIT` 및 `DietrichGebert` 문자열이 있다
-- [ ] 검증: `node --test test/install.test.js` 및 `npm run check`
+- [x] `aorch-researcher` — 웹에서 후보를 찾고 **URL·라이선스·최근 커밋일·스타수를 증거로 남긴다**. 판단이 아니라 수집이 임무이며 추천 순위를 매기지 않는다. 차단: `Write, Edit, NotebookEdit, Agent`
+- [x] `aorch-analyst` — 지목된 저장소를 읽고 **훔칠 수 있는 것과 없는 것을 구조 단위로 가른다**. 각 항목에 파일 경로와 의존성을 붙이고, 우리 구조와 충돌하는 지점을 명시한다. 차단: `Write, Edit, NotebookEdit, Agent`
+- [x] `aorch-license-reviewer` — 라이선스 원문을 확인하고 **차용 형태별로 의무를 판정한다**(그대로 복사 / 수정 후 복사 / 아이디어만). 고지 의무가 있으면 어디에 무엇을 써야 하는지 문장으로 제시한다. 불확실하면 "불확실"로 답하고 추정하지 않는다. 차단: `Write, Edit, NotebookEdit, Agent`
+- [x] `aorch-ponytail` — 계획이나 diff를 받아 **"이건 안 써도 된다"를 먼저 찾는다**. 삭제·미작성 제안을 우선하고, 남겨야 할 것에는 이유를 붙인다. 코드를 직접 고치지 않고 판정만 낸다. 차단: `Write, Edit, NotebookEdit, Agent`
+- [x] `aorch-ponytail` 두 파일 상단에 출처 주석을 넣는다: `Adapted from ponytail (https://github.com/DietrichGebert/ponytail), MIT License, Copyright (c) 2026 DietrichGebert.`
+- [x] 저장소 루트에 `NOTICE` 파일을 만들어 ponytail의 MIT 전문과 저작권 고지를 싣는다
+- [x] `package.json`의 `files` 배열에 `"NOTICE"`를 추가한다 — 배포물에 고지가 빠지면 MIT 의무 위반이다
+- [x] `test/install.test.js`에 단언 추가: 신규 4종이 claude·codex 양쪽에 설치되고, `tools:`가 없고, `aorch-ponytail`에 `MIT` 및 `DietrichGebert` 문자열이 있다
+- [x] 검증: `node --test test/install.test.js` 및 `npm run check`
 
 ### 작업 10: 드림팀 계획 템플릿
 
+> **실행 중 조정**: T2(코드분석)를 `complexity: standard`로 두니 라우터가 `claude-haiku/medium`을 골랐다. 낯선 저장소에서 의존성을 추적하고 설계 충돌을 짚는 일은 이 계획에서 가장 어려운 추론이고 이후 단계가 전부 그 산출 위에 서므로 `high`로 올렸다 — 결과 `codex-terra/xhigh`. 라우터를 원하는 모델이 나올 때까지 조정한 것이 아니라, 분류가 실제 난이도를 과소평가했던 것을 고친 것이다.
+
 대상 파일: `examples/plan-oss-adoption.json`, `integrations/claude/skills/adaptive-orchestrate/SKILL.md`, `integrations/codex/skills/adaptive-orchestrate/SKILL.md`
 
-- [ ] `examples/plan-oss-adoption.json`을 작성한다 — 5개 task를 선언 순서대로: ① `researcher` 후보 조사(`kind: research`, `complexity: standard`) ② `analyst` 구조 분석(`kind: exploration`, `complexity: standard`) ③ `reviewer` sol 검토(②의 결과 감시) ④ `license-reviewer` 라이선스 판정(`kind: risk-analysis`) ⑤ `ponytail` 축소 판정. 전부 `write: false`
-- [ ] 조사 task의 `complexity`를 `standard`로 두는 이유를 파일 안 주석 대신 계획 템플릿의 `objective` 문장에 녹인다 — `low`로 두면 codex 쪽에 갈 route가 없다(luna는 kind 미지원, terra는 low 미커버)
-- [ ] 감시 task(③)의 `objective`에 "②의 산출을 독립적으로 반박하라"를 명시하고 `allowedProviders`를 `["openai"]`로 제한해 sol 계열이 맡도록 한다
-- [ ] 두 SKILL.md에 한 문단 추가 — 오픈소스 차용 요청이 들어오면 이 템플릿을 복사해 쓰라는 지시와 파일 경로
-- [ ] 검증: `node src/cli.js decompose --plan examples/plan-oss-adoption.json` 이 `ok: true`, `taskCount: 5`를 출력하고, `node src/cli.js dispatch --plan examples/plan-oss-adoption.json --dry-run` 이 5개 task에 서로 다른 에이전트를 배정하며 ③이 openai로 가는 것을 확인
+- [x] `examples/plan-oss-adoption.json`을 작성한다 — 5개 task를 선언 순서대로: ① `researcher` 후보 조사(`kind: research`, `complexity: standard`) ② `analyst` 구조 분석(`kind: exploration`, `complexity: standard`) ③ `reviewer` sol 검토(②의 결과 감시) ④ `license-reviewer` 라이선스 판정(`kind: risk-analysis`) ⑤ `ponytail` 축소 판정. 전부 `write: false`
+- [x] 조사 task의 `complexity`를 `standard`로 두는 이유를 파일 안 주석 대신 계획 템플릿의 `objective` 문장에 녹인다 — `low`로 두면 codex 쪽에 갈 route가 없다(luna는 kind 미지원, terra는 low 미커버)
+- [x] 감시 task(③)의 `objective`에 "②의 산출을 독립적으로 반박하라"를 명시하고 `allowedProviders`를 `["openai"]`로 제한해 sol 계열이 맡도록 한다
+- [x] 두 SKILL.md에 한 문단 추가 — 오픈소스 차용 요청이 들어오면 이 템플릿을 복사해 쓰라는 지시와 파일 경로
+- [x] 검증: `node src/cli.js decompose --plan examples/plan-oss-adoption.json` 이 `ok: true`, `taskCount: 5`를 출력하고, `node src/cli.js dispatch --plan examples/plan-oss-adoption.json --dry-run` 이 5개 task에 서로 다른 에이전트를 배정하며 ③이 openai로 가는 것을 확인
 
 ### 작업 11: ECC 실전 1회
 
 대상 파일: `docs/handoff/2026-08-17-ecc-adoption.md` (신규)
 
-- [ ] `C:/Users/goyan/Downloads/ECC-main.zip`을 세션 스크래치패드(`$TEMP/claude/.../scratchpad/ecc/`)에 푼다. **저장소 안에 넣지 않는다** — 4,745 파일이 change guard의 트리 대조를 오염시킨다
-- [ ] `examples/plan-oss-adoption.json`을 복사해 대상 경로를 그 스크래치패드로 채운 계획을 만들고 `aorch dispatch --plan <file>`을 실행한다. 워커의 `allowedScope`에 스크래치패드 경로를, `forbiddenScope`에 `src/**`·`integrations/**`를 넣어 조사 대상과 우리 코드를 분리한다
-- [ ] 산출을 `docs/handoff/2026-08-17-ecc-adoption.md`에 정리한다 — 훔칠 것 목록(파일 경로 포함), 라이선스 판정, ponytail의 축소 제안, 그리고 **드림팀 자체의 실측 평가**(어느 단계가 값을 냈고 어느 단계가 낭비였나)
-- [ ] 결정 19의 세 항목이 답을 얻었는지 확인한다: 변환 규칙 검증용 샘플 / `agent-evaluator` 도입 여부 / 멀티호스트 배포 구조 차용 여부
-- [ ] 검증: 위 문서가 존재하고 세 항목 각각에 결론 문장이 있으며, `.aorch/observations.jsonl`에 이번 실행의 관측이 기록됨
+- [x] `C:/Users/goyan/Downloads/ECC-main.zip`을 세션 스크래치패드(`$TEMP/claude/.../scratchpad/ecc/`)에 푼다. **저장소 안에 넣지 않는다** — 4,745 파일이 change guard의 트리 대조를 오염시킨다
+- [x] `examples/plan-oss-adoption.json`을 복사해 대상 경로를 그 스크래치패드로 채운 계획을 만들고 `aorch dispatch --plan <file>`을 실행한다. 워커의 `allowedScope`에 스크래치패드 경로를, `forbiddenScope`에 `src/**`·`integrations/**`를 넣어 조사 대상과 우리 코드를 분리한다
+- [x] 산출을 `docs/handoff/2026-08-17-ecc-adoption.md`에 정리한다 — 훔칠 것 목록(파일 경로 포함), 라이선스 판정, ponytail의 축소 제안, 그리고 **드림팀 자체의 실측 평가**(어느 단계가 값을 냈고 어느 단계가 낭비였나)
+- [x] 결정 19의 세 항목이 답을 얻었는지 확인한다: 변환 규칙 검증용 샘플 / `agent-evaluator` 도입 여부 / 멀티호스트 배포 구조 차용 여부
+- [x] 검증: 위 문서가 존재하고 세 항목 각각에 결론 문장이 있음
+      *(정정: "관측이 기록됨"은 틀린 완료 조건이었다. 이번 5개 task는 전부 분석·검토라 `verificationCommands`가 없었고, `src/run-loop.js`는 명령이 없으면 verify 게이트와 관측 기록을 함께 건너뛴다. 설계대로이며, 검증 명령 없는 task의 증거는 receipt와 diff다. 두 SKILL.md에 이 사실을 명시했다.)*
 
 ---
 
 ## 완료 조건
 
-- [ ] `npm run check` 전체 통과
-- [ ] 1단계 도그푸딩(작업 6)에서 **워커 receipt 필드가 실제로 존재**함을 확인
-- [ ] `aorch dispatch --plan examples/plan-oss-adoption.json --dry-run` 이 5개 task에 5개 역할을 배정
-- [ ] `NOTICE` 파일 존재 및 `package.json` `files`에 포함
-- [ ] ECC 실전 산출 문서가 결정 19의 세 항목에 답함
+- [x] `npm run check` 전체 통과 — 268 테스트, 267 pass / 0 fail / 1 skip(symlink 권한, 기존 환경 제약)
+- [x] 1단계 도그푸딩(작업 6)에서 **워커 receipt 필드가 실제로 존재**함을 확인
+- [x] `aorch dispatch --plan examples/plan-oss-adoption.json --dry-run` 이 5개 task에 5개 역할을 배정
+- [x] `NOTICE` 파일 존재 및 `package.json` `files`에 포함
+- [x] ECC 실전 산출 문서가 결정 19의 세 항목에 답함
 
 ## 1단계 도그푸딩 결과
 
