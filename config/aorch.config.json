@@ -62,6 +62,14 @@
     "qa-analyst": {
       "claude": "aorch-qa-analyst",
       "codex": "aorch-qa-analyst"
+    },
+    "invest-analyst": {
+      "claude": "aorch-invest-analyst",
+      "codex": "aorch-invest-analyst"
+    },
+    "refactorer": {
+      "claude": "aorch-refactorer",
+      "codex": "aorch-refactorer"
     }
   },
   "providers": [

@@ -30,7 +30,13 @@ const AGENT_ROLES = Object.freeze({
   // reviewer work.
   writer: 'executor',
   editor: 'executor',
-  'qa-analyst': 'reviewer'
+  'qa-analyst': 'reviewer',
+  // invest-analyst renders a judgement over evidence someone else gathered
+  // (researcher collects, reviewer refutes), so it routes as a reviewer.
+  // refactorer holds the pen but only for behavior-preserving restructuring;
+  // what deserves deleting is ponytail's question, how is refactorer's.
+  'invest-analyst': 'reviewer',
+  refactorer: 'executor'
 });
 
 export function routingRoleFor(agentRole) {

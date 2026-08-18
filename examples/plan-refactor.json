@@ -1,0 +1,51 @@
+{
+  "objective": "Clean up a bounded area of a codebase without changing behavior: first ask what does not need to exist, then restructure what survives, then independently review the result. Copy this template, replace <scope> with the target paths and <test-command> with the project's real verification suite, and decide isolation per project: run in a linked worktree when the verification commands work there, or set allowInPlaceWrite on R2 when they need the workspace's installed dependencies.",
+  "decomposed": true,
+  "tasks": [
+    {
+      "id": "R1-shrink",
+      "title": "Ask what does not need to exist",
+      "objective": "Judge the code under <scope>: what can be deleted or left unwritten, what is already provided by the codebase, the standard library, the platform, or an existing dependency, and what should stay with a stated reason. Never recommend removing validation at a trust boundary, anything preventing data loss, security controls, or accessibility affordances. Your verdict is the work order for the next task — name files and symbols, not vibes.",
+      "kind": "review",
+      "agentRole": "ponytail",
+      "risk": "standard",
+      "complexity": "high",
+      "write": false,
+      "acceptanceCriteria": [
+        "Every keep carries a reason; every cut names what already covers it or why it is not needed.",
+        "Findings name files and symbols concretely enough to act on."
+      ]
+    },
+    {
+      "id": "R2-restructure",
+      "title": "Restructure what survives",
+      "objective": "Apply R1-shrink's verdict to <scope> as behavior-preserving restructuring: delete what it condemned, simplify what it questioned, and reshape what stays — in several small equivalence-preserving steps, not one clever rewrite. Anything that would change a public API, observable behavior, or an error message a caller matches on is not yours to change: report it in unresolvedRisks. Run the named tests fresh and never weaken, skip, or rewrite a test to make the restructuring pass.",
+      "kind": "implementation",
+      "agentRole": "refactorer",
+      "risk": "standard",
+      "complexity": "standard",
+      "write": true,
+      "allowedScope": ["<scope>"],
+      "verificationCommands": ["<test-command>"],
+      "acceptanceCriteria": [
+        "The named test suite passes unmodified.",
+        "Every R1 verdict is either applied or reported in unresolvedRisks with a reason.",
+        "No public API or observable behavior changed."
+      ]
+    },
+    {
+      "id": "R3-review",
+      "title": "Independently review the restructuring",
+      "objective": "Review R2-restructure's diff for behavior changes that slipped through: altered edge-case handling, error paths, ordering, or resource lifetimes. When filling this template, set allowedProviders to the provider the dry run did NOT give R2-restructure. Confirm or refute against the code, not against R2's receipt.",
+      "kind": "review",
+      "agentRole": "reviewer",
+      "risk": "standard",
+      "complexity": "high",
+      "write": false,
+      "acceptanceCriteria": [
+        "Each suspected behavior change is confirmed or refuted against the code.",
+        "The verdict states plainly whether the diff is behavior-preserving."
+      ]
+    }
+  ]
+}

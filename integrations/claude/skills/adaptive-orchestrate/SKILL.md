@@ -89,6 +89,26 @@ drafter did not get — same cross-provider reasoning as the refutation task
 above. Full `book:qa` is a milestone command run by hand before sharing or
 release, not a per-chapter step.
 
+### Preparing an investment judgement
+
+When the request is to examine an investment thesis, copy
+`examples/plan-invest-evidence.json` and state the thesis in each objective:
+`researcher` gathers dated, sourced evidence on both sides, `invest-analyst`
+analyses it into support, refutation, blind spots and checkable invalidation
+conditions, and a cross-provider `reviewer` tries to refute the analysis
+against the sources. No task decides, ranks, or orders anything — the output
+is input for the human's invest-judge decision record.
+
+### Refactoring a bounded area
+
+When the request is to clean up or refactor code, copy
+`examples/plan-refactor.json` and fill the scope and the project's real test
+command: `ponytail` decides what does not need to exist, `refactorer` applies
+the verdict as behavior-preserving steps gated on the unmodified test suite,
+and a cross-provider `reviewer` hunts for behavior changes in the diff.
+Isolation is per project — a linked worktree when the tests run there, or
+`allowInPlaceWrite` when they need the workspace's installed dependencies.
+
 ## Capability selection
 
 Choose capabilities by task need, not by habit:

@@ -1,0 +1,50 @@
+{
+  "objective": "Prepare the evidence base for one investment judgement: gather verifiable facts, analyse them into support, refutation and blind spots, and independently refute that analysis. The output feeds the invest-judge decision record; no task here decides, ranks, or orders anything. Copy this template, state the thesis under examination in each objective, and dispatch. All tasks are read-only.",
+  "decomposed": true,
+  "tasks": [
+    {
+      "id": "V1-gather",
+      "title": "Gather the evidence",
+      "objective": "Gather verifiable evidence bearing on the stated thesis: <thesis>. For each item record the source URL, the date of the data, and what the source actually says — not what it implies. Include evidence on both sides and evidence about the market structure the thesis lives in. Do not rank, recommend, or conclude. Declared standard complexity on purpose: at low complexity no Codex profile is eligible for research kinds.",
+      "kind": "research",
+      "agentRole": "researcher",
+      "risk": "standard",
+      "complexity": "standard",
+      "write": false,
+      "acceptanceCriteria": [
+        "Every item carries a URL, a data date, and a faithful statement of what the source says.",
+        "Both supporting and opposing evidence are present, or their absence is stated.",
+        "Nothing is ranked, recommended, or concluded."
+      ]
+    },
+    {
+      "id": "V2-analyse",
+      "title": "Analyse into support, refutation and blind spots",
+      "objective": "Take V1-gather's evidence about the thesis <thesis> and analyse it into the three sections an invest-judge decision record needs: grounds that support the thesis, grounds that refute it, and blind spots neither side covers. Cite the specific evidence item under each point, name every condition that would invalidate the thesis as a checkable condition, and state uncertainty as uncertainty. Do not gather new evidence, rank assets, or order trades.",
+      "kind": "risk-analysis",
+      "agentRole": "invest-analyst",
+      "risk": "standard",
+      "complexity": "high",
+      "write": false,
+      "acceptanceCriteria": [
+        "Support, refutation and blind-spot sections each cite specific evidence items.",
+        "Invalidation conditions are named and checkable.",
+        "Uncertainty is reported as uncertainty, not resolved by guessing."
+      ]
+    },
+    {
+      "id": "V3-challenge",
+      "title": "Independently refute the analysis",
+      "objective": "Take V2-analyse's output and try to refute it against the evidence itself: a support point that overstates its source, a refutation the evidence does not actually carry, a blind spot that is already covered, or a missing invalidation condition. When filling this template, set allowedProviders to the provider the dry run did NOT give V2-analyse — an independent stable catches what the analyst's own family reads past. Report each point as survived or refuted with the evidence it turns on.",
+      "kind": "review",
+      "agentRole": "reviewer",
+      "risk": "standard",
+      "complexity": "high",
+      "write": false,
+      "acceptanceCriteria": [
+        "Each analysed point is marked survived or refuted with cited evidence.",
+        "At least one claim is checked against the source rather than against the analysis."
+      ]
+    }
+  ]
+}

@@ -61,7 +61,7 @@ function adapterMaturity(value, name, fallback) {
 // fails closed when it needs a pair this map does not carry.
 const AGENT_ROLE_KEYS = [
   'worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail',
-  'writer', 'editor', 'qa-analyst'
+  'writer', 'editor', 'qa-analyst', 'invest-analyst', 'refactorer'
 ];
 const preset = (name) => Object.freeze({ claude: name, codex: name });
 const DEFAULT_ROLE_AGENTS = Object.freeze({
@@ -74,7 +74,9 @@ const DEFAULT_ROLE_AGENTS = Object.freeze({
   ponytail: preset('aorch-ponytail'),
   writer: preset('aorch-writer'),
   editor: preset('aorch-editor'),
-  'qa-analyst': preset('aorch-qa-analyst')
+  'qa-analyst': preset('aorch-qa-analyst'),
+  'invest-analyst': preset('aorch-invest-analyst'),
+  refactorer: preset('aorch-refactorer')
 });
 
 function validateRoleAgents(input, providers) {

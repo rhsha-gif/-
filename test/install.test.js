@@ -208,6 +208,27 @@ test('the book-production presets install on both hosts with the right pen bound
   assert.match(codexQa, /sandbox_mode = "read-only"/, 'codex qa-analyst must stay read-only');
 });
 
+test('the invest and refactor presets install with the right pen boundaries', async () => {
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-invref-'));
+  await installProject({ projectRoot, target: 'both' });
+
+  for (const role of ['invest-analyst', 'refactorer']) {
+    const claude = await readFile(path.join(projectRoot, `.claude/agents/aorch-${role}.md`), 'utf8');
+    const codex = await readFile(path.join(projectRoot, `.codex/agents/aorch-${role}.toml`), 'utf8');
+    assert.doesNotMatch(claude, /^tools:/m, `aorch-${role} must not declare a tools allowlist`);
+    assert.match(claude, /^disallowedTools:/m, `aorch-${role} must state its restrictions as a denylist`);
+    assert.match(codex, /developer_instructions = """/, `codex aorch-${role} must carry instructions`);
+  }
+
+  const invest = await readFile(path.join(projectRoot, '.claude/agents/aorch-invest-analyst.md'), 'utf8');
+  assert.match(invest, /^disallowedTools:.*\bWrite\b.*\bEdit\b.*\bNotebookEdit\b/m, 'invest-analyst must deny every editing tool');
+  const codexInvest = await readFile(path.join(projectRoot, '.codex/agents/aorch-invest-analyst.toml'), 'utf8');
+  assert.match(codexInvest, /sandbox_mode = "read-only"/, 'codex invest-analyst must stay read-only');
+  const refactorer = await readFile(path.join(projectRoot, '.claude/agents/aorch-refactorer.md'), 'utf8');
+  assert.doesNotMatch(refactorer, /^disallowedTools:.*\bWrite\b/m, 'refactorer must keep the pen');
+  assert.match(refactorer, /never weaken, skip, or rewrite a test/, 'refactorer must carry the no-test-weakening rule');
+});
+
 test('the adoption presets install on both hosts and carry their attribution', async () => {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-adopt-'));
   await installProject({ projectRoot, target: 'both' });

@@ -272,7 +272,7 @@ test('premiumThresholdPercent is normalized, ranged, and never below the soft th
 // half-declared block is a mistake, not a per-role override.
 const ALL_ROLES = [
   'worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail',
-  'writer', 'editor', 'qa-analyst'
+  'writer', 'editor', 'qa-analyst', 'invest-analyst', 'refactorer'
 ];
 function fullBlock(overrides = {}) {
   return Object.fromEntries(ALL_ROLES.map((r) => [r, overrides[r] ?? { generic: `my-${r}` }]));
