@@ -529,3 +529,89 @@ test('dry-run delegates without running verification', async (t) => {
   assert.equal(calls[0].dryRun, true);
   assert.equal(verifyCalls.length, 0);
 });
+
+// The receipt is the only machine signal a commandless task produces. Before
+// this gate, any non-throwing execution counted as complete, so a reviewer
+// returning `blocked` or a failed criterion still let the next plan task run.
+test('a blocked receipt returns to the human without verification or escalation', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const verifyCalls = [];
+  const base = stubExecutor(dir, calls);
+  await assert.rejects(
+    executeLoop({
+      task: baseTask({ write: false, verificationCommands: [] }),
+      config: baseConfig(),
+      cwd: dir,
+      executeTaskImpl: async (input) => {
+        const execution = await base(input);
+        return { ...execution, receipt: { status: 'blocked', filesChanged: [], criteria: [{ criterion: 'diff reviewed', status: 'not-run', evidence: 'tree unreadable' }] } };
+      },
+      runVerificationImpl: stubVerifier([], verifyCalls)
+    }),
+    (error) => {
+      assert.match(error.message, /status "blocked"/);
+      assert.match(error.message, /verification\.json/);
+      assert.equal(error.receiptStatus, 'blocked');
+      assert.equal(error.attempts.length, 1);
+      assert.equal(error.attempts[0].changeGuardPassed, true);
+      return true;
+    }
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(verifyCalls.length, 0);
+});
+
+test('a complete receipt with a failed criterion is a failure, even when commands would pass', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const verifyCalls = [];
+  const base = stubExecutor(dir, calls);
+  await assert.rejects(
+    executeLoop({
+      task: baseTask(),
+      config: baseConfig(),
+      cwd: dir,
+      executeTaskImpl: async (input) => {
+        const execution = await base(input);
+        return {
+          ...execution,
+          receipt: {
+            status: 'complete',
+            filesChanged: [],
+            criteria: [
+              { criterion: 'tests pass', status: 'pass', evidence: 'ok' },
+              { criterion: 'docs updated', status: 'fail', evidence: 'README untouched' }
+            ]
+          }
+        };
+      },
+      runVerificationImpl: stubVerifier([true], verifyCalls)
+    }),
+    (error) => {
+      assert.match(error.message, /1 criterion\(s\) failed: docs updated/);
+      assert.equal(error.receiptStatus, 'complete');
+      return true;
+    }
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(verifyCalls.length, 0);
+});
+
+test('a complete receipt whose criteria pass or were not run keeps the run moving', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const base = stubExecutor(dir, calls);
+  const result = await executeLoop({
+    task: baseTask({ verificationCommands: [] }),
+    config: baseConfig(),
+    cwd: dir,
+    executeTaskImpl: async (input) => {
+      const execution = await base(input);
+      return { ...execution, receipt: { status: 'complete', filesChanged: [], criteria: [{ criterion: 'c', status: 'not-run', evidence: 'advisory' }] } };
+    },
+    runVerificationImpl: stubVerifier([])
+  });
+  assert.equal(result.verification, null);
+  assert.equal(calls.length, 1);
+});

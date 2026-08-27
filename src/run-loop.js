@@ -42,6 +42,46 @@ async function failChangeGuard({ attempt, route, runDir, changeGuard, attempts, 
   throw error;
 }
 
+// The receipt is the only machine-readable signal a task without verification
+// commands produces, and the schema lets the worker say `partial`, `blocked`,
+// or mark a criterion `fail`. Null means the receipt claims completion; a
+// string is why the run must stop. A non-object receipt is not judged here.
+function receiptVerdict(receipt) {
+  if (!receipt || typeof receipt !== 'object') return null;
+  if (receipt.status !== 'complete') {
+    return `worker receipt reports status "${receipt.status}"`;
+  }
+  const failed = (Array.isArray(receipt.criteria) ? receipt.criteria : [])
+    .filter((entry) => entry?.status === 'fail')
+    .map((entry) => entry.criterion);
+  if (failed.length > 0) {
+    return `worker receipt marks ${failed.length} criterion(s) failed: ${failed.join('; ')}`;
+  }
+  return null;
+}
+
+// Same shape as failChangeGuard: the worker's own verdict on its work is not
+// a model failure escalation can fix — a blocked reviewer stays blocked on a
+// stronger tier — so the evidence returns to the human immediately.
+async function failReceiptVerdict({ attempt, route, runDir, changeGuard, attempts, receipt, verdict }) {
+  const routeEvidence = routeSummary(route);
+  attempts.push({ attempt, route: routeEvidence, passed: false, changeGuardPassed: true, receiptStatus: receipt.status });
+  const evidencePath = path.join(runDir, 'verification.json');
+  await writeJsonAtomic(evidencePath, {
+    attempt,
+    route: routeEvidence,
+    passed: false,
+    results: [],
+    changeGuard,
+    receiptVerdict: verdict
+  });
+  const error = new Error(`${verdict}; manual review required. Evidence: ${evidencePath}`);
+  error.attempts = attempts;
+  error.runDir = runDir;
+  error.receiptStatus = receipt.status;
+  throw error;
+}
+
 // Exec -> verify -> escalate. A failed verification climbs the provider's
 // escalation ladder with the failure evidence attached; when the attempt
 // budget or the ladder runs out, the human gets the evidence back instead of
@@ -155,6 +195,19 @@ export async function executeWithVerification({
         runDir: execution.runDir,
         changeGuard,
         attempts
+      });
+    }
+
+    const verdict = receiptVerdict(execution.receipt);
+    if (verdict) {
+      await failReceiptVerdict({
+        attempt,
+        route: execution.route,
+        runDir: execution.runDir,
+        changeGuard,
+        attempts,
+        receipt: execution.receipt,
+        verdict
       });
     }
 
