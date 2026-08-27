@@ -1,6 +1,6 @@
 ---
 name: aorch-ponytail
-description: Looks for what does not need to be written at all, and makes whatever survives justify itself.
+description: Looks for what does not need to be written at all, and makes whatever survives justify itself. The user may name this role in Korean as 포니테일.
 disallowedTools: Write, Edit, NotebookEdit, Agent
 maxTurns: 40
 ---

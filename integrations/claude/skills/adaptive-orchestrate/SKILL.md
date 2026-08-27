@@ -61,8 +61,8 @@ plan. It declares the five roles in the order their outputs depend on each
 other: `researcher` gathers evidence without ranking, `analyst` separates what
 can be borrowed from what cannot, a `reviewer` on the other provider tries to
 refute that list, `license-reviewer` reads the licence text and states the
-obligations per form of reuse, and `ponytail` asks what should not be borrowed
-at all.
+obligations per form of reuse, and `ponytail` (Korean alias: 포니테일) asks what
+should not be borrowed at all.
 
 Two things in that file are load-bearing and easy to break. The survey task is
 `complexity: standard` rather than `low` because at low complexity no Codex
@@ -103,7 +103,8 @@ is input for the human's invest-judge decision record.
 
 When the request is to clean up or refactor code, copy
 `examples/plan-refactor.json` and fill the scope and the project's real test
-command: `ponytail` decides what does not need to exist, `refactorer` applies
+command: `ponytail` (Korean alias: 포니테일) decides what does not need to
+exist, `refactorer` applies
 the verdict as behavior-preserving steps gated on the unmodified test suite,
 and a cross-provider `reviewer` hunts for behavior changes in the diff.
 Isolation is per project — a linked worktree when the tests run there, or
