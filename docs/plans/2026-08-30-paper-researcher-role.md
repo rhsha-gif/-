@@ -84,7 +84,7 @@ node src/cli.js decompose --plan examples/plan-paper-search.json   # exit 0
 
 대상 파일: `docs/plans/2026-08-30-paper-researcher-role.md`("도그푸딩 결과" 절)
 
-- [ ] `.aorch` 설치본이 저장소보다 우선하는 함정(메모 aorch-wide-tiers) 확인: `aorch install` 또는 동등 명령으로 새 프리셋·역할 맵을 설치본에 반영
+- [x] `.aorch` 설치본이 저장소보다 우선하는 함정(메모 aorch-wide-tiers) 확인: `aorch install` 또는 동등 명령으로 새 프리셋·역할 맵을 설치본에 반영 → 실측: 설치 없이 dispatch하면 Claude CLI가 `--agent 'aorch-paper-researcher' not found`로 2초 만에 exit 1(워크트리에 `.claude/agents`가 없어 상위 체크아웃의 구 설치본을 읽음). `node src/cli.js install --project . --target both --force-config`로 해결
 - [ ] `examples/plan-paper-search.json`을 복사해 주제를 "LLM agent difficulty-aware model routing"으로 채우고 `aorch dispatch`(또는 `aorch exec`) 실행
 - [ ] P1 receipt 검사: 레코드 ≥5, 각 레코드에 인용수와 `mcp__paper-search__*` 도구명, 제외 목록 존재. 미달이면 프롬프트/turn 예산 조정 후 1회 재실행하고 조정 내용 기록
 - [ ] 소요 시간·모델·receipt 경로를 이 문서 "도그푸딩 결과" 절에 기록
