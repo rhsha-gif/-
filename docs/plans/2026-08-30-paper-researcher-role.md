@@ -85,10 +85,10 @@ node src/cli.js decompose --plan examples/plan-paper-search.json   # exit 0
 대상 파일: `docs/plans/2026-08-30-paper-researcher-role.md`("도그푸딩 결과" 절)
 
 - [x] `.aorch` 설치본이 저장소보다 우선하는 함정(메모 aorch-wide-tiers) 확인: `aorch install` 또는 동등 명령으로 새 프리셋·역할 맵을 설치본에 반영 → 실측: 설치 없이 dispatch하면 Claude CLI가 `--agent 'aorch-paper-researcher' not found`로 2초 만에 exit 1(워크트리에 `.claude/agents`가 없어 상위 체크아웃의 구 설치본을 읽음). `node src/cli.js install --project . --target both --force-config`로 해결
-- [ ] `examples/plan-paper-search.json`을 복사해 주제를 "LLM agent difficulty-aware model routing"으로 채우고 `aorch dispatch`(또는 `aorch exec`) 실행
-- [ ] P1 receipt 검사: 레코드 ≥5, 각 레코드에 인용수와 `mcp__paper-search__*` 도구명, 제외 목록 존재. 미달이면 프롬프트/turn 예산 조정 후 1회 재실행하고 조정 내용 기록
-- [ ] 소요 시간·모델·receipt 경로를 이 문서 "도그푸딩 결과" 절에 기록
-- [ ] 검증: `npm run check` 전부 통과; receipt 파일이 위 3조건을 만족
+- [x] `examples/plan-paper-search.json`을 복사해 주제를 "LLM agent difficulty-aware model routing"으로 채우고 `aorch dispatch`(또는 `aorch exec`) 실행
+- [x] P1 receipt 검사: 레코드 ≥5, 각 레코드에 인용수와 `mcp__paper-search__*` 도구명, 제외 목록 존재. 미달이면 프롬프트/turn 예산 조정 후 1회 재실행하고 조정 내용 기록
+- [x] 소요 시간·모델·receipt 경로를 이 문서 "도그푸딩 결과" 절에 기록
+- [x] 검증: `npm run check` 전부 통과; receipt 파일이 위 3조건을 만족
 
 ## 스파이크 결과 (2026-08-30 실측)
 
@@ -99,11 +99,21 @@ node src/cli.js decompose --plan examples/plan-paper-search.json   # exit 0
 - 관련성: OpenAlex는 인용수 순에 가까운 결과(주제 무관 논문 상위), Crossref는 주제 적합. 프롬프트에 "소스별 특성·0건은 실패 아님·다른 소스 폴백" 명시 필요.
 - Codex 판정: **Codex MCP 가능.** `codex exec -c 'mcp_servers.paper-search.command="uvx"' -c 'mcp_servers.paper-search.args=["paper-search-mcp"]' --sandbox read-only --json -`로 도구 인식. 도구명은 `mcp__paper_search__*`(하이픈→밑줄). 200초 소요 — 전역 `codex_apps`·`chrome_devtools` MCP가 함께 로드된 탓, 모델 캐시 경고(`missing field base_instructions`) 2줄은 무관.
 
-## 도그푸딩 결과
+## 도그푸딩 결과 (2026-08-30 실측)
 
-(작업 6에서 채움)
+주제: "difficulty-aware routing of requests between LLMs of different cost (model cascades, RouteLLM)". 플랜: `examples/plan-paper-search.json` 복사, P1 `allowedProviders: ["anthropic"]`, P2 `["openai"]`(드라이런은 둘 다 Codex terra로 갔음). 명령: `node src/cli.js install --project . --target both --force-config` 후 `node src/cli.js dispatch --config config/aorch.config.json --plan <plan> --timeout-ms 1200000`.
+
+- run 1 (2초, 실패): `--agent 'aorch-paper-researcher' not found` — 워크트리에 설치본 없음. install로 해결.
+- run 2 (368초, 실패): P1 워커는 `complete`였으나 change guard 실패 — run 도중 내가 계획 문서를 편집한 미커밋 변경을 "읽기 전용 워커의 트리 변경"으로 잡음. 워커 결함 아님. 이 run의 receipt는 summary에 건수만 있고 레코드가 없었다(2.2KB) → 프리셋·예시 플랜에 "레코드 전부를 receipt summary에 담아라" 지시 추가(receipt가 유일한 보존 산출물인데 base 프롬프트가 조사형 역할의 산출물 위치를 말하지 않는 기존 공백; `researcher`도 같음 — 이월).
+- run 3 (1284초, P1 complete / P2 failed → run 중단): P1(sonnet high) receipt 16.7KB, 5개 세부 질의 × openalex/crossref/arxiv/semantic(semantic은 전부 빈 결과), 핵심 25편 + 경계 8편, DOI/arXiv ID 36개, 인용수·소스 도구명 포함, 제외 ~40편 사유별, 순위 없음 — 완료 조건 충족. run 경로: `.aorch/task-runs/a25889f0-.../P1-search/receipt.json`. P2(Codex terra max)는 33편 전부를 원출처 URL로 대조해 16 survived / 17 refuted(저자 표기 순서 5건, TensorOpera 제목 변형, DAHR DOI 불일치, Route-To-Reason 프리프린트/출판판 혼합, 연도·URL 누락)를 보고했고, 플랜에 없는 기준 "인용수·MCP 출처가 재현 가능하게 검증됨"을 스스로 추가해 fail로 매겨 dispatch가 중단됐다(adb06ee 정책대로). `.aorch/task-runs/4740d29f-.../P2-refute/receipt.json`.
+
+관찰: (1) 주입 경로·허용목록·fail-closed 모두 실 run에서 동작. (2) 워커의 서지 전사 정확도가 낮다(refuted 17/33, 대부분 저자명 순서·표기) — P2 같은 교차 검증 태스크가 필수이며, 프리셋에 "authors는 도구 반환값을 그대로" 규칙을 넣을지는 다음 run에서 판단. (3) 리뷰어가 플랜 밖 기준을 추가해 run을 멈추는 것은 이 역할이 아니라 reviewer 프리셋/receiptVerdict의 성질 — 별도 이슈로 이월. (4) run 3 이후 적용한 summary 지시 패치는 재실행으로 검증하지 않았다(run 3이 이미 완료 조건을 충족해 추가 20분 run 생략).
 
 ## 이월
+
+- 조사형 역할(researcher·paper-researcher)의 산출물이 receipt `summary`에만 살아남는 구조: base 프롬프트 또는 receipt 스키마에 findings 자리를 만들지 검토
+- reviewer가 플랜에 없는 기준을 추가해 fail로 run을 멈추는 문제(run 3 P2)
+- 서지 전사 정확도: 저자명·DOI를 도구 반환값 그대로 옮기라는 규칙 강화 여부
 
 - arxiv-mcp-server 추가: 인용 관계(피인용 목록)가 필요해질 때 — paper-search-mcp는 `references`를 전 소스에서 비워 돌려준다(08-30 실측). WebFetch 전문 실패 시에도 재검토
 - 무료 키(Semantic Scholar·NCBI) 발급: rate limit이 receipt 품질을 떨어뜨린다고 관측될 때

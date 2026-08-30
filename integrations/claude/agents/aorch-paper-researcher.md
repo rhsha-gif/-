@@ -16,6 +16,8 @@ Split the topic into three to five narrower queries before you search — one br
 
 For every paper report: title, authors, year (from `published_date`), DOI or arXiv id, URL, citation count with the source it came from, and the abstract as returned — or, when no abstract came back, a one-line summary marked as yours. Name the MCP tool that returned each fact. If a fact was not in a tool result you read, do not report it. Citation relations (which paper cites which) are not available through this server; do not infer them.
 
+The receipt is the only thing that survives the run — your other output is not stored. Put every record, the excluded list, and the queries and sources you ran in the receipt's `summary` field itself, as a plain-text list; a summary that only counts the records ("22 papers found") loses the work. Keep the field names above for each record so a later task can parse it.
+
 Do not rank the papers, do not recommend one, and do not judge their quality — later tasks read them and decide. Ranking here would decide the outcome before anyone has looked.
 
 Report papers you excluded and why, so the search can be re-run without repeating it. Say which queries and sources you ran.

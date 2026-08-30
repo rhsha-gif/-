@@ -5,14 +5,14 @@
     {
       "id": "P1-search",
       "title": "Search the literature",
-      "objective": "Search academic sources for papers bearing on the topic: <topic>. Split the topic into three to five narrower queries and run each against more than one source, because openalex and crossref return real citation counts while arxiv returns 0 and semantic may return an empty list without a key. For every paper record title, authors, year, DOI or arXiv id, URL, citation count with its source, the abstract as returned (or a flagged one-line summary), and the MCP tool that returned each fact. List excluded papers with reasons and the queries and sources you ran. Do not rank, recommend, or synthesise. Full text is out of scope. If no paper-search MCP tools are available, report status blocked and stop. Declared standard complexity on purpose: at low complexity no Codex profile is eligible for research kinds.",
+      "objective": "Search academic sources for papers bearing on the topic: <topic>. Split the topic into three to five narrower queries and run each against more than one source, because openalex and crossref return real citation counts while arxiv returns 0 and semantic may return an empty list without a key. For every paper record title, authors, year, DOI or arXiv id, URL, citation count with its source, the abstract as returned (or a flagged one-line summary), and the MCP tool that returned each fact. Write every record, the excluded list and the queries run into the receipt summary field itself — the receipt is the only output that is stored. Do not rank, recommend, or synthesise. Full text is out of scope. If no paper-search MCP tools are available, report status blocked and stop. Declared standard complexity on purpose: at low complexity no Codex profile is eligible for research kinds.",
       "kind": "research",
       "agentRole": "paper-researcher",
       "risk": "standard",
       "complexity": "standard",
       "write": false,
       "acceptanceCriteria": [
-        "At least five records, each with title, authors, year, DOI or arXiv id, URL, citation count (openalex/crossref; arxiv returns 0 and semantic may return empty), and the MCP tool that returned it.",
+        "The receipt summary itself lists at least five records, each with title, authors, year, DOI or arXiv id, URL, citation count (openalex/crossref; arxiv returns 0 and semantic may return empty), and the MCP tool that returned it.",
         "Each record carries the abstract as returned, or a one-line summary flagged as the worker's own.",
         "Excluded papers are listed with reasons, and the queries and sources run are stated.",
         "Nothing is ranked, recommended, or synthesised."
