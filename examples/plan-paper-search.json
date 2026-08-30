@@ -1,0 +1,36 @@
+{
+  "objective": "Collect the literature bearing on one stated topic and independently check the records. paper-researcher searches through the paper-search MCP that its role preset injects — the plan names no server — and records bibliographic facts without ranking; a reviewer on the other provider re-checks the records against their sources. Nothing here synthesises or recommends; that belongs to a later analyst task. Copy this template, state the topic in each objective, and dispatch. All tasks are read-only.",
+  "decomposed": true,
+  "tasks": [
+    {
+      "id": "P1-search",
+      "title": "Search the literature",
+      "objective": "Search academic sources for papers bearing on the topic: <topic>. Split the topic into three to five narrower queries and run each against more than one source, because openalex and crossref return real citation counts while arxiv returns 0 and semantic may return an empty list without a key. For every paper record title, authors, year, DOI or arXiv id, URL, citation count with its source, the abstract as returned (or a flagged one-line summary), and the MCP tool that returned each fact. List excluded papers with reasons and the queries and sources you ran. Do not rank, recommend, or synthesise. Full text is out of scope. If no paper-search MCP tools are available, report status blocked and stop. Declared standard complexity on purpose: at low complexity no Codex profile is eligible for research kinds.",
+      "kind": "research",
+      "agentRole": "paper-researcher",
+      "risk": "standard",
+      "complexity": "standard",
+      "write": false,
+      "acceptanceCriteria": [
+        "At least five records, each with title, authors, year, DOI or arXiv id, URL, citation count (openalex/crossref; arxiv returns 0 and semantic may return empty), and the MCP tool that returned it.",
+        "Each record carries the abstract as returned, or a one-line summary flagged as the worker's own.",
+        "Excluded papers are listed with reasons, and the queries and sources run are stated.",
+        "Nothing is ranked, recommended, or synthesised."
+      ]
+    },
+    {
+      "id": "P2-refute",
+      "title": "Re-check the records against their sources",
+      "objective": "Take P1-search's records on the topic <topic> and try to refute them against the sources themselves: a DOI that does not resolve to the stated title, an author list or year that disagrees with the landing page, a citation count attributed to the wrong source, a record whose stated MCP tool could not have returned that field. When filling this template, set allowedProviders to the provider the dry run did NOT give P1-search — an independent stable catches what the searcher's own family reads past. Report each record as survived or refuted with the evidence it turns on. Do not add papers or rank them.",
+      "kind": "review",
+      "agentRole": "reviewer",
+      "risk": "standard",
+      "complexity": "standard",
+      "write": false,
+      "acceptanceCriteria": [
+        "Every P1 record is marked survived or refuted with the URL that decided it.",
+        "No new papers are added and nothing is ranked."
+      ]
+    }
+  ]
+}

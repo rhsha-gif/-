@@ -10,6 +10,7 @@ export function buildCodexCommand({
   schemaPath,
   outputPath,
   agentInstructions,
+  mcpServers,
   executable = 'codex'
 }) {
   if (!route?.model || !route?.effort) throw new TypeError('route.model and route.effort are required');
@@ -25,6 +26,14 @@ export function buildCodexCommand({
     '--enable', 'web_search',
     '--json'
   ];
+  // One -c per key: `codex exec` takes TOML-valued overrides, so the command
+  // is a quoted string and args a JSON array (valid TOML for a string array).
+  // Only command and args are forwarded — a server that needed env would need
+  // a decision about secrets first, and none does today.
+  for (const [name, server] of Object.entries(mcpServers ?? {})) {
+    args.push('-c', `mcp_servers.${name}.command=${JSON.stringify(server.command)}`);
+    args.push('-c', `mcp_servers.${name}.args=${JSON.stringify(server.args ?? [])}`);
+  }
   if (schemaPath) args.push('--output-schema', schemaPath);
   if (outputPath) args.push('-o', outputPath);
   args.push('-');

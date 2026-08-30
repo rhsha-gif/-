@@ -19,8 +19,9 @@ test('a well-formed plan validates and carries agentRole through', () => {
 });
 
 test('agentRole maps onto the routing roles the router already filters on', () => {
-  assert.equal(agentRoles().length, 12);
+  assert.equal(agentRoles().length, 13);
   assert.equal(routingRoleFor('worker'), 'executor');
+  assert.equal(routingRoleFor('paper-researcher'), 'executor');
   assert.equal(routingRoleFor('fixer'), 'executor');
   assert.equal(routingRoleFor('reviewer'), 'reviewer');
   assert.throws(() => routingRoleFor('scout'), /agentRole/i);
@@ -65,7 +66,7 @@ test('task-level validation failures name the offending index', () => {
 test('the adoption roles derive routing roles that the profiles already declare', () => {
   assert.deepEqual(agentRoles(), [
     'worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail',
-    'writer', 'editor', 'qa-analyst', 'invest-analyst', 'refactorer'
+    'writer', 'editor', 'qa-analyst', 'invest-analyst', 'refactorer', 'paper-researcher'
   ]);
 
   // Evidence-producing roles route as executors; judging roles route as

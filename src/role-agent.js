@@ -18,6 +18,41 @@ const PRESET_LOCATIONS = Object.freeze({
   ]
 });
 
+// The one role that needs an MCP server, and the exact tools it may call. This
+// is hard-coded rather than a config field on purpose (2026-08-30 ponytail
+// verdict): with a single consumer, a generic roleAgents.<role>.mcpServers
+// schema would only open a surface where config runs arbitrary commands with
+// arbitrary env. The server definition is checked in as a static mcp-config, so
+// nothing is generated at run time. The tool list is enumerated, not a
+// wildcard: paper-search-mcp also ships download_scihub and other downloaders,
+// and a wildcard would grant them the moment the server updates.
+const PAPER_SEARCH_SOURCES = [
+  'arxiv', 'semantic', 'openalex', 'crossref', 'pubmed', 'pmc', 'europepmc', 'biorxiv',
+  'medrxiv', 'dblp', 'core', 'base', 'doaj', 'hal', 'iacr', 'openaire', 'ssrn', 'unpaywall',
+  'zenodo', 'citeseerx', 'google_scholar'
+];
+const PAPER_SEARCH_READ_SOURCES = [
+  'arxiv', 'base', 'biorxiv', 'citeseerx', 'crossref', 'dblp', 'doaj', 'hal', 'iacr', 'medrxiv',
+  'openaire', 'openalex', 'pubmed', 'semantic', 'ssrn', 'zenodo'
+];
+const ROLE_MCP = Object.freeze({
+  'paper-researcher': Object.freeze({
+    configPath: path.join(PACKAGE_ROOT, 'integrations', 'claude', 'mcp', 'paper-researcher.mcp.json'),
+    tools: Object.freeze([
+      'mcp__paper-search__search_papers',
+      ...PAPER_SEARCH_SOURCES.map((source) => `mcp__paper-search__search_${source}`),
+      ...PAPER_SEARCH_READ_SOURCES.map((source) => `mcp__paper-search__read_${source}_paper`),
+      'mcp__paper-search__get_crossref_paper_by_doi',
+      'mcp__paper-search__download_arxiv'
+    ])
+  })
+});
+
+export function roleMcp(agentRole) {
+  const entry = ROLE_MCP[agentRole];
+  return entry ? { mcpConfig: entry.configPath, mcpTools: [...entry.tools] } : {};
+}
+
 export function roleAgentName({ config, agentRole, adapter }) {
   if (!agentRole) return undefined;
   const entry = config?.roleAgents?.[agentRole];
@@ -91,7 +126,7 @@ export async function resolveRoleAgent({ config, agentRole, adapter, cwd = proce
       );
     }
     const maxTurns = parseFrontmatterNumber(preset, 'maxTurns');
-    return { agent: name, ...(maxTurns === undefined ? {} : { maxTurns }) };
+    return { agent: name, ...(maxTurns === undefined ? {} : { maxTurns }), ...roleMcp(agentRole) };
   }
 
   const locations = PRESET_LOCATIONS.codex.map((resolve) => resolve(cwd, name));
@@ -103,5 +138,11 @@ export async function resolveRoleAgent({ config, agentRole, adapter, cwd = proce
   if (agentInstructions === '') {
     throw new Error(`Codex agent preset ${name}.toml has no developer_instructions`);
   }
-  return { agentInstructions };
+  // Codex has no --mcp-config; the same checked-in file is read here and
+  // reaches `codex exec` as -c mcp_servers.<name>.* overrides (measured
+  // 2026-08-30: the worker listed the tools as mcp__paper_search__*).
+  const mcp = roleMcp(agentRole);
+  if (!mcp.mcpConfig) return { agentInstructions };
+  const { mcpServers } = JSON.parse(await readFile(mcp.mcpConfig, 'utf8'));
+  return { agentInstructions, mcpServers };
 }

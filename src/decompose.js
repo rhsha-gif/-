@@ -36,7 +36,10 @@ const AGENT_ROLES = Object.freeze({
   // refactorer holds the pen but only for behavior-preserving restructuring;
   // what deserves deleting is ponytail's question, how is refactorer's.
   'invest-analyst': 'reviewer',
-  refactorer: 'executor'
+  refactorer: 'executor',
+  // paper-researcher collects bibliographic evidence through the paper-search
+  // MCP and never ranks it — the same reason researcher routes as an executor.
+  'paper-researcher': 'executor'
 });
 
 export function routingRoleFor(agentRole) {

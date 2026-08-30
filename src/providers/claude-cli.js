@@ -11,6 +11,11 @@
 // The web tools are granted to every role: a researcher cannot research without
 // them, and the alternative — role-conditional allowlists — would make the
 // boundary depend on a field the worker itself cannot see.
+// MCP tools are the one exception: an MCP server is a process with a start-up
+// cost and a failure point, and granting it to every role would let a
+// paper-search outage stop a worker that never needed papers. So the role
+// preset (src/role-agent.js) returns mcpTools, and they are appended here only
+// when it does — the decision is aorch's, not the worker's.
 const READ_TOOLS = Object.freeze([
   'Read', 'Grep', 'Glob', 'Bash', 'PowerShell', 'WebSearch', 'WebFetch'
 ]);
@@ -30,6 +35,8 @@ export function buildClaudeCommand({
   pluginDirs = [],
   maxTurns = 80,
   agent,
+  mcpConfig,
+  mcpTools = [],
   executable = 'claude'
 }) {
   if (!route?.model || !route?.effort) throw new TypeError('route.model and route.effort are required');
@@ -55,7 +62,7 @@ export function buildClaudeCommand({
     // granted either way because verification needs it, so writes are bounded by
     // the change guard comparing the tree, not by a sandbox.
     '--permission-mode', 'auto',
-    '--allowed-tools', ...READ_TOOLS, ...(write ? WRITE_TOOLS : []),
+    '--allowed-tools', ...READ_TOOLS, ...(write ? WRITE_TOOLS : []), ...(mcpConfig ? mcpTools : []),
     '--max-turns', String(ultracode ? Math.max(maxTurns, ULTRACODE_MIN_MAX_TURNS) : maxTurns),
     '--no-session-persistence'
   ];
@@ -72,6 +79,10 @@ export function buildClaudeCommand({
   // Passing the model separately is deliberate: the preset supplies behaviour
   // and tool limits, the router supplies the tier.
   if (agent) args.push('--agent', agent);
+  // --strict-mcp-config keeps the worker from also loading the user's global
+  // MCP servers, whose start-up (measured: three time-outs in one session)
+  // would otherwise be paid on every paper task.
+  if (mcpConfig) args.push('--mcp-config', mcpConfig, '--strict-mcp-config');
   for (const pluginDir of pluginDirs) args.push('--plugin-dir', pluginDir);
   return {
     command: executable,

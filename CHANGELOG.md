@@ -11,6 +11,8 @@
 
 ### Added
 
+- **`paper-researcher` 역할과 역할별 MCP 주입**: 13번째 역할이 `paper-search-mcp`(MIT, `uvx`)로 논문 서지·인용수·초록을 수집만 한다(순위·종합 금지). 역할 프리셋이 MCP를 주입하는 첫 사례 — `src/role-agent.js`가 체크인된 `integrations/claude/mcp/paper-researcher.mcp.json`과 **이름으로 열거한** 도구 목록을 반환하고, Claude는 `--mcp-config` + `--strict-mcp-config`, Codex는 `-c mcp_servers.*`로 받는다(둘 다 08-30 실측). "모든 역할이 같은 allowlist"라는 READ_TOOLS 원칙의 유일한 예외이며, 근거는 MCP 서버가 기동 비용과 실패점을 가진 프로세스라는 것. 범용 `roleAgents.*.mcpServers` 설정 필드는 소비자가 하나뿐이라 의도적으로 만들지 않았다. 서버가 없으면 워커는 `blocked`를 보고하고 run이 멈춘다 — 웹 검색으로 폴백하지 않는다. 인용 관계(`references`)는 이 서버가 전 소스에서 비워 돌려주므로 수집 대상에서 제외. 예시 플랜 `examples/plan-paper-search.json`.
+
 - **분해–분배 파이프라인** (`aorch decompose` / `aorch dispatch`): 이전에는 리드가 작업마다 15필드 엔벨로프를 손으로 쓰고 `aorch exec`를 반복 호출해야 했다. 분해는 여전히 리드(호스트 모델)가 하지만, **결과의 형식을 aorch가 스키마로 강제하고 검증하며 실행까지 책임진다.** 2026-07-24 설계의 "분해기 non-goal"을 폐기한 것이 아니라, 그 문서가 스스로 지목한 "권고지 강제가 아니다"라는 약점을 제거한 것이다.
   - `aorch decompose --print-schema` — 리드가 채워야 할 계획 계약(`schemas/task-plan.schema.json`)을 출력. `--plan <path>`로 검증하며 위반 시 exit 1.
   - `aorch dispatch --plan <path> [--dry-run]` — 계획의 모든 작업을 **선언 순서대로** 라우팅·실행하고 첫 실패에서 멈춘다(뒤 작업이 반쯤 적용된 트리 위에서 돌지 않도록). 활성 rate-limit은 첫 작업뿐 아니라 모든 작업에 적용된다.

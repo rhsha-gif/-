@@ -198,6 +198,24 @@ test('a Claude preset is resolved for existence and its turn budget, before anyt
   assert.equal(parseFrontmatterNumber('---\nname: x\n---\nmaxTurns: 25\n', 'maxTurns'), undefined);
   assert.equal(parseFrontmatterNumber('no frontmatter', 'maxTurns'), undefined);
 
+  // Only paper-researcher carries an MCP server; the config it points at is
+  // checked in, and the tool list names each tool instead of a wildcard.
+  const papers = await resolveRoleAgent({ config, agentRole: 'paper-researcher', adapter: 'claude', cwd: root });
+  assert.equal(papers.agent, 'aorch-paper-researcher');
+  assert.equal(path.basename(papers.mcpConfig), 'paper-researcher.mcp.json');
+  const mcpJson = JSON.parse(await readFile(papers.mcpConfig, 'utf8'));
+  assert.deepEqual(Object.keys(mcpJson.mcpServers), ['paper-search']);
+  assert.ok(papers.mcpTools.includes('mcp__paper-search__search_openalex'));
+  assert.ok(papers.mcpTools.includes('mcp__paper-search__download_arxiv'));
+  assert.equal(papers.mcpTools.includes('mcp__paper-search__download_scihub'), false);
+  assert.equal(papers.mcpTools.some((tool) => tool.includes('*')), false);
+  const researcher = await resolveRoleAgent({ config, agentRole: 'researcher', adapter: 'claude', cwd: root });
+  assert.equal('mcpConfig' in researcher, false);
+  const codexPapers = await resolveRoleAgent({ config, agentRole: 'paper-researcher', adapter: 'codex', cwd: root });
+  assert.deepEqual(codexPapers.mcpServers, { 'paper-search': { command: 'uvx', args: ['paper-search-mcp'] } });
+  const codexResearcher = await resolveRoleAgent({ config, agentRole: 'researcher', adapter: 'codex', cwd: root });
+  assert.equal('mcpServers' in codexResearcher, false);
+
   // A project that never ran `aorch install` must be told that, not handed an
   // opaque exit 1 from the CLI after the worker process has already started.
   const missing = { ...config, roleAgents: { ...config.roleAgents, worker: { claude: 'aorch-nonexistent', codex: 'aorch-worker' } } };

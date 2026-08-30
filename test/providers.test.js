@@ -195,6 +195,49 @@ test('a Claude worker is granted the tools it needs, since no mode grants them',
   assert.equal(mode(writer), 'auto');
 });
 
+test('a role preset that carries an MCP server reaches claude as --mcp-config with enumerated tools', () => {
+  const route = { model: 'sonnet', effort: 'high' };
+  const plain = buildClaudeCommand({ prompt: 'survey', route, agent: 'aorch-researcher' });
+  assert.equal(plain.args.includes('--mcp-config'), false);
+  assert.equal(plain.args.includes('--strict-mcp-config'), false);
+  assert.equal(plain.args.some((arg) => arg.startsWith('mcp__')), false);
+
+  const tools = ['mcp__paper-search__search_arxiv', 'mcp__paper-search__read_arxiv_paper'];
+  const withMcp = buildClaudeCommand({
+    prompt: 'survey', route, agent: 'aorch-paper-researcher', mcpConfig: '/x/paper.mcp.json', mcpTools: tools
+  });
+  const at = withMcp.args.indexOf('--mcp-config');
+  assert.notEqual(at, -1);
+  assert.equal(withMcp.args[at + 1], '/x/paper.mcp.json');
+  assert.equal(withMcp.args[at + 2], '--strict-mcp-config');
+  const allowedAt = withMcp.args.indexOf('--allowed-tools');
+  const allowed = [];
+  for (let i = allowedAt + 1; i < withMcp.args.length && !withMcp.args[i].startsWith('--'); i += 1) allowed.push(withMcp.args[i]);
+  // The built-in read set stays first and intact; MCP tools are appended by name.
+  assert.deepEqual(allowed.slice(0, 7), ['Read', 'Grep', 'Glob', 'Bash', 'PowerShell', 'WebSearch', 'WebFetch']);
+  assert.deepEqual(allowed.slice(7), tools);
+  assert.equal(allowed.includes('mcp__paper-search__download_scihub'), false);
+  assert.equal(allowed.some((tool) => tool.endsWith('*')), false, 'no wildcard grant');
+  // mcpTools without a config would grant tools no server provides.
+  const toolsOnly = buildClaudeCommand({ prompt: 'survey', route, mcpTools: tools });
+  assert.equal(toolsOnly.args.some((arg) => arg.startsWith('mcp__')), false);
+});
+
+test('a role preset that carries an MCP server reaches codex as -c mcp_servers overrides', () => {
+  const route = { model: 'gpt-5.6-terra', effort: 'high' };
+  const plain = buildCodexCommand({ prompt: 'survey', route });
+  assert.equal(plain.args.some((arg) => arg.startsWith('mcp_servers.')), false);
+
+  const spec = buildCodexCommand({
+    prompt: 'survey', route, mcpServers: { 'paper-search': { command: 'uvx', args: ['paper-search-mcp'] } }
+  });
+  const overrides = spec.args.filter((arg, i) => spec.args[i - 1] === '-c' && arg.startsWith('mcp_servers.'));
+  assert.deepEqual(overrides, [
+    'mcp_servers.paper-search.command="uvx"',
+    'mcp_servers.paper-search.args=["paper-search-mcp"]'
+  ]);
+});
+
 test('codex workers get web search through the flag exec actually accepts', () => {
   const spec = buildCodexCommand({ prompt: 'find it', route: { model: 'gpt-5.6-terra', effort: 'high' } });
   const at = spec.args.indexOf('--enable');

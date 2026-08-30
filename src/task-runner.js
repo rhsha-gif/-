@@ -122,6 +122,7 @@ export async function executeTask({
       // overrides the preset.
       maxTurns: task.maxTurns ?? rolePreset.maxTurns ?? 80,
       ...(rolePreset.agent ? { agent: rolePreset.agent } : {}),
+      ...(rolePreset.mcpConfig ? { mcpConfig: rolePreset.mcpConfig, mcpTools: rolePreset.mcpTools } : {}),
       executable: provider.executable ?? 'claude'
     });
   } else if (provider.adapter === 'codex') {
@@ -132,6 +133,7 @@ export async function executeTask({
       schemaPath: RECEIPT_SCHEMA_PATH,
       outputPath,
       ...(rolePreset.agentInstructions ? { agentInstructions: rolePreset.agentInstructions } : {}),
+      ...(rolePreset.mcpServers ? { mcpServers: rolePreset.mcpServers } : {}),
       executable: provider.executable ?? 'codex'
     });
   } else {

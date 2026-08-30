@@ -99,6 +99,31 @@ conditions, and a cross-provider `reviewer` tries to refute the analysis
 against the sources. No task decides, ranks, or orders anything — the output
 is input for the human's invest-judge decision record.
 
+### Searching the literature
+
+When the request is to find the papers on a topic, copy
+`examples/plan-paper-search.json` and state the topic in each objective:
+`paper-researcher` searches through the paper-search MCP and records
+bibliographic facts — title, authors, year, DOI or arXiv id, citation count
+and the tool that returned each — without ranking, and a cross-provider
+`reviewer` re-checks the records against their sources. Synthesis belongs to a
+later `analyst` task, not to this plan.
+
+The plan names no MCP server. The role preset injects it: `src/role-agent.js`
+points at the checked-in `integrations/claude/mcp/paper-researcher.mcp.json`
+and enumerates the tools by name (search, read, DOI lookup and arXiv download
+only — the server also ships `download_scihub`, which is never granted). Claude
+receives it as `--mcp-config` with `--strict-mcp-config`; Codex as
+`-c mcp_servers.*` overrides. This is the one exception to the rule that every
+role gets the same tool allowlist: an MCP server is a process with a start-up
+cost and a failure point, so it goes only to the role that needs it. When the
+server is unavailable the worker reports `blocked` and the run stops — it does
+not fall back to web search, whose results cannot be re-run.
+
+Citation counts come from openalex and crossref; arxiv reports 0 and semantic
+returns an empty list without a key. Citation relations are not available
+through this server and must not be inferred.
+
 ### Refactoring a bounded area
 
 When the request is to clean up or refactor code, copy

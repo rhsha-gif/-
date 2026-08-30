@@ -70,6 +70,10 @@
     "refactorer": {
       "claude": "aorch-refactorer",
       "codex": "aorch-refactorer"
+    },
+    "paper-researcher": {
+      "claude": "aorch-paper-researcher",
+      "codex": "aorch-paper-researcher"
     }
   },
   "providers": [
