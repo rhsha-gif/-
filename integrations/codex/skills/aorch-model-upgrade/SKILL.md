@@ -50,6 +50,7 @@ AskUserQuestion(multiSelect)으로 수정할 finding id를 고른다. 자동 수
 ## 6. 적용
 
 - `examples/plan-model-upgrade-apply.json`을 복사해 고른 finding마다 `X<n>-<id>` 태스크(동작 보존이면 `refactorer`, 아니면 `worker`), 매핑표 승인 행으로 `M1-model-refs`를 채운다. 모든 write 태스크에 프로젝트의 진짜 검증 명령을 둔다 — 이 플랜이 새 모델의 첫 라우팅 관측을 남기는 자리다.
+- 다른 프로젝트에 적용할 때의 함정(2026-09-02 QuantPilot 실측): (a) 프로젝트 규약이 요구하는 linked worktree에서 돌리고 `aorch install`을 그 worktree에 다시 한다. `.aorch`가 gitignore가 아닌 프로젝트는 설치본이 git 변경으로 잡힌다. (b) Codex 워커의 쓰기 루트는 worktree다 — 검증 명령의 임시 경로·node_modules를 worktree 안에 둔다(junction은 안 되고 실복사). (c) pytest basetemp는 만든 계정만 읽는 ACL이라 게이트는 `.pytest_tmp/gate-%RANDOM%`(cmd.exe가 확장, 실행마다 새 디렉터리), 워커는 `.pytest_tmp/worker-<task>`를 각자 만들게 하고 워커에 `gate*` 접근 금지를 명시한다; 부모는 일반 mkdir. (c2) 웹 게이트(vite/vitest)는 Codex 샌드박스 안에서 설정 로더가 상위 경로 접근으로 실패한다 — 워커 지침에 "샌드박스 권한만의 실패면 complete로 보고하고 unresolvedRisks에 적어라, 게이트가 밖에서 같은 명령을 돌린다"를 넣는다. (c3) 이미 dirty한 트리에서 워커는 '이번에 만진 파일'을 원래 dirty였더라도 filesChanged에 적어야 한다(base 프롬프트 문구를 오독해 미신고 → change guard 실패 실측). (d) 감사 receipt는 메인 체크아웃 `.aorch/task-runs`에 있어 worktree 샌드박스가 못 읽는다 — 제안 전문을 플랜 objective에 인라인한다(템플릿이 그렇게 되어 있다). (e) kind `security`는 complexity `standard`에 실행자 프로필이 없다 — 보안 태스크는 `high` 이상으로. (f) 워커가 환경 때문에 `partial`을 내면 run이 멈춘다 — 리드가 게이트를 직접 돌려 채택하고 나머지 태스크만 재dispatch한다.
 - git이 아닌 대상은 오케스트레이터가 직접 고친다. 고치기 전 원본을 `~/.claude/backups/`에 복사한다.
 
 ## 7. 재설치와 승격
