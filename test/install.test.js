@@ -50,12 +50,19 @@ test('installs both CLI integrations idempotently without editing root instructi
     assert.equal(hookResult.status, 0, hookResult.stderr);
     assert.match(JSON.parse(hookResult.stdout).hookSpecificOutput.additionalContext, /orchestrator must run first/i);
   }
-  assert.match(await readFile(path.join(projectRoot, '.aorch/schemas/worker-receipt.schema.json'), 'utf8'), /filesChanged/);
+  const receiptSchema = await readFile(path.join(projectRoot, '.aorch/schemas/worker-receipt.schema.json'), 'utf8');
+  assert.match(receiptSchema, /filesChanged/);
+  // The auditor role writes its ranked findings here; an installed copy
+  // without the field would make the CLI reject every auditor receipt.
+  assert.match(receiptSchema, /"findings"/);
   assert.match(await readFile(path.join(projectRoot, '.aorch/hooks/gate.mjs'), 'utf8'), /classifyPrompt/);
   const claudeSkill = await readFile(path.join(projectRoot, '.claude/skills/adaptive-orchestrate/SKILL.md'), 'utf8');
   assert.match(claudeSkill, /task decomposition/i);
   assert.match(claudeSkill, /phase.*confidence.*blockers/i);
   assert.match(await readFile(path.join(projectRoot, '.agents/skills/adaptive-orchestrate/SKILL.md'), 'utf8'), /task decomposition/i);
+  const codexUpgradeSkill = await readFile(path.join(projectRoot, '.agents/skills/aorch-model-upgrade/SKILL.md'), 'utf8');
+  assert.match(codexUpgradeSkill, /plan-model-upgrade\.json/);
+  assert.match(codexUpgradeSkill, /challenger/);
 
   // The downshift skill must actually ship and point at this package, not at
   // an unresolved placeholder or a nonexistent repo path.
@@ -63,6 +70,13 @@ test('installs both CLI integrations idempotently without editing root instructi
   assert.match(downshiftSkill, /classify --objective/);
   assert.ok(!downshiftSkill.includes('{{AORCH_ROOT}}'), 'placeholder must be resolved at install time');
   assert.match(downshiftSkill, /src\/cli\.js/);
+
+  // The model-upgrade runbook ships with the package so a project can run it
+  // without reaching back into the aorch checkout.
+  const upgradeSkill = await readFile(path.join(projectRoot, '.claude/skills/aorch-model-upgrade/SKILL.md'), 'utf8');
+  assert.match(upgradeSkill, /plan-model-upgrade\.json/);
+  assert.match(upgradeSkill, /challenger/);
+  assert.match(await readFile(path.join(projectRoot, '.claude/agents/aorch-auditor.md'), 'utf8'), /findings/);
 });
 
 test('rejects unknown installation targets', async () => {

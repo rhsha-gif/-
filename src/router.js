@@ -65,6 +65,11 @@ function supportsTask(profile, task, catalog) {
     && (!task.allowedProviders?.length || task.allowedProviders.includes(profile.provider))
     && !(task.forbiddenProviders ?? []).includes(profile.provider)
     && !(task.forbiddenProfileIds ?? []).includes(profile.id)
+    // The positive twin of forbiddenProfileIds. Its one legitimate use is a
+    // task whose point is a specific model's judgement (the model-upgrade
+    // audit); routing by quality cannot express that, because a cheaper tier
+    // with an effort bump ties or wins on the prior.
+    && (!task.allowedProfileIds?.length || task.allowedProfileIds.includes(profile.id))
     && providerSupportsCapabilities(profile.provider, task.capabilityIds, catalog.capabilities);
 }
 

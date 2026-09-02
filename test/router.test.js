@@ -52,6 +52,20 @@ test('higher expected task outcome wins when no task-specific constraint exclude
   assert.equal(route.profileId, 'best');
 });
 
+test('allowedProfileIds pins a task to the named profile even when another would win on quality', () => {
+  const catalog = {
+    routing: baseRouting,
+    models: [
+      model({ id: 'cheap', quality: { implementation: 0.89 }, tokenIndex: 0.2, latencyIndex: 0.2 }),
+      model({ id: 'best', quality: { implementation: 0.91 }, tokenIndex: 8, latencyIndex: 8 })
+    ]
+  };
+  assert.equal(selectRoute({ task: { ...task, allowedProfileIds: ['cheap'] }, catalog, observations: [] }).profileId, 'cheap');
+  // An empty list is the same as unset: the router keeps choosing by evidence.
+  assert.equal(selectRoute({ task: { ...task, allowedProfileIds: [] }, catalog, observations: [] }).profileId, 'best');
+  assert.throws(() => selectRoute({ task: { ...task, allowedProfileIds: ['absent'] }, catalog, observations: [] }), /No eligible route/);
+});
+
 test('default task routing uses tokens before latency only inside the quality-equivalent tier', () => {
   const route = selectRoute({
     task,

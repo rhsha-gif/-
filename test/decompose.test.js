@@ -19,7 +19,7 @@ test('a well-formed plan validates and carries agentRole through', () => {
 });
 
 test('agentRole maps onto the routing roles the router already filters on', () => {
-  assert.equal(agentRoles().length, 13);
+  assert.equal(agentRoles().length, 14);
   assert.equal(routingRoleFor('worker'), 'executor');
   assert.equal(routingRoleFor('paper-researcher'), 'executor');
   assert.equal(routingRoleFor('fixer'), 'executor');
@@ -63,10 +63,18 @@ test('task-level validation failures name the offending index', () => {
   assert.throws(() => validateTaskPlan({ ...plan, tasks: escaping }), /plan\.tasks\[0\].*task\.id/is);
 });
 
+test('a misspelled task field is rejected instead of being silently ignored', () => {
+  const tasks = [{ ...task, allowedProfilesIds: ['claude-fable-apex'] }];
+  assert.throws(
+    () => validateTaskPlan({ ...plan, tasks }),
+    /Unknown task field: allowedProfilesIds/
+  );
+});
+
 test('the adoption roles derive routing roles that the profiles already declare', () => {
   assert.deepEqual(agentRoles(), [
     'worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail',
-    'writer', 'editor', 'qa-analyst', 'invest-analyst', 'refactorer', 'paper-researcher'
+    'writer', 'editor', 'qa-analyst', 'invest-analyst', 'refactorer', 'paper-researcher', 'auditor'
   ]);
 
   // Evidence-producing roles route as executors; judging roles route as
@@ -89,6 +97,9 @@ test('the adoption roles derive routing roles that the profiles already declare'
   // behavior-preserving work only.
   assert.equal(routingRoleFor('invest-analyst'), 'reviewer');
   assert.equal(routingRoleFor('refactorer'), 'executor');
+  // auditor synthesises other tasks' receipts into ranked findings, so it is
+  // reviewer work like qa-analyst, not a pen-holder.
+  assert.equal(routingRoleFor('auditor'), 'reviewer');
 
   const plan = {
     objective: 'Adopt something',

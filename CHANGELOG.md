@@ -9,7 +9,14 @@
 - **`aorch classify`가 관측을 읽는다**: 이전에는 `observations: []`를 하드코딩해, 거의 모든 프롬프트에서 발동하는 서브에이전트 게이트가 학습된 성과를 **한 번도 쓰지 못했다**. 이제 관측 원장을 읽으므로 반복 실패한 티어가 다운시프트 대상에서 밀려난다. 원장이 깨져 있으면 fail-open으로 prior에 의존하고 stderr에 한 줄 남긴다 — 이 게이트는 비용 최적화이지 안전장치가 아니다.
   - 다운시프트 우선순위(`standard`의 tokens-first)는 **의도적으로 유지**했다. quality-first로 뒤집으면 구현·테스트가 이력과 무관하게 상위 티어로 가면서 관측 메커니즘이 무의미해지고 한도 절약도 사라진다.
 
+### Fixed
+
+- **2026-09-02 Fable 5.1 자기 감사에서 고른 17건**(auditor findings, 사용자 선택): dispatch가 run당 하나의 runId를 써서 `task-runs/<run>/<task>/`에 모임 · 플랜의 미지 태스크 키를 `Unknown task field`로 거부하고 task 스키마에 `additionalProperties: false` · 분류기에 review 규칙(영·한 리뷰·판정 어휘, security 아래) · 에스컬레이션 사다리가 `allowedProfileIds`·`forbiddenProfileIds`·provider 핀을 존중 · 비객체 receipt fail-closed · 검증 명령 실행 뒤 HEAD·control path 재검사 · `paths.stateDir` 형식 검증 · self-update 락 `wx` 배타 생성 · `branch finish` push 실패 시 pre-merge SHA를 오류에 실음 · receipt 스키마 compact 복원 + OpenAI strict 계약 재귀 테스트 + `findings.id` pattern · 런북에서 `--force-config` 재설치 지침·외부 대상 사전 백업·개인 스모크 표 제거 · Codex용 `aorch-model-upgrade` 사본 추가. 제외(사용자 결정): installFile atomic write.
+
 ### Added
+
+- **`auditor` 역할과 receipt `findings`**: 14번째 역할. ponytail·reviewer receipt와 리드가 직접 만든 실사용 증거를 종합해 **순위 있는 발견**을 receipt의 `findings[]`(id·severity·fixCost·axis·location·evidence·proposal, 어휘는 risk·complexity와 같은 `low/standard/high/critical`)에 적는다. reviewer 프리셋은 단일 diff 반증에 고정돼 있어 재사용할 수 없었고, qa-analyst와 같은 이유로 reviewer 라우팅을 받는다. `findings`는 선택 필드라 기존 receipt는 그대로 통과한다 — paper-researcher 계획이 이월했던 "조사형 역할의 산출물이 summary에만 남는" 공백을 닫는다.
+- **`aorch-model-upgrade` 스킬과 템플릿 2종**: 새 모델이 나올 때의 런북(`integrations/claude/skills/aorch-model-upgrade/SKILL.md`, install이 함께 복사). 감사 플랜 `examples/plan-model-upgrade.json`(ponytail → 교차 프로바이더 reviewer → 신모델 고정 auditor)과 적용 플랜 `examples/plan-model-upgrade-apply.json`(사용자가 고른 finding만 + 매핑표 기반 모델 참조 갱신). auditor는 새 플랜 필드 `allowedProfileIds`(`forbiddenProfileIds`의 양성 쌍둥이)로 신모델에 고정한다 — `minimumQuality`로는 안 된다는 것을 dry-run으로 실측(opus의 review 사전값+effort 가산이 fable을 이김). 실사용 실행과 모델 참조 인벤토리는 정찰이라 위임하지 않고 리드가 직접 한다. 새 모델은 `maturity: challenger`로 등록한다 — fable이 관측 0건인 채 stable로 들어가 있던 것을 2026-09-02에 발견.
 
 - **`paper-researcher` 역할과 역할별 MCP 주입**: 13번째 역할이 `paper-search-mcp`(MIT, `uvx`)로 논문 서지·인용수·초록을 수집만 한다(순위·종합 금지). 역할 프리셋이 MCP를 주입하는 첫 사례 — `src/role-agent.js`가 체크인된 `integrations/claude/mcp/paper-researcher.mcp.json`과 **이름으로 열거한** 도구 목록을 반환하고, Claude는 `--mcp-config` + `--strict-mcp-config`, Codex는 `-c mcp_servers.*`로 받는다(둘 다 08-30 실측). "모든 역할이 같은 allowlist"라는 READ_TOOLS 원칙의 유일한 예외이며, 근거는 MCP 서버가 기동 비용과 실패점을 가진 프로세스라는 것. 범용 `roleAgents.*.mcpServers` 설정 필드는 소비자가 하나뿐이라 의도적으로 만들지 않았다. 서버가 없으면 워커는 `blocked`를 보고하고 run이 멈춘다 — 웹 검색으로 폴백하지 않는다. 인용 관계(`references`)는 이 서버가 전 소스에서 비워 돌려주므로 수집 대상에서 제외. 예시 플랜 `examples/plan-paper-search.json`.
 

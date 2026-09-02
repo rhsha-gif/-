@@ -1,0 +1,38 @@
+{
+  "objective": "Apply the findings the user picked from a model-upgrade audit, and update hard-coded model references from an approved mapping table. Copy this template: add one X<n>-<FINDING-ID> task per picked finding (the id must stay path-safe: letters, digits, dot, dash, underscore) (use agentRole refactorer when the finding is overengineering and behaviour must not change, worker otherwise), fill <scope> with the files the finding names, <test-command> with the project's real verification suite, and <mapping-table> with the old→new model reference pairs the user approved (the lead builds that table itself with the fixed grep patterns in the aorch-model-upgrade skill; inventory is reconnaissance and is not delegated). Reinstalling the .aorch copies after this plan is one command the lead runs, not a task. Every write task here carries verificationCommands, so this is the plan that records the new model's first routing observations.",
+  "decomposed": true,
+  "tasks": [
+    {
+      "id": "X1-FINDING-ID",
+      "title": "Close one picked finding",
+      "objective": "Implement the proposal of finding <finding-id> from the audit receipt at <audit-receipt-path>, inside <scope> only. Make the smallest defensible change, run the named verification fresh, and never weaken, skip, or rewrite a test to make it pass. Anything the proposal implies beyond <scope> goes to unresolvedRisks.",
+      "kind": "implementation",
+      "agentRole": "worker",
+      "risk": "standard",
+      "complexity": "standard",
+      "write": true,
+      "allowedScope": ["<scope>"],
+      "verificationCommands": ["<test-command>"],
+      "acceptanceCriteria": [
+        "The proposal of finding <finding-id> is applied or its blocker is reported in unresolvedRisks.",
+        "The named verification suite passes unmodified."
+      ]
+    },
+    {
+      "id": "M1-model-refs",
+      "title": "Update model references per the approved mapping table",
+      "objective": "Replace model identifiers only where <mapping-table> lists an old→new pair, in the files it names: <mapping-files>. Do not touch a reference that is not in the table — list it in unresolvedRisks with its path instead. Preserve surrounding formatting (frontmatter, JSON, TOML). Run the named verification fresh.",
+      "kind": "implementation",
+      "agentRole": "worker",
+      "risk": "standard",
+      "complexity": "low",
+      "write": true,
+      "allowedScope": ["<mapping-files>"],
+      "verificationCommands": ["<test-command>"],
+      "acceptanceCriteria": [
+        "Every pair in the mapping table is applied and every out-of-table reference is reported, not changed.",
+        "The named verification suite passes unmodified."
+      ]
+    }
+  ]
+}

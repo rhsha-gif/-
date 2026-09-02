@@ -74,6 +74,10 @@
     "paper-researcher": {
       "claude": "aorch-paper-researcher",
       "codex": "aorch-paper-researcher"
+    },
+    "auditor": {
+      "claude": "aorch-auditor",
+      "codex": "aorch-auditor"
     }
   },
   "providers": [
@@ -317,7 +321,7 @@
       },
       "tokenIndex": 3,
       "latencyIndex": 2.2,
-      "maturity": "stable",
+      "maturity": "challenger",
       "efforts": [
         {
           "name": "high",
