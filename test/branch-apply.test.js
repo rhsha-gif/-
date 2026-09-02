@@ -88,6 +88,35 @@ test('finish is blocked when the verify gate fails', async (t) => {
   assert.ok(result.blockers.some((b) => /verif/i.test(b)));
 });
 
+test('finish preserves undo evidence when push fails after merging', async (t) => {
+  const cwd = await repo(t);
+  await bareRemote(t, cwd);
+  await git(cwd, 'checkout', '--quiet', '-b', 'feat/push-failure');
+  await writeFile(path.join(cwd, 'push-failure.txt'), 'change\n');
+  await git(cwd, 'add', '.');
+  await git(cwd, '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'push failure');
+  const preMergeMainSha = (await git(cwd, 'rev-parse', 'main')).stdout.trim();
+  await git(cwd, 'remote', 'set-url', 'origin', path.join(cwd, 'missing-remote.git'));
+
+  let failure;
+  try {
+    await applyBranchAction({
+      cwd, config: {}, action: 'finish', approved: true,
+      options: { runVerificationImpl: async () => ({ passed: true, results: [] }) }
+    });
+  } catch (error) {
+    failure = error;
+  }
+
+  assert.ok(failure);
+  assert.deepEqual(failure.undo, { preMergeMainSha });
+  assert.deepEqual(failure.performed, ['switch main', 'merge feat/push-failure']);
+  assert.match(failure.message, new RegExp(preMergeMainSha));
+  assert.match(failure.message, /performed: switch main, merge feat\/push-failure/i);
+  assert.equal((await git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD')).stdout.trim(), 'main');
+  assert.notEqual((await git(cwd, 'rev-parse', 'HEAD')).stdout.trim(), preMergeMainSha);
+});
+
 test('cleanup deletes merged branches but defers unmerged-stale without confirmation', async (t) => {
   const cwd = await repo(t);
   // merged branch

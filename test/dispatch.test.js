@@ -135,6 +135,25 @@ test('tasks run in declared order because order is the plan\'s only sequencing s
   assert.equal(result.ok, true);
 });
 
+test('every task in one dispatch shares the same task-runs directory', async () => {
+  const runDirs = [];
+  const result = await dispatchPlan({
+    plan: plan([
+      { ...baseTask, id: 'T1', agentRole: 'worker' },
+      { ...baseTask, id: 'T2', agentRole: 'worker' }
+    ]),
+    config,
+    selectRouteImpl: stubRoute('anthropic', 'claude-sonnet-general'),
+    executeImpl: async ({ task }) => {
+      runDirs.push(path.join('/state', 'task-runs', task.runId, task.id));
+      return { route: { provider: 'anthropic', profileId: 'p', model: 'm', effort: 'high' }, runDir: runDirs.at(-1) };
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(new Set(runDirs.map((runDir) => path.dirname(runDir))).size, 1);
+});
+
 test('codex presets are parsed for developer_instructions without a TOML dependency', async () => {
   const { extractCodexInstructions, resolveRoleAgent } = await import('../src/role-agent.js');
 

@@ -11,9 +11,15 @@ function routeSummary(route) {
   return { provider: route.provider, profileId: route.profileId, model: route.model, effort: route.effort };
 }
 
-function nextLadderStep(config, provider, triedRoutes) {
+function nextLadderStep(config, provider, triedRoutes, task = {}) {
   const ladder = config.escalation?.ladders?.[provider] ?? [];
-  return ladder.find((step) => !triedRoutes.has(`${step.profileId}:${step.effort}`));
+  if ((task.allowedProviders?.length && !task.allowedProviders.includes(provider))
+    || (task.forbiddenProviders ?? []).includes(provider)) {
+    return undefined;
+  }
+  return ladder.find((step) => !triedRoutes.has(`${step.profileId}:${step.effort}`)
+    && (!task.allowedProfileIds?.length || task.allowedProfileIds.includes(step.profileId))
+    && !(task.forbiddenProfileIds ?? []).includes(step.profileId));
 }
 
 async function failChangeGuard({ attempt, route, runDir, changeGuard, attempts, cause }) {
@@ -44,10 +50,10 @@ async function failChangeGuard({ attempt, route, runDir, changeGuard, attempts, 
 
 // The receipt is the only machine-readable signal a task without verification
 // commands produces, and the schema lets the worker say `partial`, `blocked`,
-// or mark a criterion `fail`. Null means the receipt claims completion; a
-// string is why the run must stop. A non-object receipt is not judged here.
+// or mark a criterion `fail`. A string is why the run must stop; any receipt
+// that is not a non-array object is rejected.
 function receiptVerdict(receipt) {
-  if (!receipt || typeof receipt !== 'object') return null;
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) return 'worker receipt is not an object';
   if (receipt.status !== 'complete') {
     return `worker receipt reports status "${receipt.status}"`;
   }
@@ -65,7 +71,7 @@ function receiptVerdict(receipt) {
 // stronger tier — so the evidence returns to the human immediately.
 async function failReceiptVerdict({ attempt, route, runDir, changeGuard, attempts, receipt, verdict }) {
   const routeEvidence = routeSummary(route);
-  attempts.push({ attempt, route: routeEvidence, passed: false, changeGuardPassed: true, receiptStatus: receipt.status });
+  attempts.push({ attempt, route: routeEvidence, passed: false, changeGuardPassed: true, receiptStatus: receipt?.status });
   const evidencePath = path.join(runDir, 'verification.json');
   await writeJsonAtomic(evidencePath, {
     attempt,
@@ -78,7 +84,7 @@ async function failReceiptVerdict({ attempt, route, runDir, changeGuard, attempt
   const error = new Error(`${verdict}; manual review required. Evidence: ${evidencePath}`);
   error.attempts = attempts;
   error.runDir = runDir;
-  error.receiptStatus = receipt.status;
+  error.receiptStatus = receipt?.status;
   throw error;
 }
 
@@ -233,6 +239,27 @@ export async function executeWithVerification({
       cwd,
       timeoutMs: config.verification?.commandTimeoutMs
     });
+    if (verification.passed) {
+      const afterVerificationSnapshot = await captureGitSnapshotImpl({ cwd });
+      const verificationChangeGuard = evaluateChangeGuardImpl({
+        task: currentTask,
+        receipt: { filesChanged: [] },
+        before: afterSnapshot,
+        after: afterVerificationSnapshot,
+        ignoredPaths: [stateRoot]
+      });
+      // Verification can generate build artefacts, so only repository control
+      // state is an integrity boundary after commands complete.
+      if (verificationChangeGuard.headChanged || verificationChangeGuard.controlPathsChanged.length > 0) {
+        await failChangeGuard({
+          attempt,
+          route: execution.route,
+          runDir: execution.runDir,
+          changeGuard: verificationChangeGuard,
+          attempts
+        });
+      }
+    }
     attempts.push({
       attempt,
       route: routeSummary(execution.route),
@@ -280,7 +307,7 @@ export async function executeWithVerification({
       error.runDir = execution.runDir;
       throw error;
     }
-    forcedRoute = nextLadderStep(config, execution.route.provider, triedRoutes);
+    forcedRoute = nextLadderStep(config, execution.route.provider, triedRoutes, task);
     if (!forcedRoute || attempt === maxAttempts) {
       const error = new Error(
         `Verification failed after ${attempt} attempt(s); escalation ${forcedRoute ? 'budget' : 'ladder'} exhausted. ` +

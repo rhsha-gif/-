@@ -148,3 +148,22 @@ test('the background refresh spawns at most one updater per project', async () =
   assert.equal(later.status, 'spawned');
   assert.equal(spawned.length, 2);
 });
+
+test('the background refresh claims a missing lock exclusively', async () => {
+  const projectRoot = await newProject('aorch-autoupdate-exclusive-lock-');
+  await installProject({ projectRoot, target: 'claude' });
+  await markStale(projectRoot);
+
+  const spawned = [];
+  const spawnProcess = (command, args) => {
+    spawned.push({ command, args });
+    return { unref() {} };
+  };
+
+  const results = await Promise.all(Array.from({ length: 8 }, () => (
+    refreshIfStale({ projectRoot, env: {}, spawnProcess })
+  )));
+  assert.equal(results.filter((result) => result.status === 'spawned').length, 1);
+  assert.equal(results.filter((result) => result.status === 'pending').length, 7);
+  assert.equal(spawned.length, 1);
+});

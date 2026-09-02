@@ -8,6 +8,7 @@ const KIND_RULES = [
   { kind: 'security', complexity: 'high', re: /\b(security|threat model|auth|vulnerab\w*|exploit|crypto)\b/i, reKo: /보안|취약점|인증|권한|암호화/i },
   { kind: 'architecture', complexity: 'high', re: /\b(architect|system design|design the|scalab\w*)\b/i, reKo: /아키텍처|시스템 설계|확장성/i },
   { kind: 'debugging', complexity: 'high', re: /\b(race condition|deadlock|heisenbug|root cause|debug)\b/i, reKo: /디버깅|교착|경쟁 상태|근본 원인/i },
+  { kind: 'review', complexity: 'standard', re: /\b(review|judge|audit|critique|verdict|falsify)\b/i, reKo: /리뷰|검토|판정|감사|평가/ },
   // Below debugging on purpose: "investigate and debug X" must classify as
   // debugging, not research. These two unlock haiku's existing exploration
   // and research taskKinds, which no classifier rule emitted before.
