@@ -48,10 +48,12 @@ const MATRIX = [
   { objective: 'Research and compare options for JSON schema validation', kind: 'research', model: 'haiku' },
   { objective: 'Find the root cause of the race condition and debug it', kind: 'debugging', model: 'opus' },
   { objective: 'Design the architecture for the delegation subsystem', kind: 'architecture', model: 'opus' },
+  { objective: 'Review the diff for behavior changes and report findings without editing', kind: 'review', model: 'sonnet' },
   { objective: 'Review the auth token handling for vulnerabilities', kind: 'security', model: 'opus' }
 ];
 
 const KOREAN_MATRIX = [
+  { objective: '이 diff에서 동작이 바뀐 곳이 있는지 리뷰만 해줘', kind: 'review', model: 'sonnet' },
   { objective: '리드미 오타를 고치고 주석 블록을 정리', kind: 'documentation', model: 'haiku' },
   { objective: 'limits 모듈 회귀 테스트 작성', kind: 'testing', model: 'haiku' },
   { objective: '원자적 쓰기 헬퍼를 공유 모듈로 구현', kind: 'implementation', model: 'haiku' },

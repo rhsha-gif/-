@@ -5,7 +5,7 @@
 // silent — this is convenience, not a control.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { open, stat } from 'node:fs/promises';
+import { open, stat, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { inspectProject, packageRoot } from './install-registry.js';
@@ -22,15 +22,32 @@ function lockPath(projectRoot) {
 async function claimLock(projectRoot, now) {
   const file = lockPath(projectRoot);
   try {
+    const handle = await open(file, 'wx');
+    try {
+      await handle.writeFile(String(process.pid), 'utf8');
+    } finally {
+      await handle.close();
+    }
+    return true;
+  } catch (error) {
+    if (error?.code !== 'EEXIST') return false;
+  }
+
+  try {
     const stats = await stat(file);
     if (now - stats.mtimeMs < LOCK_TTL_MS) return false;
+    await unlink(file);
   } catch {
-    // No lock yet.
+    return false;
   }
+
   try {
-    const handle = await open(file, 'w');
-    await handle.writeFile(String(process.pid), 'utf8');
-    await handle.close();
+    const handle = await open(file, 'wx');
+    try {
+      await handle.writeFile(String(process.pid), 'utf8');
+    } finally {
+      await handle.close();
+    }
     return true;
   } catch {
     return false;

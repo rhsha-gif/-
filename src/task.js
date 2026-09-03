@@ -2,6 +2,14 @@ const RISKS = new Set(['low', 'standard', 'high', 'critical']);
 const COMPLEXITIES = new Set(['low', 'standard', 'high', 'critical']);
 const DEFAULT_COMPLEXITY_BY_RISK = Object.freeze({ low: 'low', standard: 'standard', high: 'high', critical: 'high' });
 const ROUTE_METRICS = new Set(['quality', 'tokens', 'latency']);
+const KNOWN_TASK_FIELDS = new Set([
+  'id', 'title', 'objective', 'kind', 'agentRole', 'role', 'risk', 'complexity',
+  'write', 'allowInPlaceWrite', 'maxTurns', 'runId', 'routingPriorities',
+  'minimumQuality', 'maxTokenIndex', 'maxLatencyIndex', 'tags', 'capabilityIds',
+  'allowedScope', 'forbiddenScope', 'acceptanceCriteria', 'verificationCommands',
+  'allowedProviders', 'forbiddenProviders', 'forbiddenProfileIds', 'allowedProfileIds',
+  'weight'
+]);
 
 function requireString(task, field) {
   if (typeof task[field] !== 'string' || task[field].trim() === '') throw new TypeError(`task.${field} is required`);
@@ -40,6 +48,9 @@ function ensureStringArray(value, field) {
 export function validateTask(input, { forExecution = false } = {}) {
   if (!input || typeof input !== 'object') throw new TypeError('task must be an object');
   const task = structuredClone(input);
+  for (const field of Object.keys(task)) {
+    if (!KNOWN_TASK_FIELDS.has(field)) throw new Error(`Unknown task field: ${field}`);
+  }
   for (const field of ['id', 'kind', 'role']) requireString(task, field);
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(task.id)) {
     throw new Error('task.id must be a path-safe identifier');
@@ -64,6 +75,7 @@ export function validateTask(input, { forExecution = false } = {}) {
   task.allowedProviders = ensureStringArray(task.allowedProviders, 'allowedProviders');
   task.forbiddenProviders = ensureStringArray(task.forbiddenProviders, 'forbiddenProviders');
   task.forbiddenProfileIds = ensureStringArray(task.forbiddenProfileIds, 'forbiddenProfileIds');
+  task.allowedProfileIds = ensureStringArray(task.allowedProfileIds, 'allowedProfileIds');
   if (task.write !== undefined && typeof task.write !== 'boolean') {
     throw new TypeError('task.write must be boolean');
   }

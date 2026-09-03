@@ -32,9 +32,26 @@
         "additionalProperties": false
       }
     },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+          "severity": { "type": "string", "enum": ["low", "standard", "high", "critical"] },
+          "fixCost": { "type": "string", "enum": ["low", "standard", "high", "critical"] },
+          "axis": { "type": "string", "enum": ["overengineering", "correctness", "usage"] },
+          "location": { "type": "string" },
+          "evidence": { "type": "string" },
+          "proposal": { "type": "string" }
+        },
+        "required": ["id", "severity", "fixCost", "axis", "location", "evidence", "proposal"],
+        "additionalProperties": false
+      }
+    },
     "unresolvedRisks": { "type": "array", "items": { "type": "string" } },
     "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
   },
-  "required": ["status", "summary", "filesInspected", "filesChanged", "commands", "criteria", "unresolvedRisks", "confidence"],
+  "required": ["status", "summary", "filesInspected", "filesChanged", "commands", "criteria", "findings", "unresolvedRisks", "confidence"],
   "additionalProperties": false
 }

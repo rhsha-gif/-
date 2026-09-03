@@ -129,6 +129,80 @@ test('a first-attempt pass records evidence and a verify-gate observation', asyn
   assert.equal(persisted.changeGuard.passed, true);
 });
 
+test('a passed verification rejects HEAD or control-path changes', async (t) => {
+  const cases = [
+    { name: 'moves HEAD', head: 'after', control: {}, expectedControlPaths: [] },
+    {
+      name: 'edits a control path',
+      head: 'before',
+      control: { '.claude/settings.json': 'file:changed' },
+      expectedControlPaths: ['.claude/settings.json']
+    }
+  ];
+
+  for (const { name, head, control, expectedControlPaths } of cases) {
+    await t.test(name, async (t) => {
+      const dir = await temporaryDirectory(t);
+      const calls = [];
+      const verifyCalls = [];
+      const baseline = { applicable: true, reason: null, root: dir, head: 'before', entries: {}, control: {} };
+      const snapshots = [
+        baseline,
+        baseline,
+        { ...baseline, head, control }
+      ];
+
+      await assert.rejects(
+        executeLoop({
+          task: baseTask(),
+          config: baseConfig(),
+          cwd: dir,
+          executeTaskImpl: stubExecutor(dir, calls),
+          runVerificationImpl: stubVerifier([true], verifyCalls),
+          captureGitSnapshotImpl: async () => snapshots.shift()
+        }),
+        (error) => {
+          assert.match(error.message, /change guard failed/i);
+          assert.equal(error.changeGuard.headChanged, head !== 'before');
+          assert.deepEqual(error.changeGuard.controlPathsChanged, expectedControlPaths);
+          return true;
+        }
+      );
+
+      assert.equal(calls.length, 1);
+      assert.equal(verifyCalls.length, 1);
+    });
+  }
+});
+
+test('a passed verification permits output-only changes after the worker guard', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const baseline = { applicable: true, reason: null, root: dir, head: 'before', entries: {}, control: {} };
+  const snapshots = [
+    baseline,
+    baseline,
+    {
+      ...baseline,
+      entries: {
+        'dist/output.js': { status: '??', index: null, worktree: 'file:generated' }
+      }
+    }
+  ];
+
+  const result = await executeLoop({
+    task: baseTask(),
+    config: baseConfig(),
+    cwd: dir,
+    executeTaskImpl: stubExecutor(dir, calls),
+    runVerificationImpl: stubVerifier([true]),
+    captureGitSnapshotImpl: async () => snapshots.shift()
+  });
+
+  assert.equal(result.verification.passed, true);
+  assert.equal(calls.length, 1);
+});
+
 test('a task without verification commands keeps single-shot behavior', async (t) => {
   const dir = await temporaryDirectory(t);
   const calls = [];
@@ -371,6 +445,77 @@ test('a ladder step the run already used is skipped instead of retried', async (
   assert.equal(result.verification.passed, true);
 });
 
+test('a ladder skips profiles excluded by task pins', async (t) => {
+  const cases = [
+    {
+      name: 'allowedProfileIds',
+      task: baseTask({ allowedProfileIds: ['claude-sonnet-general', 'claude-fable-apex'] })
+    },
+    {
+      name: 'forbiddenProfileIds',
+      task: baseTask({ forbiddenProfileIds: ['claude-opus-deep'] })
+    }
+  ];
+
+  for (const { name, task } of cases) {
+    await t.test(name, async (t) => {
+      const dir = await temporaryDirectory(t);
+      const calls = [];
+      const result = await executeLoop({
+        task,
+        config: baseConfig(),
+        cwd: dir,
+        executeTaskImpl: stubExecutor(dir, calls),
+        runVerificationImpl: stubVerifier([false, true])
+      });
+
+      assert.equal(calls.length, 2);
+      assert.deepEqual(calls[1].forcedRoute, { profileId: 'claude-fable-apex', effort: 'high' });
+      assert.equal(result.verification.passed, true);
+    });
+  }
+});
+
+test('a ladder exhausted by task pins returns verification evidence to the human', async (t) => {
+  const cases = [
+    {
+      name: 'allowedProfileIds',
+      task: baseTask({ allowedProfileIds: ['claude-fable-apex'] }),
+      initialRoute: { provider: 'anthropic', profileId: 'claude-fable-apex', model: 'fable', effort: 'high' }
+    },
+    {
+      name: 'forbiddenProfileIds',
+      task: baseTask({ forbiddenProfileIds: ['claude-opus-deep', 'claude-fable-apex'] })
+    },
+    {
+      name: 'allowedProviders',
+      task: baseTask({ allowedProviders: ['openai'] })
+    },
+    {
+      name: 'forbiddenProviders',
+      task: baseTask({ forbiddenProviders: ['anthropic'] })
+    }
+  ];
+
+  for (const { name, task, initialRoute } of cases) {
+    await t.test(name, async (t) => {
+      const dir = await temporaryDirectory(t);
+      const calls = [];
+      await assert.rejects(
+        executeLoop({
+          task,
+          config: baseConfig(),
+          cwd: dir,
+          executeTaskImpl: stubExecutor(dir, calls, { initialRoute }),
+          runVerificationImpl: stubVerifier([false])
+        }),
+        /Verification failed after 1 attempt\(s\); escalation ladder exhausted/
+      );
+      assert.equal(calls.length, 1);
+    });
+  }
+});
+
 test('an empty ladder fails after the first attempt instead of retrying blindly', async (t) => {
   const dir = await temporaryDirectory(t);
   const calls = [];
@@ -560,6 +705,43 @@ test('a blocked receipt returns to the human without verification or escalation'
   );
   assert.equal(calls.length, 1);
   assert.equal(verifyCalls.length, 0);
+});
+
+test('a null, scalar, or array receipt fails closed before verification', async (t) => {
+  const cases = [
+    { name: 'null', receipt: null },
+    { name: 'string scalar', receipt: 'complete' },
+    { name: 'number scalar', receipt: 1 },
+    { name: 'boolean scalar', receipt: true },
+    { name: 'array', receipt: [] }
+  ];
+
+  for (const { name, receipt } of cases) {
+    await t.test(name, async (t) => {
+      const dir = await temporaryDirectory(t);
+      const calls = [];
+      const verifyCalls = [];
+      const base = stubExecutor(dir, calls);
+
+      await assert.rejects(
+        executeLoop({
+          task: baseTask(),
+          config: baseConfig(),
+          cwd: dir,
+          executeTaskImpl: async (input) => ({ ...await base(input), receipt }),
+          runVerificationImpl: stubVerifier([true], verifyCalls)
+        }),
+        (error) => {
+          assert.match(error.message, /worker receipt is not an object/);
+          assert.equal(error.receiptStatus, undefined);
+          return true;
+        }
+      );
+
+      assert.equal(calls.length, 1);
+      assert.equal(verifyCalls.length, 0);
+    });
+  }
 });
 
 test('a complete receipt with a failed criterion is a failure, even when commands would pass', async (t) => {

@@ -30,6 +30,29 @@ function assertNonEmptyStrings(entries, name) {
   }
 }
 
+function validateStateDir(stateDir) {
+  const message = "config.paths.stateDir must be a non-empty relative path rooted in a dot-prefixed directory and may not contain '..' segments";
+  if (
+    typeof stateDir !== 'string' ||
+    stateDir === '' ||
+    path.isAbsolute(stateDir) ||
+    path.posix.isAbsolute(stateDir) ||
+    path.win32.isAbsolute(stateDir)
+  ) {
+    throw new TypeError(message);
+  }
+  const segments = stateDir.split(/[\\/]+/).filter(Boolean);
+  const firstDirectory = segments.find((segment) => segment !== '.');
+  if (
+    !firstDirectory ||
+    !firstDirectory.startsWith('.') ||
+    segments.includes('..')
+  ) {
+    throw new TypeError(message);
+  }
+  return stateDir;
+}
+
 function positiveNumber(value, name, fallback) {
   const resolved = value ?? fallback;
   if (!Number.isFinite(resolved) || resolved <= 0) throw new RangeError(`${name} must be positive`);
@@ -61,7 +84,7 @@ function adapterMaturity(value, name, fallback) {
 // fails closed when it needs a pair this map does not carry.
 const AGENT_ROLE_KEYS = [
   'worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail',
-  'writer', 'editor', 'qa-analyst', 'invest-analyst', 'refactorer', 'paper-researcher'
+  'writer', 'editor', 'qa-analyst', 'invest-analyst', 'refactorer', 'paper-researcher', 'auditor'
 ];
 const preset = (name) => Object.freeze({ claude: name, codex: name });
 const DEFAULT_ROLE_AGENTS = Object.freeze({
@@ -77,7 +100,8 @@ const DEFAULT_ROLE_AGENTS = Object.freeze({
   'qa-analyst': preset('aorch-qa-analyst'),
   'invest-analyst': preset('aorch-invest-analyst'),
   refactorer: preset('aorch-refactorer'),
-  'paper-researcher': preset('aorch-paper-researcher')
+  'paper-researcher': preset('aorch-paper-researcher'),
+  auditor: preset('aorch-auditor')
 });
 
 function validateRoleAgents(input, providers) {
@@ -382,6 +406,9 @@ export function validateConfig(input) {
     if (b.verificationCommands !== undefined) assertNonEmptyStrings(b.verificationCommands, 'config.branch.verificationCommands');
   }
 
+  const paths = { stateDir: '.aorch', ...(input.paths ?? {}) };
+  validateStateDir(paths.stateDir);
+
   return structuredClone({
     ...input,
     providers: normalizedProviders,
@@ -392,7 +419,7 @@ export function validateConfig(input) {
     controlPlane,
     escalation,
     verification: { ...(input.verification ?? {}), commandTimeoutMs: verificationTimeoutMs },
-    paths: { stateDir: '.aorch', ...(input.paths ?? {}) }
+    paths
   });
 }
 

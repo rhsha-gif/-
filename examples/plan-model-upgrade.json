@@ -1,0 +1,52 @@
+{
+  "objective": "Audit one project after a new frontier model ships, with the new model as the judge. Copy this template and replace <project-root> (absolute path the tasks may read; for a non-git target such as the global ~/.claude, run this plan from the aorch repository and point the objectives at the external absolute path), <scope> (the paths under review), <conventions-doc> (the project's CLAUDE.md or AGENTS.md), and <usage-evidence-dir> (a directory the lead filled by actually running the project — smoke suites, a real dispatch, a browser flow — before dispatching; the plan deliberately has no usage task because a read-only smoke run on an unchanged tree passes regardless of model and would record a meaningless observation). A1-audit pins the newest model with allowedProfileIds: quality routing cannot express 'this model's judgement is the point' — measured 2026-09-02, minimumQuality 0.95 with anthropic still went to opus xhigh, because opus carries a review prior of 0.96 plus an effort bump while fable has no review prior and offers its high effort only at critical complexity. So A1 is complexity critical (that is where the pinned profile's effort lives) and risk high, because the critical-risk gate (criticalMinimumSamples) would exclude a challenger model with no observations yet. Replace claude-fable-apex with the catalogue id of the model under evaluation. Fixes are a second plan (plan-model-upgrade-apply.json) built from the findings the user picked.",
+  "decomposed": true,
+  "tasks": [
+    {
+      "id": "P1-shrink",
+      "title": "Ask what does not need to exist",
+      "objective": "Judge <scope> under <project-root>: what can be deleted or left unwritten, what is already provided by the codebase, the standard library, the platform, or an existing dependency, and what should stay with a stated reason. Never recommend removing validation at a trust boundary, anything preventing data loss, security controls, or accessibility affordances. Name files and symbols; your verdict is one of the auditor's inputs.",
+      "kind": "review",
+      "agentRole": "ponytail",
+      "risk": "standard",
+      "complexity": "high",
+      "write": false,
+      "acceptanceCriteria": [
+        "Every keep carries a reason; every cut names what already covers it or why it is not needed.",
+        "Findings name files and symbols concretely enough to act on."
+      ]
+    },
+    {
+      "id": "R1-invariants",
+      "title": "Falsify the project's own invariants",
+      "objective": "Read <conventions-doc> and list the invariants, forbidden actions and verification gates it promises. Then attempt to falsify each against the code under <scope>: failure paths, fail-open defaults, security controls, data integrity, and gates that can be bypassed. When filling this template, set allowedProviders to the provider that does NOT own A1-audit's pinned profile, so the two verdicts come from different models. Confirm or refute against the code, not against any prior summary.",
+      "kind": "security",
+      "agentRole": "reviewer",
+      "risk": "standard",
+      "complexity": "high",
+      "write": false,
+      "acceptanceCriteria": [
+        "Each promised invariant is listed with held / not held / could not determine and the evidence.",
+        "Every 'not held' names the file and the path by which it fails."
+      ]
+    },
+    {
+      "id": "A1-audit",
+      "title": "Rank the findings for the owner",
+      "objective": "Read the receipts of P1-shrink and R1-invariants under the .aorch/task-runs/<run-id>/ directory that contains this task's own id directory, the usage evidence under <usage-evidence-dir>, and <conventions-doc>. Produce the receipt's findings list: every entry with id, severity, fixCost, axis, location, evidence and proposal, ordered by how much future human intervention each fix removes per unit of fixCost, without lowering the project's quality floor. Open source files only to confirm or refute a specific claim. Do not add axes or scope the plan did not give you.",
+      "kind": "review",
+      "agentRole": "auditor",
+      "risk": "high",
+      "complexity": "critical",
+      "write": false,
+      "allowedProfileIds": [
+        "claude-fable-apex"
+      ],
+      "acceptanceCriteria": [
+        "Every finding has all seven fields and a location that names a file.",
+        "The list is ordered by the stated objective and the receipt says so.",
+        "No finding proposes removing a trust-boundary control, a data-loss guard, a security control or an accessibility affordance."
+      ]
+    }
+  ]
+}

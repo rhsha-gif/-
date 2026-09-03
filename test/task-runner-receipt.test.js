@@ -118,3 +118,50 @@ test('a worker that dies before producing output surfaces its stderr as evidence
   // Then: the failure message carries the stderr tail so `aorch exec` output is diagnosable
   await assert.rejects(execution, /Worker exited with 1[\s\S]*--json-schema is not a valid JSON Schema/);
 });
+
+// The receipt schema is handed to the CLI as --json-schema (Claude) and
+// --output-schema (Codex), so its shape is the only thing that constrains what
+// a worker can claim. findings is the auditor's ranked output; every other role
+// returns it empty. It is required, not optional: OpenAI's strict structured
+// output rejects a schema whose `required` omits any property key (measured
+// 2026-09-02 — an optional findings field made every Codex worker fail with
+// 400 invalid_json_schema before it started). Its vocabulary is the same
+// four-tier scale the plan schema already uses for risk and complexity.
+test('the receipt schema carries a required findings list on the shared four-tier scale', async () => {
+  const schemaPath = new URL('../schemas/worker-receipt.schema.json', import.meta.url);
+  const schema = JSON.parse(await readFile(schemaPath, 'utf8'));
+  assert.ok(schema.required.includes('findings'), 'strict structured output needs every key required');
+  assert.deepEqual(schema.required, Object.keys(schema.properties), 'required must list every property for OpenAI strict mode');
+  const finding = schema.properties.findings.items;
+  assert.deepEqual(finding.required, ['id', 'severity', 'fixCost', 'axis', 'location', 'evidence', 'proposal']);
+  assert.equal(finding.additionalProperties, false);
+  const tiers = ['low', 'standard', 'high', 'critical'];
+  assert.deepEqual(finding.properties.severity.enum, tiers);
+  assert.deepEqual(finding.properties.fixCost.enum, tiers);
+  assert.deepEqual(finding.properties.axis.enum, ['overengineering', 'correctness', 'usage']);
+  assert.equal(schema.additionalProperties, false);
+});
+
+function assertStrictObjectContracts(node, schemaPath = '$') {
+  if (node === null || typeof node !== 'object') return;
+
+  if (Object.hasOwn(node, 'properties')) {
+    assert.equal(node.additionalProperties, false, `${schemaPath} must disallow additional properties`);
+    assert.deepEqual(node.required, Object.keys(node.properties), `${schemaPath} must require every property`);
+  }
+
+  for (const [key, value] of Object.entries(node)) {
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => assertStrictObjectContracts(item, `${schemaPath}.${key}[${index}]`));
+    } else {
+      assertStrictObjectContracts(value, `${schemaPath}.${key}`);
+    }
+  }
+}
+
+test('the receipt schema satisfies the Codex strict structured-output contract recursively', async () => {
+  const schemaPath = new URL('../schemas/worker-receipt.schema.json', import.meta.url);
+  const schema = JSON.parse(await readFile(schemaPath, 'utf8'));
+
+  assertStrictObjectContracts(schema);
+});

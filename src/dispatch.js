@@ -2,6 +2,7 @@ import { validateTaskPlan } from './decompose.js';
 import { roleAgentName } from './role-agent.js';
 import { selectRoute } from './router.js';
 import { executeWithVerification } from './run-loop.js';
+import { randomUUID } from 'node:crypto';
 
 function adapterForProvider(config, providerId) {
   const provider = config.providers?.find((entry) => entry.id === providerId);
@@ -41,6 +42,7 @@ export async function dispatchPlan({
 }) {
   const validated = validateTaskPlan(plan);
   const results = [];
+  const runId = randomUUID();
 
   for (const declared of validated.tasks) {
     const task = forbiddenProviders.length === 0
@@ -83,7 +85,7 @@ export async function dispatchPlan({
 
     try {
       const execution = await executeImpl({
-        task,
+        task: { ...task, runId },
         config,
         observations,
         cwd,

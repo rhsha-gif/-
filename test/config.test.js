@@ -31,6 +31,19 @@ test('a new provider and model can be added through configuration only', () => {
   assert.equal(config.models[0].provider, 'newco');
 });
 
+test('stateDir stays in a dot-prefixed project-local directory', () => {
+  assert.equal(validateConfig(minimalConfig()).paths.stateDir, '.aorch');
+  const dotRelative = minimalConfig();
+  dotRelative.paths.stateDir = './.aorch';
+  assert.doesNotThrow(() => validateConfig(dotRelative));
+
+  for (const stateDir of ['', '.', path.resolve('outside-aorch-state'), '.aorch/../src', './src', 'src']) {
+    const config = minimalConfig();
+    config.paths.stateDir = stateDir;
+    assert.throws(() => validateConfig(config), /config\.paths\.stateDir/i);
+  }
+});
+
 test('validateConfig accepts a well-formed usageProbe and rejects malformed ones, and stays optional', () => {
   const good = minimalConfig();
   good.providers[0].usageProbe = { command: 'caut', args: ['usage', '--json'], remainingField: 'usage.primary.remainingPercent' };
@@ -272,7 +285,7 @@ test('premiumThresholdPercent is normalized, ranged, and never below the soft th
 // half-declared block is a mistake, not a per-role override.
 const ALL_ROLES = [
   'worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail',
-  'writer', 'editor', 'qa-analyst', 'invest-analyst', 'refactorer', 'paper-researcher'
+  'writer', 'editor', 'qa-analyst', 'invest-analyst', 'refactorer', 'paper-researcher', 'auditor'
 ];
 function fullBlock(overrides = {}) {
   return Object.fromEntries(ALL_ROLES.map((r) => [r, overrides[r] ?? { generic: `my-${r}` }]));

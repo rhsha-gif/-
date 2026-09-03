@@ -112,13 +112,23 @@ async function planFinish({ cwd, config, options }) {
 
   const run = async () => {
     const performed = [];
-    const must = async (args, label) => {
-      const r = await runGit(args, cwd);
-      if (r.exitCode !== 0) throw new Error(`finish failed at ${label}: ${(r.stderr || r.stdout).trim()}`);
-      performed.push(label);
-    };
     // Record where main was so the caller can undo the merge if needed.
     const preMerge = await runGit(['rev-parse', main], cwd);
+    const undo = { preMergeMainSha: preMerge.stdout.trim() };
+    const must = async (args, label) => {
+      const r = await runGit(args, cwd);
+      if (r.exitCode !== 0) {
+        const error = new Error(
+          `finish failed at ${label}: ${(r.stderr || r.stdout).trim()}\n` +
+          `performed: ${performed.join(', ') || '(none)'}\n` +
+          `undo: preMergeMainSha=${undo.preMergeMainSha}`
+        );
+        error.undo = undo;
+        error.performed = [...performed];
+        throw error;
+      }
+      performed.push(label);
+    };
     await must(['switch', main], `switch ${main}`);
     const merge = await runGit(['merge', '--no-ff', '-m', `Merge ${branch}`, branch], cwd);
     if (merge.exitCode !== 0) {
@@ -130,7 +140,7 @@ async function planFinish({ cwd, config, options }) {
     performed.push(`merge ${branch}`);
     if (hasRemote) await must(['push', 'origin', main], `push ${main}`);
     await must(['branch', '-d', branch], `delete ${branch}`);
-    return { performed, undo: { preMergeMainSha: preMerge.stdout.trim() } };
+    return { performed, undo };
   };
 
   return { plan, run, blockers, verifyBlocking: { commands, runVerify } };

@@ -39,7 +39,13 @@ const AGENT_ROLES = Object.freeze({
   refactorer: 'executor',
   // paper-researcher collects bibliographic evidence through the paper-search
   // MCP and never ranks it — the same reason researcher routes as an executor.
-  'paper-researcher': 'executor'
+  'paper-researcher': 'executor',
+  // auditor synthesises the receipts other tasks already produced (ponytail,
+  // reviewer, the lead's usage evidence) into ranked findings — the same reason
+  // qa-analyst routes as a reviewer. The reviewer preset itself is fixed on
+  // falsifying one diff and has no vocabulary for ranking across receipts, so
+  // it cannot be reused with a different objective (2026-09-02 ponytail verdict).
+  auditor: 'reviewer'
 });
 
 export function routingRoleFor(agentRole) {

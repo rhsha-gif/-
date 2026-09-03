@@ -26,6 +26,7 @@
   "$defs": {
     "task": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["id", "objective", "kind", "risk", "acceptanceCriteria", "agentRole"],
       "not": { "required": ["role"] },
       "properties": {
@@ -42,7 +43,7 @@
           "description": "Routing input, e.g. implementation, testing, documentation, debugging, architecture, security, exploration, research, writing."
         },
         "agentRole": {
-          "enum": ["worker", "reviewer", "fixer", "researcher", "analyst", "license-reviewer", "ponytail", "writer", "editor", "qa-analyst", "invest-analyst", "refactorer", "paper-researcher"],
+          "enum": ["worker", "reviewer", "fixer", "researcher", "analyst", "license-reviewer", "ponytail", "writer", "editor", "qa-analyst", "invest-analyst", "refactorer", "paper-researcher", "auditor"],
           "description": "Selects the role agent and derives the routing role. worker: build it. reviewer: judge it without touching it. fixer: repair a task whose verification failed. researcher: find candidates on the web and record URL, license, recency and activity as evidence. analyst: read a named repository and separate what can be borrowed from what cannot. license-reviewer: check the licence text and state what obligations each form of reuse carries. ponytail: look for what does not need to be written at all, and justify whatever survives. writer: draft prose for a bounded chapter or page set at top-tier routing. editor: directly fix wording, phrasing and typos only, and report substance or structure concerns as judgements instead of edits. qa-analyst: read what the QA commands already computed and render a verdict, opening only changed or machine-flagged pages. invest-analyst: analyse evidence someone else gathered into support, refutation and blind spots shaped as decision-record input, never gathering, ranking or ordering trades. refactorer: perform behavior-preserving restructuring only, reporting any public-API or behavior change as a judgement instead of making it. paper-researcher: search academic sources through the paper-search MCP and record bibliographic records, citation counts and the tool each fact came from, never ranking or synthesising. Scouting our own repository is deliberately absent — that reconnaissance stays with the lead, because verifying a delegated survey costs about as much as running it. Web research is the exception researcher covers: a URL and a licence can be re-checked mechanically, so the spot check is cheap."
         },
         "role": {
@@ -54,6 +55,9 @@
           "description": "Optional; derived from risk when absent."
         },
         "write": { "type": "boolean" },
+        "allowInPlaceWrite": { "type": "boolean" },
+        "maxTurns": { "type": "integer", "minimum": 1 },
+        "runId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
         "weight": { "type": "number" },
         "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "capabilityIds": { "type": "array", "items": { "type": "string", "minLength": 1 } },
@@ -76,14 +80,20 @@
         },
         "forbiddenProviders": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "forbiddenProfileIds": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "allowedProfileIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Pin the task to named catalogue profiles. Leave unset so the router chooses by evidence; set it only when the task exists to obtain a specific model's judgement, such as the model-upgrade audit."
+        },
         "minimumQuality": { "type": "number", "minimum": 0, "maximum": 1 },
+        "maxTokenIndex": { "type": "number", "exclusiveMinimum": 0 },
+        "maxLatencyIndex": { "type": "number", "exclusiveMinimum": 0 },
         "routingPriorities": {
           "type": "array",
           "minItems": 1,
           "maxItems": 3,
           "items": { "enum": ["quality", "tokens", "latency"] }
-        },
-        "allowInPlaceWrite": { "type": "boolean" }
+        }
       }
     }
   }
