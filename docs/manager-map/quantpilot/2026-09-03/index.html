@@ -1,0 +1,301 @@
+<title>QuantPilot 운영 지도</title>
+<style>
+:root {
+  --bg: #fafaf7; --fg: #1f2328; --muted: #6b7280; --line: #d9dbe0; --card: #ffffff;
+  --accent: #2f5fd6; --ok: #1e8e3e; --ok-bg: #e6f4ea; --bad: #c5221f; --bad-bg: #fce8e6;
+  --warn: #b26a00; --warn-bg: #fff3d6; --hi: #b3261e; --std: #8a5a00; --low: #3d5a80;
+  --judge-hi: #1b5e20; --judge-md: #7a5800; --judge-lo: #8b1e3f; --judge-bg: #f1f0ff;
+  --lane-human: #eef3ff; --lane-system: #f2f7f0; --lane-external: #fff5ec;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161a; --fg: #e6e8eb; --muted: #9aa3ad; --line: #2e333a; --card: #1c1f24;
+    --accent: #7ea2ff; --ok: #6fd18a; --ok-bg: #12301c; --bad: #ff7b72; --bad-bg: #3a1613;
+    --warn: #f0b95a; --warn-bg: #3a2a0c; --hi: #ff8a80; --std: #f3c56b; --low: #9fc0e8;
+    --judge-hi: #8fe0a0; --judge-md: #f0d27a; --judge-lo: #ff9fbf; --judge-bg: #25243a;
+    --lane-human: #1d2436; --lane-system: #1c2a1e; --lane-external: #33261a;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14161a; --fg: #e6e8eb; --muted: #9aa3ad; --line: #2e333a; --card: #1c1f24;
+  --accent: #7ea2ff; --ok: #6fd18a; --ok-bg: #12301c; --bad: #ff7b72; --bad-bg: #3a1613;
+  --warn: #f0b95a; --warn-bg: #3a2a0c; --hi: #ff8a80; --std: #f3c56b; --low: #9fc0e8;
+  --judge-hi: #8fe0a0; --judge-md: #f0d27a; --judge-lo: #ff9fbf; --judge-bg: #25243a;
+  --lane-human: #1d2436; --lane-system: #1c2a1e; --lane-external: #33261a;
+}
+.mm { background: var(--bg); color: var(--fg); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; padding: 24px; max-width: 1280px; margin: 0 auto; }
+.mm h1 { font-size: 1.6rem; margin: 0 0 4px; }
+.mm h2 { font-size: 1.2rem; margin: 36px 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.mm h3 { font-size: 1rem; margin: 20px 0 8px; }
+.mm p, .mm li { margin: 4px 0; }
+.mm .meta { color: var(--muted); font-size: 0.9rem; }
+.mm code { font-family: ui-monospace, Consolas, monospace; font-size: 0.86em; background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.mm table { border-collapse: collapse; width: 100%; background: var(--card); font-size: 0.9rem; margin: 8px 0 12px; }
+.mm th, .mm td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+.mm th { background: var(--bg); font-weight: 600; }
+.mm a { color: var(--accent); }
+.mm .counts { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; margin: 10px 0 16px; }
+.mm .count { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.mm .count .n { font-size: 1.8rem; font-weight: 700; line-height: 1.1; }
+.mm .count .l { color: var(--muted); font-size: 0.85rem; }
+.mm .badge { display: inline-block; font-size: 0.78rem; line-height: 1.3; padding: 1px 7px; white-space: nowrap; }
+.mm .badge[data-kind="fact"] { font-family: ui-monospace, Consolas, monospace; border-radius: 3px; border: 1.5px solid; font-weight: 700; }
+.mm .badge[data-kind="fact"][data-value="yes"] { color: var(--ok); background: var(--ok-bg); border-color: var(--ok); }
+.mm .badge[data-kind="fact"][data-value="no"] { color: var(--bad); background: var(--bad-bg); border-color: var(--bad); }
+.mm .badge[data-kind="fact"][data-value="partial"] { color: var(--warn); background: var(--warn-bg); border-color: var(--warn); }
+.mm .badge[data-kind="judgement"] { border-radius: 999px; border: 1px dashed; font-style: italic; background: var(--judge-bg); }
+.mm .badge[data-kind="judgement"][data-confidence="high"] { color: var(--judge-hi); border-color: var(--judge-hi); }
+.mm .badge[data-kind="judgement"][data-confidence="medium"] { color: var(--judge-md); border-color: var(--judge-md); }
+.mm .badge[data-kind="judgement"][data-confidence="low"] { color: var(--judge-lo); border-color: var(--judge-lo); }
+.mm .sev { font-weight: 700; }
+.mm .sev-high { color: var(--hi); } .mm .sev-standard { color: var(--std); } .mm .sev-low { color: var(--low); }
+.mm .lane { display: inline-block; border-radius: 4px; padding: 0 6px; font-size: 0.8rem; }
+.mm .lane-human { background: var(--lane-human); } .mm .lane-system { background: var(--lane-system); } .mm .lane-external { background: var(--lane-external); }
+.mm pre.mermaid { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; }
+.mm .legend { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; font-size: 0.85rem; color: var(--muted); margin: 6px 0 12px; }
+.mm .heat td.cell-yes { background: var(--ok-bg); } .mm .heat td.cell-no { background: var(--bad-bg); } .mm .heat td.cell-partial { background: var(--warn-bg); }
+.mm .small { font-size: 0.85rem; }
+.mm .ev { color: var(--muted); font-size: 0.85rem; }
+.mm .explain { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 12px 16px; margin: 12px 0 18px; }
+.mm .explain h3 { margin: 0 0 6px; font-size: 1rem; }
+.mm .explain dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 6px 0 0; }
+.mm .explain dt { font-weight: 600; white-space: nowrap; }
+.mm .explain dd { margin: 0; }
+.mm .summary-line { font-size: 1.05rem; margin: 8px 0 12px; }
+.mm .heat th, .mm .heat td { padding: 10px 12px; font-size: 0.95rem; }
+.mm .heat td.cell-yes, .mm .heat td.cell-no, .mm .heat td.cell-partial { font-weight: 600; }
+.mm .heat td.cell-yes { color: var(--ok); } .mm .heat td.cell-no { color: var(--bad); } .mm .heat td.cell-partial { color: var(--warn); }
+.mm .heat .badge { font-size: 0.9rem; padding: 3px 9px; }
+.mm .heat thead th { position: sticky; top: 0; }
+.mm .steps { counter-reset: step; padding-left: 0; list-style: none; }
+.mm .steps li { counter-increment: step; margin: 6px 0; padding-left: 2.2rem; position: relative; }
+.mm .steps li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; text-align: center; line-height: 1.6rem; font-size: 0.85rem; }
+.mm .lane-legend span { display: inline-block; padding: 2px 10px; border-radius: 4px; margin-right: 8px; font-size: 0.85rem; }
+.mm footer { margin-top: 36px; border-top: 1px solid var(--line); padding-top: 10px; color: var(--muted); font-size: 0.85rem; }
+</style>
+<div class="mm">
+<header>
+  <h1>🧭 QuantPilot 운영 지도</h1>
+  <p class="meta">기준일 2026-09-03 · 대조 대상: <code>docs/STATUS.md</code>(2026-08-12 갱신) · <code>docs/roadmap_acceptance_matrix.md</code> · <code>docs/operator_runbook.md</code> · <code>docs/safety_checklist.md</code> · <code>docs/live_trading_enablement_checklist.md</code> ↔ <code>quantpilot/{packages,services,jobs,apps/web/src}</code>. 존재 목록은 grep/ls로 기계적으로 뽑았고(라우트 51개·잡 6개·상태 enum 10종·UI 페이지 11개), 판단에는 근거 줄을 붙였다.</p>
+  <div class="legend">
+    <span><span class="badge" data-kind="fact" data-value="yes">✓ 존재</span> / <span class="badge" data-kind="fact" data-value="no">✗ 없음</span> = 사실(라우트·잡·페이지가 실제로 있는가)</span>
+    <span><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="badge" data-kind="judgement" data-confidence="medium">medium</span> <span class="badge" data-kind="judgement" data-confidence="low">low</span> = 판단(런북 서술이 코드 동작과 같은가)</span>
+    <span>심각도: 런북 흐름 안의 불일치·끊긴 고리 <span class="sev sev-high">high</span> · 흐름 밖 불일치·스텁·잠김 <span class="sev sev-standard">standard</span> · 수동 단계·오래된 메모 <span class="sev sev-low">low</span></span>
+  </div>
+</header>
+
+<div class="explain">
+  <h3>이 지도를 읽는 법</h3>
+  <p>이 페이지는 QuantPilot이 <strong>어떻게 돌아가는지</strong>(2절 흐름), <strong>사람이 어디서 개입하는지</strong>(2절의 "사람" 색 단계), <strong>무엇이 돼 있고 무엇이 빈칸인지</strong>(1절 히트맵), <strong>어디를 고쳐야 하는지</strong>(3절 갭 목록)를 한 장에 모은 것이다. 프로젝트가 스스로 적어 둔 문서(현황판·수용 매트릭스·런북·체크리스트)를 실제 코드와 맞춰 본 결과이며, 문서와 코드가 다르거나 문서에 없는 것이 "갭"이다.</p>
+  <dl>
+    <dt>게이트(Gate)</dt><dd>로드맵의 관문. 하나를 넘어야 다음 단계로 간다. 0·1·2·3·4·P 여섯 개가 있고, "done"은 통과, "proposed"는 아직 계획만 있음.</dd>
+    <dt>Level 1~5</dt><dd>자동화 수준. 1~2는 신호를 보고 사람이 모의체결, 3은 제안을 사람이 승인해야 제출, 4는 보호 장치 아래 자동, 5는 완전 자동 오퍼레이터. 3~5는 현재 플래그로 잠겨 있다.</dd>
+    <dt>오퍼레이터(Operator)</dt><dd>Level 5의 실행 주체. "한 번의 실행(run-once)"이 게이트 검사→전략 선택→신호→제안→제출→보고의 한 사이클이다.</dd>
+    <dt>플래그(flag)</dt><dd>환경변수 스위치. <code>LIVE_TRADING_ENABLED</code> 등 여섯 개가 전부 꺼진 것이 안전 기본값이며, 켜지 않으면 자동 매매 경로는 첫 관문에서 멈춘다.</dd>
+    <dt>mock / paper / live</dt><dd>브로커 모드. mock은 가짜 체결, paper는 증권사 모의투자 서버, live는 실거래(코드상 존재하지 않음).</dd>
+    <dt>dry_run / mock_submit / paper_submit</dt><dd>실행 모드. dry_run은 제안만 만들고 제출하지 않음. 실거래 모드는 없다.</dd>
+    <dt>승인 티켓 / 킬스위치</dt><dd>사람이 개입하는 두 지점. 티켓은 제안을 사람이 승인하는 레일, 킬스위치는 모든 자동 매매를 즉시 멈추고 권한을 낮추는 버튼.</dd>
+    <dt>✓ ✗ 와 신뢰도 배지</dt><dd>네모 배지는 "실제로 있다/없다"는 사실. 점선 알약 배지는 "문서 서술이 코드와 같은가"에 대한 판단이며 high/medium/low는 그 판단의 확신 정도. 판단 옆에는 근거 줄이 붙어 있다.</dd>
+  </dl>
+</div>
+
+<section id="overview">
+  <h2>1. 한눈에 — 게이트 히트맵과 갭 수</h2>
+  <div class="counts">
+    <div class="count"><div class="n">10</div><div class="l">문서–코드 불일치 (MIS)</div></div>
+    <div class="count"><div class="n">4</div><div class="l">끊긴 고리 (LINK)</div></div>
+    <div class="count"><div class="n">6</div><div class="l">스텁·잠김·실서버 미검증 (STUB)</div></div>
+    <div class="count"><div class="n">5</div><div class="l">수동 단계 (MAN)</div></div>
+  </div>
+  <p class="small">총 25건 — <span class="sev sev-high">high 7</span> · <span class="sev sev-standard">standard 12</span> · <span class="sev sev-low">low 6</span>. 흐름도 단계 24개 중 판단 신뢰도 low 2개(E1·E2).</p>
+
+  <h3>1-a. 로드맵 게이트 × 상태 — 수용 매트릭스 §6 원장 그대로</h3>
+  <p class="summary-line">한 줄 요약: 여섯 관문 중 <strong>둘(Gate 0·1)만 통과</strong>했고, 넷은 계획 단계다. 통과한 둘도 "사람이 실서버로 확인"한 항목은 비어 있다.</p>
+  <div class="explain">
+    <h3>관문과 열의 뜻</h3>
+    <dl>
+      <dt>Gate 0</dt><dd>기준선 — 테스트와 스모크가 통과하는 상태를 확정.</dd>
+      <dt>Gate 1</dt><dd>리스크 예약 v1 — 주문 전에 현금·수량을 원자적으로 잡아 둠.</dd>
+      <dt>Gate 2</dt><dd>체결 이벤트 v1 — 주문 이력을 정본 이벤트로 기록. (현황판은 완료, 이 원장은 미갱신 → <a href="#gap-MIS-02">MIS-02</a>)</dd>
+      <dt>Gate 3</dt><dd>실행 커널 v2 — 주문 실행 엔진 교체. 계약만 있고 런타임 미착수.</dd>
+      <dt>Gate 4</dt><dd>원장 런타임 — 장부 기록의 실행 시 반영.</dd>
+      <dt>Gate P</dt><dd>모의투자 준비 — 증권사 paper 서버로 실제 왕복을 사람이 확인.</dd>
+      <dt>Backend evidence</dt><dd>그 관문에서 통과한 자동 테스트 수.</dd>
+      <dt>Smoke evidence</dt><dd>스모크 실행 출력에 반드시 찍혀야 하는 줄(mock, live=false, blocked)이 찍혔는가.</dd>
+      <dt>P0/P1</dt><dd>감사에서 남은 치명·중대 결함 수. 0이어야 통과.</dd>
+      <dt>Fake-only met / Manual met</dt><dd>가짜 클라이언트 테스트로 충족 / 사람이 실서버로 확인. 자동 매매를 모의투자에 붙이려면 Manual 열이 채워져야 한다.</dd>
+    </dl>
+  </div>
+  <p class="small">출처: <a href="docs/roadmap_acceptance_matrix.md#6-acceptance-ledger-to-be-filled-at-each-gates-completion" title="QuantPilot 저장소 루트 기준 경로">docs/roadmap_acceptance_matrix.md §6. Acceptance ledger</a> (재계산 없이 복사. 원장은 미션 리드만 갱신한다고 명시돼 있다. STATUS.md와 어긋나는 Gate 2 행은 <a href="#gap-MIS-02">MIS-02</a>.)</p>
+  <table class="heat">
+    <thead><tr><th>Gate</th><th>Backend evidence</th><th>Smoke evidence</th><th>P0/P1</th><th>Fake-only met</th><th>Manual met</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>Gate 0 <code>QP-RM-00</code></td><td class="cell-yes"><code>819 passed, 2 skipped</code></td><td class="cell-yes">mock/live=false/blocked</td><td class="cell-yes">0</td><td class="cell-yes">yes</td><td class="cell-partial"><code>VTTC0084R</code> pending</td><td class="cell-yes">done</td></tr>
+      <tr><td>Gate 1 <code>QP-RISK-RES-V1</code></td><td class="cell-yes"><code>885 passed, 2 skipped</code></td><td class="cell-yes">mock/live=false/operator blocked; kill CLI blocked</td><td class="cell-yes">0/0</td><td class="cell-yes">yes</td><td class="cell-partial">n/a for dev; Gate P pending</td><td class="cell-yes">done</td></tr>
+      <tr><td>Gate 2 <code>QP-EXEC-EVENTS-V1</code></td><td class="cell-no"><a href="#gap-MIS-02">pending</a></td><td class="cell-no">pending</td><td class="cell-no">pending</td><td class="cell-no">pending</td><td>n/a</td><td class="cell-partial"><a href="#gap-MIS-02">proposed</a></td></tr>
+      <tr><td>Gate 3 <code>QP-KERNEL-V2</code></td><td class="cell-no">pending</td><td class="cell-no">pending</td><td class="cell-no">pending</td><td class="cell-no">pending</td><td>n/a</td><td class="cell-partial">proposed</td></tr>
+      <tr><td>Gate 4 <code>QP-LEDGER-RUNTIME</code></td><td class="cell-no">pending</td><td class="cell-no">pending</td><td class="cell-no">pending</td><td class="cell-no">pending</td><td class="cell-partial">folded into P</td><td class="cell-partial">proposed</td></tr>
+      <tr><td>Gate P paper readiness</td><td class="cell-no">pending</td><td class="cell-no">pending</td><td class="cell-no">pending</td><td class="cell-partial">required</td><td class="cell-no"><a href="#gap-STUB-04"><strong>required</strong></a></td><td class="cell-partial">proposed</td></tr>
+    </tbody>
+  </table>
+
+  <h3>1-b. 도메인(라우터) × 존재 — 매트릭스가 다루지 않는 영역</h3>
+  <p class="summary-line">한 줄 요약: API 도메인 13개 중 <strong>화면(UI)이 없는 도메인이 5개</strong>(signals·portfolio·orders·autopilot·reports)다. 특히 킬스위치(autopilot)와 Level 3 주문 레일(orders)은 API로만 쓸 수 있다.</p>
+  <div class="explain">
+    <h3>도메인의 뜻 (관리자 말로)</h3>
+    <dl>
+      <dt>harness</dt><dd>시스템 상태 확인과 스모크(자가 점검) 실행.</dd>
+      <dt>policies</dt><dd>운용 정책 — 자동화 권한 레벨, 승격 확인 문구.</dd>
+      <dt>level_1_2</dt><dd>신호 보기·제안 만들기·모의 체결(리서치·시그널·런 화면).</dd>
+      <dt>signals</dt><dd>신호 생성만 따로 부르는 API.</dd>
+      <dt>portfolio</dt><dd>포트폴리오 계획과 리밸런스 제안.</dd>
+      <dt>orders</dt><dd>Level 3 주문 레일 — 제안·승인·제출을 API로.</dd>
+      <dt>autopilot</dt><dd>Level 4 보호 자동 매매와 킬스위치·재개.</dd>
+      <dt>execution</dt><dd>승인 티켓과 체결 기록, 알림 인박스 화면.</dd>
+      <dt>strategy_tickets / strategy_studio</dt><dd>전략을 만들고(스튜디오·백테스트) 승격 티켓으로 올리는 절차.</dd>
+      <dt>notifications</dt><dd>안전 이벤트 알림 인박스.</dd>
+      <dt>operator</dt><dd>Level 5 오퍼레이터 — 한 번 실행(run-once)과 보고서.</dd>
+      <dt>reports</dt><dd>일일 보고서 API.</dd>
+    </dl>
+    <p class="small">열 읽기: "라우트 존재"는 API가 있는가, "잡 존재"는 명령줄에서 돌릴 수 있는가, "UI 페이지 존재"는 화면에서 쓸 수 있는가. ✗가 곧 결함은 아니다 — API 전용으로 두기로 한 것이면 갭 목록에서 "STATUS에 명시"를 제안한다.</p>
+  </div>
+  <p class="small">매트릭스 원장은 로드맵 게이트만 다루므로 API 라우터 13개 전부가 이 표에 들어간다. 셀은 사실(✓/✗)이며 ✗는 해당 갭 행으로 이어진다. "잡"은 그 도메인을 CLI에서 구동하는 <code>quantpilot/jobs/*.py</code>가 있는가.</p>
+  <table class="heat">
+    <thead><tr><th>도메인 (routers/*.py)</th><th>라우트 존재</th><th>잡 존재</th><th>UI 페이지 존재</th><th>비고</th></tr></thead>
+    <tbody>
+      <tr><td>harness</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 2</span></td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ run_smoke</span></td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ overview</span></td><td>UI 스모크에는 operator 섹션 없음 → <a href="#gap-LINK-03">LINK-03</a></td></tr>
+      <tr><td>policies</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 3</span></td><td class="cell-no"><span class="badge" data-kind="fact" data-value="no">✗</span></td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ policies</span></td><td>승격은 <code>confirm policy update</code> 문구 필요</td></tr>
+      <tr><td>level_1_2</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 8</span></td><td class="cell-partial"><span class="badge" data-kind="fact" data-value="partial">△ fetch_krx_local_data(데이터만)</span></td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ research·signals·run·briefing</span></td><td>rebalance-suggestions·research-signal-daily는 UI 미호출 → <a href="#gap-LINK-04">LINK-04</a></td></tr>
+      <tr><td>signals</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 1</span></td><td class="cell-no"><span class="badge" data-kind="fact" data-value="no">✗</span></td><td class="cell-no"><a href="#gap-LINK-04"><span class="badge" data-kind="fact" data-value="no">✗</span></a></td><td><code>/api/signals/run</code> API 전용</td></tr>
+      <tr><td>portfolio</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 1</span></td><td class="cell-no"><span class="badge" data-kind="fact" data-value="no">✗</span></td><td class="cell-no"><a href="#gap-LINK-04"><span class="badge" data-kind="fact" data-value="no">✗</span></a></td><td>API 전용</td></tr>
+      <tr><td>orders (Level 3 직접 레일)</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 8</span></td><td class="cell-no"><span class="badge" data-kind="fact" data-value="no">✗</span></td><td class="cell-no"><a href="#gap-LINK-02"><span class="badge" data-kind="fact" data-value="no">✗</span></a></td><td>STATUS는 Level 3 ✅ → <a href="#gap-LINK-02">LINK-02</a></td></tr>
+      <tr><td>autopilot (Level 4·킬스위치)</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 6</span></td><td class="cell-partial"><span class="badge" data-kind="fact" data-value="partial">△ run_kis_paper_kill(페이퍼 취소만)</span></td><td class="cell-no"><a href="#gap-LINK-01"><span class="badge" data-kind="fact" data-value="no">✗</span></a></td><td>런북의 정지 단계가 UI 없음 → <a href="#gap-LINK-01">LINK-01</a></td></tr>
+      <tr><td>execution (승인 티켓)</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 4</span></td><td class="cell-no"><span class="badge" data-kind="fact" data-value="no">✗</span></td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ execution</span></td><td>live 후보 티켓은 승인해도 차단(의도됨)</td></tr>
+      <tr><td>strategy_tickets</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 8</span></td><td class="cell-no"><span class="badge" data-kind="fact" data-value="no">✗</span></td><td class="cell-partial"><span class="badge" data-kind="fact" data-value="partial">△ studio·execution(create·pending·approve만)</span></td><td>reject·revoke·performance는 UI 미호출 → <a href="#gap-LINK-04">LINK-04</a></td></tr>
+      <tr><td>strategy_studio</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 3</span></td><td class="cell-partial"><span class="badge" data-kind="fact" data-value="partial">△ run_local_backtest(검증 백테스트)</span></td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ studio</span></td><td>STATUS '라우터 분리 남음'은 완료됨 → <a href="#gap-MIS-07">MIS-07</a></td></tr>
+      <tr><td>notifications</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 2</span></td><td class="cell-no"><span class="badge" data-kind="fact" data-value="no">✗</span></td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ execution 인박스</span></td><td></td></tr>
+      <tr><td>operator (Level 5)</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 4</span></td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ run_kis_paper_session·record_paper_loss_baseline</span></td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ operator</span></td><td>두 잡과 professional-status는 문서에 없음 → <a href="#gap-MIS-04">MIS-04</a>·<a href="#gap-MIS-10">MIS-10</a></td></tr>
+      <tr><td>reports</td><td class="cell-yes"><span class="badge" data-kind="fact" data-value="yes">✓ 1</span></td><td class="cell-no"><span class="badge" data-kind="fact" data-value="no">✗</span></td><td class="cell-no"><a href="#gap-LINK-04"><span class="badge" data-kind="fact" data-value="no">✗</span></a></td><td><code>/api/reports/daily</code> API 전용</td></tr>
+    </tbody>
+  </table>
+  <p class="small">안전 불변식(STATUS §안전 불변식 = 매트릭스 §1): <code>LIVE_TRADING_ENABLED=false</code>(state_machine.py:136) · <code>GUARDED_AUTOPILOT_ENABLED=false</code>(:121) · <code>FULLY_AUTOMATED_OPERATOR_ENABLED=false</code>(:126, gatekeeper.py:35) · <code>MARKET_ORDERS_ENABLED=false</code>(gatekeeper.py:28) · <code>BROKER_MODE=mock</code>(schemas.py:63 <code>BrokerMode</code>에 live 값 없음) · <code>DATA_MODE=fixture</code>(data/mode.py:23) — 여섯 기본값 모두 코드에서 <span class="badge" data-kind="fact" data-value="yes">✓</span> 확인. 매트릭스의 앵커 줄번호는 일부 드리프트 → <a href="#gap-MIS-05">MIS-05</a>.</p>
+</section>
+
+<section id="flow">
+  <h2>2. 흐름 — 런북 "한 번의 실행" (Level 5 오퍼레이터 사이클)</h2>
+  <p class="small">출처: <code>docs/operator_runbook.md</code> "What a run does" 1~7단계 + "How to run it" + "How to stop it" + "Reading a report". 코드 위치와 서술–코드 대조는 아래 표(경로는 <code>quantpilot/packages/core/</code>, <code>quantpilot/services/api/</code>, <code>quantpilot/jobs/</code> 기준).</p>
+<p class="lane-legend"><span class="lane-human">사람이 하는 단계</span><span class="lane-system">시스템이 하는 단계</span><span class="lane-external">외부(브로커·시장 데이터·알림)</span> — 노드 안 번호는 런북 단계, 코드 위치는 아래 대조표에 있다.</p>
+
+<h3>2-a. 정상 경로 — 한 번의 실행</h3>
+<pre class="mermaid">
+flowchart LR
+  classDef human fill:#dfe8ff,stroke:#2f5fd6,color:#1f2328
+  classDef system fill:#e3f1e0,stroke:#1e8e3e,color:#1f2328
+  classDef external fill:#ffe9d6,stroke:#b26a00,color:#1f2328
+  H1["체크리스트 서명"]:::human --> H2["정책 승격 확정"]:::human --> H3["run-once 요청"]:::human
+  H3 --> S1["1 게이트 검사"]:::system --> S2["2 전략 선택"]:::system --> S3["3 스냅샷 동기화"]:::system
+  E1["브로커 mock/paper"]:::external --> S3
+  S3 --> S3b["3b 월간 손실 정지 확인"]:::system --> S4["4 신호 생성"]:::system
+  E2["시장 데이터"]:::external --> S4
+  S4 --> S5["5 플랜·제안 생성"]:::system --> S6["6 재승인 후 제출<br/>(dry_run이면 제출 없음)"]:::system
+  E3["KRX 거래 시간 창"]:::external --> S6
+  S6 --> E1b["브로커 제출"]:::external --> S7["7 보고서 기록"]:::system --> H4["보고서 읽기"]:::human
+</pre>
+<ol class="steps">
+  <li><strong>사람</strong>이 안전 체크리스트에 서명하고 정책을 Level 5로 승격한 뒤 "한 번 실행"을 요청한다. 기본 상태에서는 플래그가 꺼져 있어 여기서 이미 멈춘다(<a href="#gap-STUB-01">STUB-01</a>).</li>
+  <li><strong>시스템</strong>이 관문 일곱 개를 검사한다 — 플래그, 킬스위치, 브로커 모드, 정책 버전, 승격 여부. 하나라도 실패하면 이유를 적고 끝난다.</li>
+  <li>승인된 전략 목록에서 하나를 고른다. 기본 목록에는 승인된 전략이 없어 현재는 항상 "적격 전략 없음"으로 끝난다(<a href="#gap-MAN-05">MAN-05</a>).</li>
+  <li>브로커에서 보유 현황을 받아 온다. 이 직후 특정 전략에서만 타는 숨은 분기가 있다(<a href="#gap-MIS-03">MIS-03</a>).</li>
+  <li>시장 데이터로 신호를 만들고, 포트폴리오 계획과 주문 제안을 만든다. 각 제안에는 리스크 검사 결과가 붙는다.</li>
+  <li>제안마다 다시 한 번 전부 검사(시세 신선도, 거래 시간, 주문 유형, 중복 주문…)한 뒤 브로커에 제출한다. dry_run이면 제출하지 않는다.</li>
+  <li>보고서를 남긴다. 사람은 API나 화면에서 보고서(상태·중단 이유·결정·주문 id·안전 플래그)를 읽는다.</li>
+</ol>
+
+<h3>2-b. 멈춤·예외·재개</h3>
+<pre class="mermaid">
+flowchart LR
+  classDef human fill:#dfe8ff,stroke:#2f5fd6,color:#1f2328
+  classDef system fill:#e3f1e0,stroke:#1e8e3e,color:#1f2328
+  classDef external fill:#ffe9d6,stroke:#b26a00,color:#1f2328
+  H5["킬스위치 (API만, 화면 없음)"]:::human --> S1["1 게이트에서 차단"]:::system
+  S6["6 제출 중 브로커 실패"]:::system --> S9["자동 일시정지"]:::system --> E4["알림 인박스"]:::external
+  S9 --> H6["재개 (API만)"]:::human --> S1
+  S1 -.게이트 실패.-> S8["정해진 폴백으로 종료 + 보고"]:::system
+  H3["같은 키로 재요청"]:::human -.-> S10["기록된 결과 재생<br/>(킬스위치 후엔 재차단)"]:::system
+  H7["스모크 실행 (명령줄)"]:::human --> S1
+</pre>
+<p class="small">읽기: 멈추는 길은 셋이다 — 사람이 킬스위치를 누르거나(권한을 낮추고 전략 티켓을 전부 되돌림, <a href="#gap-MIS-08">MIS-08</a>), 제출 중 브로커가 실패해 시스템이 스스로 일시정지하거나, 관문이 실패해 폴백으로 끝난다. 재개는 사람이 API로만 할 수 있다(<a href="#gap-LINK-01">LINK-01</a>).</p>
+
+  <h3>2-c. 단계별 대조표 — 런북 문장과 코드가 같은가</h3>
+  <p class="small">각 행: 런북이 하는 말 → 실제 코드 위치 → 그 단계의 통제점 → 존재 사실 → 서술과 코드가 같은지에 대한 판단과 근거.</p>
+  <table>
+    <thead><tr><th>노드</th><th>런북 서술</th><th>행위자</th><th>코드 앵커</th><th>통제점</th><th>존재</th><th>서술–코드 일치 판단 · 근거</th></tr></thead>
+    <tbody>
+      <tr><td>H1</td><td>"enable only after the safety checklist" (troubleshooting) · 체크리스트 "Before enabling FULLY_AUTOMATED_OPERATOR_ENABLED"</td><td><span class="lane lane-human">사람</span></td><td><code>docs/safety_checklist.md</code> L12-20</td><td>체크리스트 7항목(전부 미체크) · <code>FULLY_AUTOMATED_OPERATOR_ENABLED</code></td><td><span class="badge" data-kind="fact" data-value="yes">✓ 문서</span> <span class="badge" data-kind="fact" data-value="no">✗ 서명 0/18</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">체크리스트가 요구하는 코드 불변식 7개 중 단일 제출 경로·mock-execute의 BrokerMode.mock 요구·기본 레지스트리 validated_l5 없음은 코드에서 확인(harness_service.py:3125, registry.py:224). 서명은 없음 → <a href="#gap-MAN-01">MAN-01</a></span></td></tr>
+      <tr><td>H2</td><td>"Policy promoted: authority_level=5 and execution_mode=fully_automated" · "promote via policy versioning flow with explicit confirmation"</td><td><span class="lane lane-human">사람</span></td><td><code>routers/policies.py:42</code> <code>POST /api/policies/confirm</code></td><td>확인 문구 <code>confirm policy update</code> · 버전 증가</td><td><span class="badge" data-kind="fact" data-value="yes">✓ 라우트</span> <span class="badge" data-kind="fact" data-value="yes">✓ UI policies</span></td><td><span class="badge" data-kind="judgement" data-confidence="medium">일치 medium</span> <span class="ev">게이트 7이 두 조건을 검사(service.py:480-481)하는 것은 확인. 확인 문구 강제는 PolicyVersioningService를 읽지 않아 체크리스트 서술을 신뢰</span></td></tr>
+      <tr><td>H3</td><td>"POST /api/operator/run-once {policy_id, requested_policy_version, run_mode, idempotency_key}" · "run_mode is one of dry_run, mock_submit, paper_submit. There is no live mode."</td><td><span class="lane lane-human">사람</span></td><td><code>routers/operator.py:26</code> · UI <code>pages/operator.tsx:612</code></td><td><code>require_operator_actor</code> 의존성 · 멱등 키(UI는 매 실행 자동 생성)</td><td><span class="badge" data-kind="fact" data-value="yes">✓ 라우트</span> <span class="badge" data-kind="fact" data-value="yes">✓ UI operator</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev"><code>OperatorRunMode = Literal["dry_run","mock_submit","paper_submit"]</code>(operator/schemas.py:23), 기본값 dry_run(:31)</span></td></tr>
+      <tr><td>H7</td><td>"python -m quantpilot.jobs.run_smoke … operator section must show status blocked, fallback level5_flag_disabled, live_trading_enabled false"</td><td><span class="lane lane-human">사람</span></td><td><code>jobs/run_smoke.py:19-32</code></td><td>기본 플래그 상태 증명(매트릭스 §2 필수 줄)</td><td><span class="badge" data-kind="fact" data-value="yes">✓ 잡</span> <span class="badge" data-kind="fact" data-value="partial">△ UI run-smoke</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">잡이 dry_run으로 run_once를 호출해 <code>operator.status/fallback/live_trading_enabled</code>를 붙인다(:27-32). API 라우트 run-smoke는 이 섹션이 없음 → <a href="#gap-LINK-03">LINK-03</a></span></td></tr>
+      <tr><td>S10</td><td>"Reusing an idempotency_key replays the recorded result … unless a kill switch engaged since; then the run re-blocks"</td><td><span class="lane lane-system">시스템</span></td><td><code>operator/service.py:208-227</code>, durable 체크포인트 <code>:240-256</code></td><td>요청 지문 비교(:211-215) · 킬스위치 재검사(:218-221, :256)</td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">같은 키·다른 요청이면 오류, 킬스위치가 켜졌으면 캐시 대신 재차단</span></td></tr>
+      <tr><td>1 / S1</td><td>"Checks every safety gate (feature flag, kill switches, broker mode, policy version, policy promotion)"</td><td><span class="lane lane-system">시스템</span></td><td><code>operator/service.py:412-481</code> (Gate 1~7)</td><td><code>FULLY_AUTOMATED_OPERATOR_ENABLED</code>(:415) · 정책 동의(:430) · <code>LIVE_TRADING_ENABLED</code>=false 강제(:435) · <code>policy.kill_switch_engaged</code>(:439) · <code>OPERATOR_KILL_SWITCH</code>(:441) · 브로커 mock/paper(:445-449) · 버전(:463-477) · 승격(:480)</td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">런북 목록 5종이 게이트 1~7에 모두 대응. 단, 런북 1항 "env or policy"는 코드에선 AND → <a href="#gap-MIS-01">MIS-01</a></span></td></tr>
+      <tr><td>2 / S2</td><td>"Selects one strategy from the approved registry (validated_l5 only)"</td><td><span class="lane lane-system">시스템</span></td><td><code>operator/service.py:484</code> → <code>strategies/registry.py:128</code> <code>select_for_level5</code></td><td>레지스트리 상태 <code>validated_l5</code> · 레시피 로드 가능(:502)</td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">없으면 <code>no_level5_strategy_eligible</code>(Level 4 가능 시) 또는 <code>no_approved_strategy_available</code>(:496-498). 기본 레지스트리엔 validated_l5 없음(registry.py:224) → <a href="#gap-MAN-05">MAN-05</a></span></td></tr>
+      <tr><td>3 / S3</td><td>"Syncs the portfolio snapshot from the mock/paper broker"</td><td><span class="lane lane-system">시스템</span></td><td><code>operator/service.py:506-522</code> <code>broker.get_positions</code></td><td>실패 시 <code>broker_unhealthy</code>/<code>paper_*</code> 사유로 차단, 브로커 건강 false 기록(:517)</td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="medium">일치 medium</span> <span class="ev">동기화 자체는 일치. 직후 professional 분기(:527-565)가 런북에 없어 3→4 사이에 서술되지 않은 종료 경로가 있음 → <a href="#gap-MIS-03">MIS-03</a></span></td></tr>
+      <tr><td>3b / S3b</td><td>"Monthly loss stop not triggered (checked after the broker snapshot sync)"</td><td><span class="lane lane-system">시스템</span></td><td><code>operator/service.py:567-569</code></td><td><code>policy.monthly_loss_stop_all_autotrading</code></td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">"Gate 8: monthly loss stop halts all automatic trading before any planning" 주석과 위치가 런북 9항 그대로</span></td></tr>
+      <tr><td>4 / S4</td><td>"Generates signals with the selected strategy's recipe only"</td><td><span class="lane lane-system">시스템</span></td><td><code>operator/service.py:571</code> → <code>:727 generate_provider_bound_signals</code></td><td>데이터 품질 불가 시 noop(:578-580) · <code>stale_quote_max_age_seconds</code></td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="medium">일치 medium</span> <span class="ev">선택된 recipe만 인자로 넘기는 것은 확인(:571-572). signals/service.py 내부는 읽지 않음</span></td></tr>
+      <tr><td>5 / S5</td><td>"Builds a portfolio plan and Level 3-style order proposals (each with a deterministic risk check and idempotency key)"</td><td><span class="lane lane-system">시스템</span></td><td><code>operator/service.py:607/618 create_portfolio_plan</code>, <code>:648 generate_order_proposals</code></td><td>제안 0건이면 <code>risk_check_failed</code> 폴백(:659-664) · paper_submit은 정수 주수 강제(:614)</td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="medium">일치 medium</span> <span class="ev">제안에 <code>risk_check_id</code>가 붙는 것은 확인(:673, :688). 리스크 검사·멱등 키 생성 본체(harness generate_order_proposals)는 읽지 않음</span></td></tr>
+      <tr><td>6a / S6a</td><td>"In dry_run mode nothing is submitted"</td><td><span class="lane lane-system">시스템</span></td><td><code>operator/service.py:666-689</code></td><td>제안을 <code>dry_run_no_submission</code> 사유로 cancelled 전이</td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">제출 함수 호출 전에 return(:684). 상태는 completed, order_plan_ids만 보고</span></td></tr>
+      <tr><td>6b / S6b</td><td>"re-authorizes each proposal (authorize_level5, including a fresh risk check)" · 10항 "Per order: fresh quote, KRX continuous session, allowed order type, monthly loss pause (buys), no conflicting unfilled order, new idempotency key, passing fresh deterministic risk check"</td><td><span class="lane lane-system">시스템</span></td><td><code>operator/service.py:804</code> → <code>execution/state_machine.py:252-431</code></td><td>검사 순서: 플래그(:291) · live=false(:293) · 킬스위치 3종(:297) · 일시정지(:301) · 브로커(:303) · 버전(:311) · 건강(:313) · 스냅샷·시세 신선도(:320-334) · 레지스트리(:346) · 레벨(:355) · KRX 창(:386) · 주문유형/<code>MARKET_ORDERS_ENABLED</code>(:392) · 월간 정지/일시중지(:399-402) · 미체결 충돌(:406) · 멱등 키(:415) · 신선 리스크 검사(:431)</td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">런북 10항의 7개 항목이 모두 record() 검사로 존재. 실패 시 order plan은 failed로 전이하고 첫 실패 검사명이 폴백 사유로 매핑(:816-839, CHECK_TO_FALLBACK_REASON :69-83)</span></td></tr>
+      <tr><td>6c / S6c</td><td>"submits through the existing order state machine" · 10항 "re-checked again inside submit_order_plan"</td><td><span class="lane lane-system">시스템</span></td><td><code>operator/service.py:856</code> → <code>harness_service.py:2828 submit_order_plan</code> → <code>:3125 broker.submit_order</code></td><td>단일 제출 경로(저장소 전체에서 <code>.submit_order(</code> 호출 1곳) · <code>autopilot_paused</code> 검사(:3003)</td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="medium">일치 medium</span> <span class="ev">단일 경로와 일시정지 검사는 확인. submit_order_plan 내부의 재검사 목록은 300줄 본문을 통독하지 않아 런북 서술을 신뢰</span></td></tr>
+      <tr><td>7 / S7</td><td>"Records an OperatorReport and audit events for every material branch" · "Reading a report: status, fallback.reason_code, strategy_selection, decisions, risk_check_ids, broker_order_ids, safety_flags"</td><td><span class="lane lane-system">시스템</span></td><td><code>operator/service.py:336-350</code> <code>OperatorReport(</code>, <code>_safety_flags :194-204</code></td><td>보고서 <code>live_trading_enabled</code>와 <code>safety_flags.LIVE_TRADING_ENABLED</code> 둘 다 false 요구</td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">safety_flags에 LIVE/GUARDED/FULLY/MARKET/OPERATOR_KILL_SWITCH/BROKER_MODE 6개 기록(:196-201). 매 분기에서 decide()로 결정 항목 적재</span></td></tr>
+      <tr><td>S8</td><td>"If any gate fails, the run ends with a deterministic fallback (see docs/operator_fallback_matrix.md) and a report. The operator never retries on its own."</td><td><span class="lane lane-system">시스템</span></td><td><code>execution/fallback_manager.py:21-63</code> · <code>operator/service.py:406-410 blocked_by</code></td><td>사유별 to_level 고정(0=blocked, 2~4=fallback)</td><td><span class="badge" data-kind="fact" data-value="yes">✓ 코드</span> <span class="badge" data-kind="fact" data-value="yes">✓ 문서 operator_fallback_matrix.md</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">to_level 0이면 status blocked, 그 외 fallback(:408-409). 재시도 루프는 run_once 안에 없음</span></td></tr>
+      <tr><td>S9</td><td>"A broker failure during submission pauses the harness (autopilot_paused=true) automatically; resume requires POST /api/autopilot/guarded/resume"</td><td><span class="lane lane-system">시스템</span></td><td><code>operator/service.py:1074-1099 _handle_broker_failure</code> → <code>harness_service.py:3343-3352 record_broker_health</code></td><td><code>autopilot_paused=True</code> 영속화(:3346-3351) · 감사 <code>broker_health_failed</code>(:1095)</td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">폴백 사유 <code>broker_failure</code>(to_level 3) 반환(:1099). 통지 인박스 적재 여부는 이 함수엔 없고 킬스위치 경로(:3416)에서만 확인</span></td></tr>
+      <tr><td>H4</td><td>"GET /api/operator/reports/latest returns the structured report plus a plain-text rendering (generated deterministically, no LLM required)"</td><td><span class="lane lane-human">사람</span></td><td><code>routers/operator.py:69-74</code> · UI <code>pages/operator.tsx:880</code></td><td>—</td><td><span class="badge" data-kind="fact" data-value="yes">✓ 라우트</span> <span class="badge" data-kind="fact" data-value="yes">✓ UI</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev"><code>render_operator_report_text(report)</code>로 텍스트 동봉(:74). 실행 기록 없으면 "no operator runs recorded"</span></td></tr>
+      <tr><td>H5</td><td>"Kill switch (policy): POST /api/autopilot/kill-switch — stops guarded autopilot and Level 5; demotes the policy to approval-required" · "Kill switch (environment): OPERATOR_KILL_SWITCH=true"</td><td><span class="lane lane-human">사람</span></td><td><code>routers/autopilot.py:59</code> → <code>harness_service.py:3398-3431</code> · env <code>state_machine.py:132</code></td><td><code>kill_switch_engaged=True</code>, authority 2, approval_required(:3401-3404) · 전략 티켓 전부 revoke(:3425-3430) · 해제는 문구 <code>release kill switch</code>(:3435)</td><td><span class="badge" data-kind="fact" data-value="yes">✓ 라우트</span> <span class="badge" data-kind="fact" data-value="no">✗ UI</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">런북 서술은 맞으나 불완전(티켓 revoke·해제 문구·재승격 필요 누락) → <a href="#gap-MIS-08">MIS-08</a>. UI 미연결 → <a href="#gap-LINK-01">LINK-01</a></span></td></tr>
+      <tr><td>H6</td><td>"resume requires POST /api/autopilot/guarded/resume after investigation"</td><td><span class="lane lane-human">사람</span></td><td><code>routers/autopilot.py:51</code> → <code>harness_service.py:3379-3384</code></td><td><code>autopilot_paused=False</code> 영속화 · <code>require_operator_actor</code></td><td><span class="badge" data-kind="fact" data-value="yes">✓ 라우트</span> <span class="badge" data-kind="fact" data-value="no">✗ UI</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">resume가 paused를 False로 되돌린다(:3384). UI 미연결 → <a href="#gap-LINK-01">LINK-01</a></span></td></tr>
+      <tr><td>E1</td><td>"only ever talks to MockBroker or PaperBroker" · "no real money is ever involved"</td><td><span class="lane lane-external">외부</span></td><td><code>harness_service.py:3125 broker.submit_order</code> · <code>brokers/mock_broker.py:26-29</code>(픽스처 스냅샷) · <code>BrokerMode</code> <code>schemas.py:63-66</code></td><td><code>BrokerMode</code>에 live 값 없음(<code>live_disabled</code>) · paper는 <code>DurablePaperSubmissionCoordinator</code>(paper_submission.py:128)</td><td><span class="badge" data-kind="fact" data-value="yes">✓ mock</span> <span class="badge" data-kind="fact" data-value="partial">△ paper 실서버 미검증</span></td><td><span class="badge" data-kind="judgement" data-confidence="low">일치 low</span> <span class="ev">mock 경로는 픽스처 포트폴리오를 반환하는 것까지 확인. paper 경로(brokers/kis_paper, paper_submission)는 읽지 않았고 실 KIS 검증은 Gate P 대기 → <a href="#gap-STUB-04">STUB-04</a></span></td></tr>
+      <tr><td>E2</td><td>런북에 데이터 소스 서술 없음 (troubleshooting "stale_market_data: refresh data")</td><td><span class="lane lane-external">외부</span></td><td><code>data/mode.py:23</code> <code>DATA_MODE</code> 기본 fixture · <code>data/providers.py:421 build_providers_from_env</code></td><td>지원 외 값은 <code>DataModeConfigError</code>(:33) · realtime은 미구현 fail-closed</td><td><span class="badge" data-kind="fact" data-value="yes">✓ fixture·local_historical</span> <span class="badge" data-kind="fact" data-value="no">✗ realtime</span></td><td><span class="badge" data-kind="judgement" data-confidence="low">일치 low</span> <span class="ev">런북이 데이터 모드를 말하지 않아 대조할 서술이 없다. 오퍼레이터 사이클이 어느 provider를 잡는지(HarnessService.from_environment)는 추적하지 않음 → <a href="#gap-STUB-06">STUB-06</a>·<a href="#gap-STUB-03">STUB-03</a></span></td></tr>
+      <tr><td>E3</td><td>"KRX continuous session" (10항)</td><td><span class="lane lane-external">외부</span></td><td><code>execution/state_machine.py:110 is_krx_auto_order_window</code>, 검사 <code>:386</code></td><td>경매 창 자동주문 차단</td><td><span class="badge" data-kind="fact" data-value="yes">✓</span></td><td><span class="badge" data-kind="judgement" data-confidence="high">일치 high</span> <span class="ev">authorize_level5의 <code>krx_auto_order_window</code> 검사. 단 STATUS(168행)는 이 단순 캘린더가 라이브 후보 권위가 아니라고 명시</span></td></tr>
+      <tr><td>E4</td><td>런북에 통지 서술 없음 (STATUS: "안전 이벤트가 OperatorNotification 인박스에 자동 적재")</td><td><span class="lane lane-external">외부</span></td><td><code>routers/notifications.py:14</code> · <code>harness_service.py:3416 _notify</code></td><td>킬스위치 등 critical 이벤트 적재 · UI execution 인박스 + 브라우저 알림</td><td><span class="badge" data-kind="fact" data-value="yes">✓ 라우트</span> <span class="badge" data-kind="fact" data-value="yes">✓ UI</span></td><td><span class="badge" data-kind="judgement" data-confidence="medium">일치 medium</span> <span class="ev">STATUS 서술과 킬스위치 경로는 일치. 브로커 실패(S9)가 인박스에 적재되는지는 확인 못 함</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="gaps">
+  <h2>3. 갭 목록 (심각도 순, 25건)</h2>
+  <p class="small">원본: <code>gaps.json</code>. id 접두어 = 신호 종류(MIS 불일치 · LINK 끊긴 고리 · STUB 스텁·잠김 · MAN 수동). 위치는 <code>파일:줄</code> 또는 <code>문서#절</code>(QuantPilot 저장소 루트 기준).</p>
+  <table>
+    <thead><tr><th>id</th><th>심각도</th><th>수정 비용</th><th>축</th><th>위치</th><th>근거</th><th>제안</th></tr></thead>
+    <tbody>
+      <tr id="gap-MIS-01"><td>MIS-01</td><td class="sev sev-high">high</td><td>low</td><td>correctness</td><td><code>docs/operator_runbook.md#What must be true…</code></td><td>런북 1항 "env <em>or</em> policy"이지만 코드는 env 필수(service.py:415-419) + Level 5 정책이면 정책 동의도 필수(:426-431 → state_machine.py:125-129, <code>env_enabled and policy…</code>). 'or'가 아니라 'and'.</td><td>런북 1항을 "둘 다 true"로 고친다.</td></tr>
+      <tr id="gap-MIS-02"><td>MIS-02</td><td class="sev sev-high">high</td><td>low</td><td>correctness</td><td><code>docs/roadmap_acceptance_matrix.md#6. Acceptance ledger</code></td><td>원장은 Gate 2를 pending/proposed로 두지만 STATUS "최근 완료 (2026-07-12, Roadmap Gate 2)"는 통합 완료(<code>1046 passed, 2 skipped</code>, head <code>8eaf15a</code>). 히트맵과 현황판이 다른 그림.</td><td>미션 리드가 §6 Gate 2 행을 STATUS 검증 문구로 갱신.</td></tr>
+      <tr id="gap-MIS-03"><td>MIS-03</td><td class="sev sev-high">high</td><td>standard</td><td>correctness</td><td><code>quantpilot/packages/core/operator/service.py:527</code></td><td>전략이 <code>pullback_trend_v2</code>이고 professional 저장소가 있으면 스냅샷 직후 별도 분기(527-565)에서 상태 부재·보호 리스크 평가·주간 리밸런스 미청구 시 계획 없이 completed. 런북 7단계·troubleshooting에 없음.</td><td>런북 3단계와 troubleshooting에 분기·noop 사유 추가.</td></tr>
+      <tr id="gap-MIS-04"><td>MIS-04</td><td class="sev sev-high">high</td><td>standard</td><td>correctness</td><td><code>quantpilot/jobs/run_kis_paper_session.py:215</code></td><td>1분 주기 스케줄러용 페이퍼 오퍼레이터 진입점(run_mode paper_submit, 플래그 <code>KIS_PAPER_SESSION_ENABLED</code>·<code>KIS_PAPER_ORDER_SUBMISSION_ENABLED</code>)이 5개 문서 어디에도 없음(grep 0건). <code>record_paper_loss_baseline.py</code>도 동일.</td><td>런북 "How to run it"에 스케줄 경로·플래그, STATUS에 잡 행 추가.</td></tr>
+      <tr id="gap-LINK-01"><td>LINK-01</td><td class="sev sev-high">high</td><td>standard</td><td>correctness</td><td><code>quantpilot/services/api/routers/autopilot.py:59</code></td><td>런북 정지 단계 <code>POST /api/autopilot/kill-switch</code>·재개 <code>guarded/resume</code>(:51)는 라우트만 있고 UI 호출 없음(queries.ts apiFetch 경로 27개 중 <code>/api/autopilot/*</code> 0건).</td><td>/operator 페이지에 킬스위치·재개 버튼, 또는 런북에 UI 없음·curl 예시 명시.</td></tr>
+      <tr id="gap-LINK-02"><td>LINK-02</td><td class="sev sev-high">high</td><td>standard</td><td>correctness</td><td><code>quantpilot/services/api/routers/orders.py:66</code></td><td>STATUS "Level 3 ✅ 완료 (제안 생성→사용자 승인→제출)"이지만 <code>/api/orders/*</code> 8개 라우트를 호출하는 UI 없음. UI 승인 경로는 <code>/api/execution/approval-tickets/*</code>뿐.</td><td>STATUS에 "UI는 승인 티켓 레일만" 명시하거나 orders 레일을 UI에 연결.</td></tr>
+      <tr id="gap-MIS-09"><td>MIS-09</td><td class="sev sev-high">high</td><td>low</td><td>correctness</td><td><code>docs/roadmap_acceptance_matrix.md#4. Stage-gated acceptance</code></td><td>근거 문서 <code>docs/roadmap_execution_workboard.md</code>·<code>docs/roadmap_baseline_v9_report.md</code>가 docs/에 없음. Gate 0 증거와 Gate P 수동 권한 절차가 가리키는 곳이 비어 있음.</td><td>두 문서 복구 또는 §3·§4 참조를 현존 문서로 교체.</td></tr>
+      <tr id="gap-MIS-05"><td>MIS-05</td><td class="sev sev-standard">standard</td><td>low</td><td>correctness</td><td><code>docs/roadmap_acceptance_matrix.md#1. Standing safety invariants</code></td><td>앵커 드리프트: <code>gatekeeper.py:36</code>→31행; <code>db/sqlite_repositories.py:62-117</code>→<code>execution/transitions.py:19,51</code>(KILL만 sqlite_repositories.py:284); <code>paper_submission.py:107-108</code>→128행. 불변식 내용은 일치.</td><td>§1 앵커 3건 갱신.</td></tr>
+      <tr id="gap-MIS-06"><td>MIS-06</td><td class="sev sev-standard">standard</td><td>low</td><td>correctness</td><td><code>docs/STATUS.md#단계별 상태</code></td><td>표 '뉴스 브리핑' 행 "프론트 페이지는 후속"이지만 <code>pages/briefing.tsx</code>·App.tsx:132 <code>/briefing</code>이 있고 같은 문서 111행은 브라우저 실검증 완료라고 적음.</td><td>표 행을 "프론트 완료, 수집기 후속"으로 수정.</td></tr>
+      <tr id="gap-MIS-08"><td>MIS-08</td><td class="sev sev-standard">standard</td><td>low</td><td>correctness</td><td><code>docs/operator_runbook.md#How to stop it</code></td><td>코드는 킬스위치 시 pending/approved 전략 티켓 전부 revoke(harness_service.py:3425-3430), 해제는 문구 <code>release kill switch</code> 필수(:3435), 해제 후 authority_level=2 유지(:3439-3440). 런북엔 강등만 적힘.</td><td>"How to stop it"에 세 가지 추가.</td></tr>
+      <tr id="gap-LINK-03"><td>LINK-03</td><td class="sev sev-standard">standard</td><td>low</td><td>correctness</td><td><code>quantpilot/services/api/routers/harness.py:76</code></td><td>런북·매트릭스의 스모크 증거 줄(<code>operator.status=blocked</code>…)은 CLI 잡이 run_once를 따로 호출해 붙임(run_smoke.py:18-32). API run-smoke는 <code>HarnessService.run_smoke()</code>만 반환 → UI 스모크에 operator 섹션 없음.</td><td>API에도 operator 섹션 추가 또는 런북에 한계 명시.</td></tr>
+      <tr id="gap-LINK-04"><td>LINK-04</td><td class="sev sev-standard">standard</td><td>standard</td><td>correctness</td><td><code>quantpilot/services/api/routers/portfolio.py:22</code></td><td>UI 미호출 라우트: <code>/api/portfolio/plan</code>, <code>rebalance-suggestions</code>(level_1_2.py:94), <code>/api/signals/run</code>(signals.py:13), <code>/api/reports/daily</code>(reports.py:22), <code>research-signal-daily</code>(level_1_2.py:106), 전략 티켓 reject/revoke(strategy_tickets.py:105,120), <code>strategy-performance*</code>(:135,158), <code>drafts/{id}</code> GET(strategy_studio.py:37).</td><td>"API 전용"으로 분류해 STATUS에 적거나 UI 연결.</td></tr>
+      <tr id="gap-MIS-10"><td>MIS-10</td><td class="sev sev-standard">standard</td><td>low</td><td>correctness</td><td><code>quantpilot/services/api/routers/operator.py:57</code></td><td><code>GET /api/operator/professional-status</code>와 professional 상태 저장소(service.py:240,380)는 코드·UI(queries.ts:295)에 있지만 5개 문서에 없음.</td><td>STATUS 표 행 추가, 런북 "Status and latest report"에 엔드포인트 추가.</td></tr>
+      <tr id="gap-STUB-01"><td>STUB-01</td><td class="sev sev-standard">standard</td><td>high</td><td>usage</td><td><code>docs/STATUS.md#단계별 상태</code></td><td>Level 3·4·5 "✅ 완료 (플래그 잠김)". 기본 env에서 run-once는 첫 게이트 <code>level5_flag_disabled</code>로 종료(service.py:415-419). 잠금 해제 도그푸딩 기록 없음.</td><td>체크리스트 서명 후 mock_submit 1회 도그푸딩 결과를 STATUS에 기록.</td></tr>
+      <tr id="gap-STUB-02"><td>STUB-02</td><td class="sev sev-standard">standard</td><td>high</td><td>usage</td><td><code>quantpilot/packages/core/data/kis_historical.py:65</code></td><td>external_historical(KIS)·토큰 헬퍼는 fake transport 테스트만(STATUS 24-25행). <code>KIS_HISTORICAL_ENABLED=true</code> 아니면 거부(:65-67). 실 키 미확보.</td><td>앱키 확보 후 수동 통합 테스트 결과 기록.</td></tr>
+      <tr id="gap-STUB-03"><td>STUB-03</td><td class="sev sev-standard">standard</td><td>high</td><td>usage</td><td><code>quantpilot/packages/core/data/providers.py:421</code></td><td>실시간 provider 미구현·fail closed(STATUS 27행). 팩토리는 realtime/paper 요청을 fixture로 되돌리지 않음(:387-389, :421). 라이브 체크리스트 4항 전제 공백.</td><td>현 상태 유지, 라이브 4항 선행 작업으로 연결.</td></tr>
+      <tr id="gap-STUB-04"><td>STUB-04</td><td class="sev sev-standard">standard</td><td>critical</td><td>usage</td><td><code>quantpilot/jobs/run_kis_paper_kill.py:100</code></td><td>Gate P 수동 검증(<code>VTTC0084R</code>, buying-power 필드, 세션 캘린더, 왕복 1회) 전부 미수행. 킬 CLI는 <code>KIS_PAPER_KILL_ENABLED</code> 없으면 <code>paper_kill_disabled</code>(:100-101).</td><td>사용자 명시 권한 아래 Gate P 세션 실행, §6 Manual 열 기록.</td></tr>
+      <tr id="gap-STUB-05"><td>STUB-05</td><td class="sev sev-standard">standard</td><td>critical</td><td>usage</td><td><code>quantpilot/packages/core/schemas.py:63</code></td><td><code>BrokerMode</code>는 mock/paper/live_disabled(:63-66); <code>LIVE_TRADING_ENABLED=true</code>는 실행 거부 사유(state_machine.py:136, service.py:435). 라이브 체크리스트 0/12. 의도된 미구현, STATUS 32행과 일치.</td><td>현 상태 유지. 체크리스트 1항 전까지 라이브 코드 변경 금지.</td></tr>
+      <tr id="gap-STUB-06"><td>STUB-06</td><td class="sev sev-standard">standard</td><td>standard</td><td>usage</td><td><code>quantpilot/packages/core/data/mode.py:23</code></td><td><code>DATA_MODE</code> 기본 fixture; 애널리스트 문구 "fixture-backed"(analyst/reports.py:57-74). 기본 dry_run은 저장소 픽스처 OHLCV로 신호 생성. 실데이터는 <code>fetch_krx_local_data</code> 선행.</td><td>런북에 DATA_MODE 기본과 local_historical 전환 절차 한 줄 추가.</td></tr>
+      <tr id="gap-MIS-07"><td>MIS-07</td><td class="sev sev-low">low</td><td>low</td><td>correctness</td><td><code>docs/STATUS.md#최근 완료 (2026-07-11)</code></td><td>"남은 것: 라우터 파일 분리(현재 execution.py에 동거)"이나 <code>routers/strategy_studio.py</code>가 별도 존재, main.py:104 등록.</td><td>문장 삭제 또는 완료 표시.</td></tr>
+      <tr id="gap-MAN-01"><td>MAN-01</td><td class="sev sev-low">low</td><td>standard</td><td>usage</td><td><code>docs/safety_checklist.md#Defaults that must never drift</code></td><td>18개 항목(4+7+7) 전부 미체크. 코드 불변식 7개 중 단일 제출 경로(harness_service.py:3125 한 곳) 등은 코드로 확인되나 서명 기록 없음.</td><td>코드로 확인 가능한 7개부터 근거 줄번호와 함께 체크.</td></tr>
+      <tr id="gap-MAN-02"><td>MAN-02</td><td class="sev sev-low">low</td><td>critical</td><td>usage</td><td><code>docs/live_trading_enablement_checklist.md#Hard prerequisites</code></td><td>12항목 0/12. STATUS 32·284행과 일치. "AI 에이전트는 체크 금지" 명시.</td><td>현 상태 유지. 1항(서면 결정) 여부만 사람이 답한다.</td></tr>
+      <tr id="gap-MAN-03"><td>MAN-03</td><td class="sev sev-low">low</td><td>standard</td><td>usage</td><td><code>docs/STATUS.md#사람 입력 대기</code></td><td>미결 6건: KIS 앱키, Gate P 권한, 슬리피지·체결버퍼, 승인 기준(제안값 준비됨), 워크포워드 윈도, 승격 승인자·증빙 형식.</td><td>승인 기준부터 확정해 <code>run_local_backtest</code> 게이트 값으로 고정.</td></tr>
+      <tr id="gap-MAN-04"><td>MAN-04</td><td class="sev sev-low">low</td><td>standard</td><td>usage</td><td><code>quantpilot/apps/web/src/pages/jobs.tsx:35</code></td><td>잡 6개 전부 CLI 수동 실행, 저장소에 스케줄러 정의 없음. <code>/jobs</code> 페이지는 "UI가 보낸 API 요청의 기록"이지 잡 실행기가 아님.</td><td>STATUS에 잡 실행 방식 표, /jobs 페이지명을 '활동 로그'로.</td></tr>
+      <tr id="gap-MAN-05"><td>MAN-05</td><td class="sev sev-low">low</td><td>standard</td><td>usage</td><td><code>quantpilot/packages/core/strategies/registry.py:221</code></td><td>기본 레지스트리는 의도적으로 validated_l5 없음(:221-224) → 런북 2단계는 기본 상태에서 항상 no_level5_strategy_eligible/no_approved_strategy_available. 승격은 수동 절차, API·UI 없음.</td><td>승격 산출물(레지스트리 파일·증빙 경로)을 런북 troubleshooting에 링크.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  <p>개발자 지도: <a href="#dev-map-placeholder" id="dev-map-placeholder">(자리 — 코드 구조·의존 그래프·핫스팟 지도가 발행되면 여기에 연결)</a></p>
+  <p>읽지 않은 것: <code>quantpilot-foundation*</code>, <code>local_data</code>, <code>experiments</code>, <code>marketdata</code>, <code>quantpilot/tests</code> 본문(파일 존재만 확인), <code>brokers/kis_paper</code>·<code>signals/service.py</code>·<code>harness_service.submit_order_plan</code> 본문. 이 지도는 대조이지 감사가 아니다 — 판단 배지의 근거 줄을 직접 열어 확인한 뒤 갭을 적용한다.</p>
+</footer>
+</div>
