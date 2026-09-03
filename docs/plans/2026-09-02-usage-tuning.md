@@ -75,7 +75,7 @@ cd "C:/dev/study-agent" && npm run verify                 # study-agent CLAUDE.m
 - [x] 삭제 직전 `find "<경로>" -type f | wc -l`이 39이고 `package.json`이 없음을 다시 확인한다(프로젝트 파일이 생겼으면 중단)
 - [x] 디렉터리 삭제 — 파일 39개 삭제 완료. 빈 디렉터리 자체는 다른 프로세스(OneDrive 동기화 추정)가 잡고 있어 `rm -rf`·`Remove-Item`·`rmdir` 모두 "resource busy". 재부팅 또는 OneDrive 일시정지 후 빈 폴더 삭제 필요
 - [x] aorch 레지스트리 정리: `node src/cli.js update --project "<스텁 경로>"`로 해당 항목만 대상 지정 → `unmanaged` 판정으로 `~/.aorch/installs.json`에서 제거됨(전체 `update`는 오래된 설치본 5곳에 미병합 브랜치를 재설치하므로 쓰지 않음)
-- [ ] 검증: 레지스트리 JSON에 해당 경로 없음(확인). 빈 폴더는 재개 세션에서 사용자 승인으로 8/17 Claude 세션(18052)·데몬(54092)·터미널 셸(27952)을 종료한 뒤에도 "used by another process" — 남은 보유자는 OneDrive 클라이언트로 추정. OneDrive 일시정지 또는 재부팅 후 `rmdir` 필요
+- [ ] 검증: 레지스트리 JSON에 해당 경로 없음(확인). 빈 폴더는 재개 세션에서 사용자 승인으로 8/17 Claude 세션(18052)·데몬(54092)·터미널 셸(27952)을 종료한 뒤에도 "used by another process" — 남은 보유자는 OneDrive 클라이언트로 추정. OneDrive 일시정지 또는 재부팅 후 `rmdir` 필요. 09-03 재시도: OneDrive 프로세스를 종료한 상태에서도 잠김(보유자는 OneDrive가 아님, 커맨드라인에 경로를 가진 프로세스 없음, handle.exe 없음) → 사용자 결정으로 **재부팅 후 `rmdir` 1회**로 마감
 
 ### 작업 8: 기록
 
