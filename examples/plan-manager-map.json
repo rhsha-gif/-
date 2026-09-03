@@ -1,0 +1,24 @@
+{
+  "objective": "Manager map for <project>: cross-check the project's own manager-facing documents against the code and publish one artifact page (heatmap + one operator-cycle flow + gap list). Copy this file, replace every <placeholder>, run `--dry-run` to confirm M1 routes to anthropic/fable, then dispatch from git bash with nohup. Runbook: integrations/claude/skills/aorch-manager-map/SKILL.md.",
+  "decomposed": true,
+  "tasks": [
+    {
+      "id": "M1-manager-map",
+      "title": "M1-manager-map",
+      "objective": "Write a manager's map of <project> (root: <project-root>) into <out>/index.html and <out>/gaps.json. Read only: the status board <status-doc>, the acceptance matrix <acceptance-doc>, the runbook <runbook>, the checklists <checklists>, and the code under <src-dirs>. Never open <private-dirs>. Do not modify anything outside <out>.\n\nProcedure (the skill aorch-manager-map §2 is authoritative): (1) list what exists with inline commands — routes (`grep -rn \"@router\\.\\(get\\|post\\|put\\|delete\\|patch\\)\" <api-routers-dir>`), jobs (`ls <jobs-dir>/*.py` with first docstring line), state enums (`grep -n \"class .*(str, Enum)\" <schemas-file>`), safety flags (`grep -rn \"_ENABLED\\|BROKER_MODE\\|DATA_MODE\" <settings-or-gatekeeper>`), stubs (`grep -rn \"NotImplementedError\\|TODO\\|fixture\" <src-dirs>`), UI pages (`ls <web-pages-dir>`); (2) read the five documents; (3) ONE flow: the runbook's execution cycle, step by step, each step with a code anchor file:line, an actor (human / system / external), its control points (flags, kill switch, approvals, checklist items), an existence fact ✓/✗ (route/job/page really exists) and a judgement of whether the runbook's wording matches the code (confidence high/medium/low + one-line evidence). Render it as a Mermaid `flowchart LR` inside `<pre class=\"mermaid\">` with three `subgraph` swimlanes (human / system / external), at most 30 nodes; (4) heatmap: if the acceptance matrix has a gate×status table, copy it as-is with a link to its section (no recomputation); domains absent from it (by router name) get a domain × (route exists / job exists / UI page exists) three-column existence grid; (5) gaps.json: an array of findings with exactly id, severity, fixCost, axis, location, evidence, proposal (plus optional confidence) — signals: document–code mismatch (status ✅ but no code; code with no status/runbook mention), stubs/locked/unverified-against-real-server, broken links in the flow (a step without route/job/page, API without UI or vice versa), manual steps (unfinished checklist items, manually run jobs). severity: broken link and mismatch high, stub/locked standard, manual low. axis: mismatch and broken link correctness, stub/locked/manual usage. location is `file:line` or `doc#section`; (6) index.html is an ARTIFACT BODY: no doctype/html/head/body wrappers, starts with <title><Project> 운영 지도</title> then one <style> then the content; zero external resources (no fonts, no scripts — the host renders Mermaid); first screen = heatmap + four gap counts; then the flow; then the gap table sorted by severity; existence badges carry data-kind=\"fact\" (✓/✗) and judgement badges carry data-kind=\"judgement\" with the confidence, styled differently; light and dark theme tokens (:root, prefers-color-scheme guarded by :root:not([data-theme=\"light\"]), :root[data-theme=\"dark\"]); one link placeholder to the developer map; Korean UI text; (7) receipt summary states the number of flow steps, gaps and low-confidence judgements; unresolvedRisks lists documents you could not open and steps you could not judge.",
+      "kind": "writing",
+      "agentRole": "worker",
+      "risk": "standard",
+      "complexity": "critical",
+      "write": true,
+      "allowedProfileIds": ["claude-fable-apex"],
+      "allowedScope": ["<out>/**"],
+      "verificationCommands": ["node scripts/manager-map-check.mjs <out>"],
+      "acceptanceCriteria": [
+        "index.html has one Mermaid flowchart whose nodes cover every runbook step, each with a file:line anchor and an actor swimlane.",
+        "Every gap in gaps.json has the seven findings fields and a file:line or doc#section location.",
+        "Existence facts and judgement claims are visually distinct badges (data-kind fact vs judgement)."
+      ]
+    }
+  ]
+}

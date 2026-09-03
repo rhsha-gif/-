@@ -77,6 +77,9 @@ test('installs both CLI integrations idempotently without editing root instructi
   assert.match(upgradeSkill, /plan-model-upgrade\.json/);
   assert.match(upgradeSkill, /challenger/);
   assert.match(await readFile(path.join(projectRoot, '.claude/agents/aorch-auditor.md'), 'utf8'), /findings/);
+  const managerSkill = await readFile(path.join(projectRoot, '.claude/skills/aorch-manager-map/SKILL.md'), 'utf8');
+  assert.match(managerSkill, /plan-manager-map\.json/);
+  assert.match(await readFile(path.join(projectRoot, '.agents/skills/aorch-manager-map/SKILL.md'), 'utf8'), /manager-map-check/);
 });
 
 test('rejects unknown installation targets', async () => {

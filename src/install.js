@@ -117,14 +117,14 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/skills'), path.join(projectRoot, '.claude/skills'));
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/agents'), path.join(projectRoot, '.claude/agents'));
     await writeJson(settingsPath, mergedSettings);
-    installed.push('.claude/skills/adaptive-orchestrate', '.claude/skills/aorch-downshift', '.claude/skills/aorch-model-upgrade', '.claude/agents', '.claude/settings.json');
+    installed.push('.claude/skills/adaptive-orchestrate', '.claude/skills/aorch-downshift', '.claude/skills/aorch-model-upgrade', '.claude/skills/aorch-manager-map', '.claude/agents', '.claude/settings.json');
   }
 
   if (wantsCodex) {
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/codex/skills'), path.join(projectRoot, '.agents/skills'));
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/codex/agents'), path.join(projectRoot, '.codex/agents'));
     await writeJson(hooksPath, mergedCodexHooks);
-    installed.push('.agents/skills/adaptive-orchestrate', '.agents/skills/aorch-model-upgrade', '.codex/agents', '.codex/hooks.json');
+    installed.push('.agents/skills/adaptive-orchestrate', '.agents/skills/aorch-model-upgrade', '.agents/skills/aorch-manager-map', '.codex/agents', '.codex/hooks.json');
   }
 
   // Record what this project now holds so `aorch update` and the prompt hook
