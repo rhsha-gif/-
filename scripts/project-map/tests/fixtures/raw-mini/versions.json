@@ -1,0 +1,6 @@
+{
+  "scc": "4.0.0",
+  "grimp": "3.16",
+  "vulture": "2.16",
+  "dependency-cruiser": "18.2.0"
+}

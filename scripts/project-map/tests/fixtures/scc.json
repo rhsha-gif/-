@@ -1,0 +1,24 @@
+[
+  {
+    "Name": "Python",
+    "Files": [
+      {
+        "Location": "quantpilot/packages/core.py",
+        "Lines": 20,
+        "Code": 15,
+        "Complexity": 3
+      }
+    ]
+  },
+  {
+    "Name": "TypeScript",
+    "Files": [
+      {
+        "Location": "quantpilot/apps/web/src/pages/index.tsx",
+        "Lines": 12,
+        "Code": 10,
+        "Complexity": 1
+      }
+    ]
+  }
+]

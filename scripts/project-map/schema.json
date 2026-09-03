@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aorch/project-map/map.json",
+  "title": "project-map map.json",
+  "type": "object",
+  "required": ["meta", "nodes", "edges", "problems"],
+  "additionalProperties": false,
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["project", "generated_at", "tool_versions"],
+      "additionalProperties": false,
+      "properties": {
+        "project": { "type": "string", "minLength": 1 },
+        "generated_at": { "type": "string", "minLength": 1 },
+        "tool_versions": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "path", "lines", "complexity", "churn", "tested", "entry", "dead", "package"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "enum": ["py-module", "ts-module"] },
+          "path": { "type": "string", "minLength": 1 },
+          "lines": { "type": "integer", "minimum": 0 },
+          "complexity": { "type": "integer", "minimum": 0 },
+          "churn": { "type": "integer", "minimum": 0 },
+          "tested": { "type": "boolean" },
+          "entry": { "type": "array", "items": { "type": "string", "enum": ["job", "router", "page"] } },
+          "dead": { "type": "array", "items": { "type": "string" } },
+          "package": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "from": { "type": "string", "minLength": 1 },
+          "to": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "enum": ["import", "cycle"] }
+        }
+      }
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "fixCost", "axis", "location", "evidence", "proposal", "nodeId"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^(hotspot|giant|untested|cycle|dead|orphan)-[A-Za-z0-9._/-]+$" },
+          "severity": { "type": "string", "enum": ["low", "standard", "high", "critical"] },
+          "fixCost": { "type": "string", "enum": ["low", "standard", "high", "critical"] },
+          "axis": { "type": "string", "enum": ["overengineering", "correctness", "usage"] },
+          "location": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 },
+          "proposal": { "type": "string", "minLength": 1 },
+          "nodeId": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

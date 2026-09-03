@@ -1,0 +1,30 @@
+{
+  "modules": [
+    "quantpilot.packages.core",
+    "quantpilot.packages.core.alpha",
+    "quantpilot.packages.core.beta",
+    "quantpilot.jobs.lonely"
+  ],
+  "imports": [
+    ["quantpilot.packages.core.alpha", "quantpilot.packages.core.beta"],
+    ["quantpilot.packages.core.beta", "quantpilot.packages.core.alpha"]
+  ],
+  "entry_points": {
+    "quantpilot.jobs.lonely": "job"
+  },
+  "downstream": {
+    "quantpilot.jobs.lonely": []
+  },
+  "test_upstream": {
+    "quantpilot.packages.core": false,
+    "quantpilot.packages.core.alpha": true,
+    "quantpilot.packages.core.beta": true,
+    "quantpilot.jobs.lonely": false
+  },
+  "module_paths": {
+    "quantpilot.packages.core": "quantpilot/packages/core/__init__.py",
+    "quantpilot.packages.core.alpha": "quantpilot/packages/core/alpha.py",
+    "quantpilot.packages.core.beta": "quantpilot/packages/core/beta.py",
+    "quantpilot.jobs.lonely": "quantpilot/jobs/lonely.py"
+  }
+}

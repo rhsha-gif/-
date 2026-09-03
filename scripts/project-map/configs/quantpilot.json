@@ -1,0 +1,37 @@
+{
+  "project": "QuantPilot",
+  "root": "C:/Users/goyan/OneDrive/문서/코덱스/주식트레이더",
+  "python": {
+    "package": "quantpilot",
+    "src_dirs": ["quantpilot/packages", "quantpilot/services", "quantpilot/jobs"],
+    "test_dirs": ["quantpilot/tests"],
+    "entry_points": {
+      "job": "quantpilot/jobs/*.py",
+      "router": "quantpilot/services/api/routers/*.py"
+    }
+  },
+  "web": {
+    "root": "quantpilot/apps/web",
+    "src": "src",
+    "ts_config": "tsconfig.app.json",
+    "entry_points": {
+      "page": "src/pages/*.tsx"
+    }
+  },
+  "exclude": [
+    "quantpilot-foundation",
+    "quantpilot-foundation-meta",
+    "experiments",
+    "local_data",
+    "marketdata",
+    "node_modules",
+    ".venv"
+  ],
+  "generated": ["*/src/lib/openapi.d.ts", "src/lib/openapi.d.ts"],
+  "churn_days": 180,
+  "thresholds": {
+    "big_file_lines": 1500,
+    "hotspot_top": 10,
+    "dead_confidence": 80
+  }
+}

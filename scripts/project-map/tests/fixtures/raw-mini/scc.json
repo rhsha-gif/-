@@ -1,0 +1,19 @@
+[
+  {
+    "Name": "Python",
+    "Files": [
+      {"Location": "quantpilot/packages/core/__init__.py", "Lines": 5, "Code": 3, "Complexity": 0},
+      {"Location": "quantpilot/packages/core/alpha.py", "Lines": 100, "Code": 90, "Complexity": 12},
+      {"Location": "quantpilot/packages/core/beta.py", "Lines": 80, "Code": 70, "Complexity": 8},
+      {"Location": "quantpilot/jobs/lonely.py", "Lines": 30, "Code": 25, "Complexity": 2}
+    ]
+  },
+  {
+    "Name": "TypeScript",
+    "Files": [
+      {"Location": "quantpilot/apps/web/src/pages/index.tsx", "Lines": 50, "Code": 44, "Complexity": 4},
+      {"Location": "quantpilot/apps/web/src/lib/client.ts", "Lines": 20, "Code": 17, "Complexity": 2},
+      {"Location": "quantpilot/apps/web/src/components/orphan.tsx", "Lines": 10, "Code": 8, "Complexity": 1}
+    ]
+  }
+]

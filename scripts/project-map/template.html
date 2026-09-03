@@ -1,0 +1,690 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{PROJECT_TITLE}}</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f2f5f9;
+      --panel: #ffffff;
+      --panel-muted: #e9eef5;
+      --text: #1b2430;
+      --muted: #5d6b7e;
+      --border: #d3dbe6;
+      --accent: #0e7c86;
+      --accent-soft: #d6eef0;
+      --danger: #b42318;
+      --sev-critical: #b42318;
+      --sev-high: #c2410c;
+      --sev-standard: #2f5aa8;
+      --sev-low: #6b7280;
+      --ramp-lo: #dbe4ee;
+      --ramp-hi: #b23a48;
+      --shadow: 0 8px 24px rgb(27 36 48 / 8%);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --bg: #0f141b;
+        --panel: #161c25;
+        --panel-muted: #1e2632;
+        --text: #e6ecf3;
+        --muted: #98a6b8;
+        --border: #2b3543;
+        --accent: #4fb3bf;
+        --accent-soft: #123a3f;
+        --danger: #f0655a;
+        --sev-critical: #f0655a;
+        --sev-high: #f59e5b;
+        --sev-standard: #7aa2e3;
+        --sev-low: #9aa6b5;
+        --ramp-lo: #2a3542;
+        --ramp-hi: #e0606b;
+        --shadow: 0 8px 24px rgb(0 0 0 / 32%);
+      }
+    }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f2f5f9;
+      --panel: #ffffff;
+      --panel-muted: #e9eef5;
+      --text: #1b2430;
+      --muted: #5d6b7e;
+      --border: #d3dbe6;
+      --accent: #0e7c86;
+      --accent-soft: #d6eef0;
+      --danger: #b42318;
+      --sev-critical: #b42318;
+      --sev-high: #c2410c;
+      --sev-standard: #2f5aa8;
+      --sev-low: #6b7280;
+      --ramp-lo: #dbe4ee;
+      --ramp-hi: #b23a48;
+      --shadow: 0 8px 24px rgb(27 36 48 / 8%);
+    }
+
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #0f141b;
+      --panel: #161c25;
+      --panel-muted: #1e2632;
+      --text: #e6ecf3;
+      --muted: #98a6b8;
+      --border: #2b3543;
+      --accent: #4fb3bf;
+      --accent-soft: #123a3f;
+      --danger: #f0655a;
+      --sev-critical: #f0655a;
+      --sev-high: #f59e5b;
+      --sev-standard: #7aa2e3;
+      --sev-low: #9aa6b5;
+      --ramp-lo: #2a3542;
+      --ramp-hi: #e0606b;
+      --shadow: 0 8px 24px rgb(0 0 0 / 32%);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "IBM Plex Sans KR", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.45;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1.1rem clamp(1rem, 3vw, 2.5rem);
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    h1, h2 { margin: 0; text-wrap: balance; }
+    h1 { font-size: clamp(1.2rem, 2.6vw, 1.6rem); font-weight: 600; letter-spacing: -.01em; }
+    h2 { font-size: .95rem; font-weight: 600; }
+    .eyebrow { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; font-size: .8rem; }
+    .chip { display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; font-size: .72rem; letter-spacing: .04em; color: #fff; background: var(--sev-low); }
+    .chip-critical { background: var(--sev-critical); }
+    .chip-high { background: var(--sev-high); }
+    .chip-standard { background: var(--sev-standard); }
+    .chip-low { background: var(--sev-low); }
+    .chip-cost { color: var(--text); background: var(--panel-muted); border: 1px solid var(--border); }
+
+    .summary {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: .45rem .9rem;
+      color: var(--muted);
+      font-size: .88rem;
+    }
+
+    .summary strong { color: var(--text); font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
+
+    button, select {
+      min-height: 2.15rem;
+      border: 1px solid var(--border);
+      border-radius: .55rem;
+      background: var(--panel-muted);
+      color: var(--text);
+      padding: .35rem .7rem;
+      font: inherit;
+    }
+
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    button:focus-visible, select:focus-visible, tr:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 1rem;
+      padding: 1rem clamp(1rem, 3vw, 2.5rem) 2rem;
+    }
+
+    .pane {
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: .85rem;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .pane-head {
+      display: flex;
+      min-height: 3.2rem;
+      align-items: center;
+      justify-content: space-between;
+      gap: .75rem;
+      padding: .7rem .85rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: .45rem;
+    }
+
+    .chart { width: 100%; height: min(62vh, 590px); min-height: 390px; }
+    .problems { grid-column: 1 / -1; }
+    .table-wrap { max-height: 48vh; overflow: auto; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .82rem;
+    }
+
+    th, td {
+      padding: .62rem .7rem;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--panel-muted);
+      white-space: nowrap;
+      font-size: .72rem;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    tbody tr { cursor: pointer; }
+    tbody tr:hover, tbody tr.is-selected { background: var(--accent-soft); }
+    td:nth-child(6), td:nth-child(7) { min-width: 16rem; }
+
+    .empty {
+      padding: 2rem;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      header { align-items: flex-start; flex-direction: column; }
+      main { grid-template-columns: 1fr; }
+      .problems { grid-column: 1; }
+      .chart { height: 480px; min-height: 360px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="eyebrow">project map · <span id="generated-at"></span></div>
+      <h1><span id="project-name"></span> 지도</h1>
+    </div>
+    <div class="summary" aria-label="프로젝트 요약">
+      <span>파일 <strong id="node-count">0</strong></span>
+      <span>의존 <strong id="edge-count">0</strong></span>
+      <span>문제 <strong id="problem-count">0</strong></span>
+      <button id="theme-toggle" type="button">테마 전환</button>
+    </div>
+  </header>
+
+  <main id="charts">
+    <section class="pane" aria-labelledby="treemap-title">
+      <div class="pane-head">
+        <h2 id="treemap-title">트리맵</h2>
+        <label>색상
+          <select id="metric-select">
+            <option value="churn">변경 빈도</option>
+            <option value="complexity">복잡도</option>
+          </select>
+        </label>
+      </div>
+      <div id="treemap" class="chart" role="img" aria-label="패키지와 파일 트리맵"></div>
+    </section>
+
+    <section class="pane" aria-labelledby="graph-title">
+      <div class="pane-head">
+        <h2 id="graph-title">의존 그래프</h2>
+        <div class="controls">
+          <select id="entry-select" aria-label="진입점 선택">
+            <option value="">진입점 강조 안 함</option>
+          </select>
+          <button id="expand-package" type="button" disabled>선택 패키지 펼치기</button>
+        </div>
+      </div>
+      <div id="graph" class="chart" role="img" aria-label="패키지와 모듈 의존 그래프"></div>
+    </section>
+
+    <section class="pane problems" aria-labelledby="problems-title">
+      <div class="pane-head">
+        <h2 id="problems-title">문제 목록</h2>
+        <label>심각도
+          <select id="severity-filter">
+            <option value="all">전체</option>
+            <option value="critical">치명적</option>
+            <option value="high">높음</option>
+            <option value="standard">보통</option>
+            <option value="low">낮음</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>id</th><th>심각도</th><th>수정 비용</th><th>축</th>
+              <th>위치</th><th>근거</th><th>제안</th>
+            </tr>
+          </thead>
+          <tbody id="problem-body">{{PROBLEM_ROWS}}</tbody>
+        </table>
+        <div id="empty-problems" class="empty" hidden>표시할 문제가 없습니다.</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/6.1.0/echarts.min.js" integrity="sha384-C2iskrW/uPW46KzOjrvJIQo4YkV8lkD+QS0CrDN18IIPIpT/g2USu8bTP3nvmIAD" crossorigin="anonymous"></script>
+  <script id="map" type="application/json">{{MAP_JSON}}</script>
+  <script>
+    (() => {
+      "use strict";
+
+      const data = JSON.parse(document.getElementById("map").textContent);
+      const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+      const edges = Array.isArray(data.edges) ? data.edges : [];
+      const problems = Array.isArray(data.problems) ? data.problems : [];
+      const byId = new Map(nodes.map((node) => [node.id, node]));
+      const packageMembers = new Map();
+      const expandedPackages = new Set();
+      let selectedId = null;
+      let reachableIds = null;
+      let colorMetric = "churn";
+
+      for (const node of nodes) {
+        if (!packageMembers.has(node.package)) packageMembers.set(node.package, []);
+        packageMembers.get(node.package).push(node);
+      }
+
+      const packages = [...packageMembers.keys()].sort((a, b) => a.localeCompare(b));
+      const adjacency = new Map(nodes.map((node) => [node.id, []]));
+      for (const edge of edges) {
+        if (adjacency.has(edge.from) && byId.has(edge.to)) {
+          adjacency.get(edge.from).push(edge.to);
+        }
+      }
+
+      document.getElementById("project-name").textContent = data.meta.project;
+      document.getElementById("generated-at").textContent = `생성: ${data.meta.generated_at}`;
+      document.getElementById("node-count").textContent = nodes.length.toLocaleString("ko-KR");
+      document.getElementById("edge-count").textContent = edges.length.toLocaleString("ko-KR");
+      document.getElementById("problem-count").textContent = problems.length.toLocaleString("ko-KR");
+
+      const treemap = echarts.init(document.getElementById("treemap"));
+      const graph = echarts.init(document.getElementById("graph"));
+      const metricSelect = document.getElementById("metric-select");
+      const entrySelect = document.getElementById("entry-select");
+      const expandButton = document.getElementById("expand-package");
+      const severityFilter = document.getElementById("severity-filter");
+      const problemBody = document.getElementById("problem-body");
+      const emptyProblems = document.getElementById("empty-problems");
+
+      function css(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (character) => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+        })[character]);
+      }
+
+      function aggregate(members) {
+        return {
+          lines: members.reduce((sum, node) => sum + node.lines, 0),
+          complexity: members.reduce((sum, node) => sum + node.complexity, 0),
+          churn: members.reduce((sum, node) => sum + node.churn, 0),
+          tested: members.filter((node) => node.tested).length,
+          entry: members.reduce((sum, node) => sum + node.entry.length, 0),
+          dead: members.reduce((sum, node) => sum + node.dead.length, 0),
+          files: members.length,
+        };
+      }
+
+      function hexToRgb(hex) {
+        const clean = hex.replace("#", "");
+        return [0, 2, 4].map((offset) => parseInt(clean.slice(offset, offset + 2), 16));
+      }
+
+      function color(value, maximum) {
+        const ratio = maximum ? Math.sqrt(Math.min(1, value / maximum)) : 0;
+        const lo = hexToRgb(css("--ramp-lo"));
+        const hi = hexToRgb(css("--ramp-hi"));
+        const mixed = lo.map((channel, index) => Math.round(channel + (hi[index] - channel) * ratio));
+        return `rgb(${mixed[0]} ${mixed[1]} ${mixed[2]})`;
+      }
+
+      function tooltip(raw, name) {
+        const tested = typeof raw.tested === "number"
+          ? `${raw.tested}/${raw.files}`
+          : (raw.tested ? "예" : "아니오");
+        const entry = Array.isArray(raw.entry) ? (raw.entry.join(", ") || "없음") : raw.entry;
+        const dead = Array.isArray(raw.dead) ? raw.dead.length : raw.dead;
+        return [
+          `<strong>${escapeHtml(name)}</strong>`,
+          `줄: ${raw.lines.toLocaleString("ko-KR")}`,
+          `복잡도: ${raw.complexity.toLocaleString("ko-KR")}`,
+          `변경: ${raw.churn.toLocaleString("ko-KR")}`,
+          `테스트됨: ${escapeHtml(tested)}`,
+          `진입점: ${escapeHtml(entry)}`,
+          `미사용: ${dead}`,
+        ].join("<br>");
+      }
+
+      function selectionMatches(id, members = []) {
+        return selectedId === id || members.some((member) => member.id === selectedId);
+      }
+
+      function treemapData() {
+        const maximum = Math.max(0, ...nodes.map((node) => node[colorMetric]));
+        return packages.map((packageName) => {
+          const members = packageMembers.get(packageName);
+          const raw = aggregate(members);
+          return {
+            id: `package:${packageName}`,
+            name: packageName,
+            raw,
+            children: members.map((node) => ({
+              id: node.id,
+              name: node.path.split("/").pop(),
+              value: node.lines,
+              raw: node,
+              itemStyle: {
+                color: color(node[colorMetric], maximum),
+                borderColor: selectedId === node.id ? css("--accent") : css("--panel"),
+                borderWidth: selectedId === node.id ? 4 : 1,
+              },
+            })),
+            itemStyle: {
+              borderColor: selectionMatches(`package:${packageName}`, members)
+                ? css("--accent") : css("--border"),
+              borderWidth: selectionMatches(`package:${packageName}`, members) ? 4 : 2,
+            },
+          };
+        });
+      }
+
+      function renderTreemap() {
+        treemap.setOption({
+          backgroundColor: "transparent",
+          tooltip: { formatter: (params) => tooltip(params.data.raw, params.data.name) },
+          series: [{
+            type: "treemap",
+            roam: true,
+            nodeClick: false,
+            breadcrumb: { show: false },
+            label: { show: true, color: css("--text"), overflow: "truncate" },
+            upperLabel: { show: true, height: 24, color: css("--text") },
+            levels: [
+              { itemStyle: { borderColor: css("--panel"), borderWidth: 3, gapWidth: 3 } },
+              { upperLabel: { show: true }, itemStyle: { gapWidth: 1 } },
+            ],
+            data: treemapData(),
+          }],
+        }, true);
+      }
+
+      function displayedId(node) {
+        return expandedPackages.has(node.package) ? node.id : `package:${node.package}`;
+      }
+
+      function graphData() {
+        const graphNodes = [];
+        for (const packageName of packages) {
+          const members = packageMembers.get(packageName);
+          if (expandedPackages.has(packageName)) {
+            for (const node of members) {
+              graphNodes.push({ id: node.id, name: node.id, members: [node], raw: node, symbolSize: 19 });
+            }
+          } else {
+            const raw = aggregate(members);
+            graphNodes.push({
+              id: `package:${packageName}`,
+              name: packageName,
+              members,
+              raw,
+              symbolSize: Math.min(54, 24 + Math.sqrt(members.length) * 5),
+            });
+          }
+        }
+
+        const combined = new Map();
+        for (const edge of edges) {
+          const sourceNode = byId.get(edge.from);
+          const targetNode = byId.get(edge.to);
+          if (!sourceNode || !targetNode) continue;
+          const source = displayedId(sourceNode);
+          const target = displayedId(targetNode);
+          if (source === target && !expandedPackages.has(sourceNode.package)) continue;
+          const key = `${source}\u0000${target}`;
+          const current = combined.get(key) || { source, target, count: 0, cycle: false };
+          current.count += 1;
+          current.cycle ||= edge.kind === "cycle";
+          combined.set(key, current);
+        }
+
+        for (const item of graphNodes) {
+          const active = reachableIds === null
+            || item.members.some((member) => reachableIds.has(member.id));
+          const selected = selectionMatches(item.id, item.members);
+          item.label = { show: selected || item.id.startsWith("package:"), color: css("--text") };
+          item.itemStyle = {
+            color: selected ? css("--accent") : css("--panel-muted"),
+            borderColor: selected ? css("--accent") : css("--border"),
+            borderWidth: selected ? 4 : 2,
+            opacity: active ? 1 : .16,
+          };
+        }
+
+        const graphNodeById = new Map(graphNodes.map((node) => [node.id, node]));
+        const graphEdges = [...combined.values()].map((edge) => {
+          const source = graphNodeById.get(edge.source);
+          const target = graphNodeById.get(edge.target);
+          const active = reachableIds === null || [source, target].some(
+            (item) => item && item.members.some((member) => reachableIds.has(member.id))
+          );
+          return {
+            source: edge.source,
+            target: edge.target,
+            value: edge.count,
+            lineStyle: {
+              color: edge.cycle ? css("--danger") : css("--muted"),
+              width: Math.min(6, 1 + Math.log2(edge.count + 1)),
+              opacity: active ? .7 : .08,
+              curveness: .08,
+            },
+          };
+        });
+        return { graphNodes, graphEdges };
+      }
+
+      function renderGraph() {
+        const { graphNodes, graphEdges } = graphData();
+        graph.setOption({
+          backgroundColor: "transparent",
+          animation: graphNodes.length < 300,
+          tooltip: {
+            formatter: (params) => params.dataType === "edge"
+              ? `가져오기: ${params.data.value}`
+              : tooltip(params.data.raw, params.data.name),
+          },
+          series: [{
+            type: "graph",
+            layout: "force",
+            roam: true,
+            draggable: true,
+            data: graphNodes,
+            links: graphEdges,
+            force: {
+              repulsion: 150,
+              edgeLength: [55, 130],
+              gravity: .08,
+              layoutAnimation: graphNodes.length < 300,
+            },
+            emphasis: { focus: "adjacency" },
+          }],
+        }, true);
+      }
+
+      function selectedPackage() {
+        if (!selectedId) return null;
+        if (selectedId.startsWith("package:")) return selectedId.slice(8);
+        return byId.get(selectedId)?.package || null;
+      }
+
+      function updateExpandButton() {
+        const packageName = selectedPackage();
+        expandButton.disabled = !packageName;
+        expandButton.textContent = packageName && expandedPackages.has(packageName)
+          ? "선택 패키지 접기" : "선택 패키지 펼치기";
+      }
+
+      function select(nodeId) {
+        selectedId = nodeId;
+        renderTreemap();
+        renderGraph();
+        updateExpandButton();
+        for (const row of problemBody.rows) {
+          row.classList.toggle("is-selected", row.dataset.nodeId === nodeId);
+        }
+      }
+
+      function reachableFrom(start) {
+        const visited = new Set();
+        const queue = [start];
+        for (let index = 0; index < queue.length; index += 1) {
+          const current = queue[index];
+          if (visited.has(current)) continue;
+          visited.add(current);
+          for (const target of adjacency.get(current) || []) {
+            if (!visited.has(target)) queue.push(target);
+          }
+        }
+        return visited;
+      }
+
+      function appendCell(row, key, value) {
+        const cell = document.createElement("td");
+        if (key === "severity" || key === "fixCost") {
+          const chip = document.createElement("span");
+          chip.className = key === "severity" ? `chip chip-${value}` : "chip chip-cost";
+          chip.textContent = value;
+          cell.appendChild(chip);
+        } else {
+          cell.textContent = value;
+          if (key === "id" || key === "location") cell.classList.add("mono");
+        }
+        row.appendChild(cell);
+      }
+
+      function renderProblems() {
+        const severity = severityFilter.value;
+        const visible = severity === "all"
+          ? problems : problems.filter((problem) => problem.severity === severity);
+        problemBody.replaceChildren();
+        for (const problem of visible) {
+          const row = document.createElement("tr");
+          row.dataset.problemId = problem.id;
+          row.dataset.nodeId = problem.nodeId;
+          row.tabIndex = 0;
+          for (const key of ["id", "severity", "fixCost", "axis", "location", "evidence", "proposal"]) {
+            appendCell(row, key, problem[key]);
+          }
+          const activate = () => {
+            select(problem.nodeId);
+            document.getElementById("charts").scrollIntoView({ behavior: "smooth", block: "start" });
+          };
+          row.addEventListener("click", activate);
+          row.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") activate();
+          });
+          row.classList.toggle("is-selected", problem.nodeId === selectedId);
+          problemBody.appendChild(row);
+        }
+        emptyProblems.hidden = visible.length !== 0;
+      }
+
+      for (const node of nodes.filter((item) => item.entry.length)) {
+        for (const kind of node.entry) {
+          const option = document.createElement("option");
+          option.value = node.id;
+          option.textContent = `${kind} · ${node.id}`;
+          entrySelect.appendChild(option);
+        }
+      }
+
+      treemap.on("click", (params) => select(params.data.id));
+      graph.on("click", (params) => {
+        if (params.dataType === "node") select(params.data.id);
+      });
+      metricSelect.addEventListener("change", () => {
+        colorMetric = metricSelect.value;
+        renderTreemap();
+      });
+      entrySelect.addEventListener("change", () => {
+        reachableIds = entrySelect.value ? reachableFrom(entrySelect.value) : null;
+        if (entrySelect.value) select(entrySelect.value);
+        else renderGraph();
+      });
+      expandButton.addEventListener("click", () => {
+        const packageName = selectedPackage();
+        if (!packageName) return;
+        if (expandedPackages.has(packageName)) expandedPackages.delete(packageName);
+        else {
+          expandedPackages.clear();
+          expandedPackages.add(packageName);
+        }
+        renderGraph();
+        updateExpandButton();
+      });
+      severityFilter.addEventListener("change", renderProblems);
+      document.getElementById("theme-toggle").addEventListener("click", () => {
+        const root = document.documentElement;
+        const dark = root.dataset.theme === "dark"
+          || (!root.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+        root.dataset.theme = dark ? "light" : "dark";
+        renderTreemap();
+        renderGraph();
+      });
+
+      let resizeFrame = 0;
+      window.addEventListener("resize", () => {
+        cancelAnimationFrame(resizeFrame);
+        resizeFrame = requestAnimationFrame(() => {
+          treemap.resize();
+          graph.resize();
+        });
+      });
+
+      renderTreemap();
+      renderGraph();
+      renderProblems();
+    })();
+  </script>
+</body>
+</html>
