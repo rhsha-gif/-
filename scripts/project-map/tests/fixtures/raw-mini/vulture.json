@@ -1,0 +1,16 @@
+[
+  {
+    "path": "quantpilot/packages/core/beta.py",
+    "line": 22,
+    "kind": "function",
+    "name": "obsolete_helper",
+    "confidence": 85
+  },
+  {
+    "path": "quantpilot/jobs/lonely.py",
+    "line": 9,
+    "kind": "variable",
+    "name": "possible_false_positive",
+    "confidence": 60
+  }
+]

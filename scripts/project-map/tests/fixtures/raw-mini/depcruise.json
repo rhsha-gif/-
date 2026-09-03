@@ -1,0 +1,14 @@
+[
+  {
+    "source": "src/pages/index.tsx",
+    "dependencies": [{"resolved": "src/lib/client.ts"}]
+  },
+  {
+    "source": "src/lib/client.ts",
+    "dependencies": []
+  },
+  {
+    "source": "src/components/orphan.tsx",
+    "dependencies": []
+  }
+]

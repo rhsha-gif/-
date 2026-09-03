@@ -1,0 +1,4 @@
+quantpilot/packages/core.py:7: unused function 'helper' (60% confidence)
+quantpilot/services/models.py:12: unused class 'LegacyModel' (100% confidence)
+this line does not match vulture output
+

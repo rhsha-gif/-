@@ -1,0 +1,27 @@
+{
+  "project": "mini",
+  "root": ".",
+  "python": {
+    "package": "quantpilot",
+    "src_dirs": ["quantpilot/packages", "quantpilot/services", "quantpilot/jobs"],
+    "test_dirs": ["quantpilot/tests"],
+    "entry_points": {
+      "job": "quantpilot/jobs/*.py",
+      "router": "quantpilot/services/api/routers/*.py"
+    }
+  },
+  "web": {
+    "root": "quantpilot/apps/web",
+    "src": "src",
+    "entry_points": {
+      "page": "src/pages/*.tsx"
+    }
+  },
+  "exclude": [],
+  "churn_days": 180,
+  "thresholds": {
+    "big_file_lines": 90,
+    "hotspot_top": 2,
+    "dead_confidence": 80
+  }
+}

@@ -15,6 +15,7 @@
 
 ### Added
 
+- **`aorch-manager-map` 스킬과 템플릿**: 프로젝트를 최종 관리자의 눈으로 보는 지도(실행 사이클 흐름도·능력 히트맵·갭 목록)를 Fable 핀 worker 태스크 하나로 만들어 아티팩트로 발행하는 런북(`integrations/claude/skills/aorch-manager-map/SKILL.md`, Codex 사본, `examples/plan-manager-map.json`, 게이트 `scripts/manager-map-check.mjs`). 추출 스크립트·모델 파일은 두지 않는다(2026-09-03 포니테일 판정). 같은 날의 개발자 지도 `scripts/project-map/`(scc·grimp·vulture·dependency-cruiser → ECharts 대시보드)는 사용자가 원한 관점이 아니어서 보조 도구로만 남긴다.
 - **`auditor` 역할과 receipt `findings`**: 14번째 역할. ponytail·reviewer receipt와 리드가 직접 만든 실사용 증거를 종합해 **순위 있는 발견**을 receipt의 `findings[]`(id·severity·fixCost·axis·location·evidence·proposal, 어휘는 risk·complexity와 같은 `low/standard/high/critical`)에 적는다. reviewer 프리셋은 단일 diff 반증에 고정돼 있어 재사용할 수 없었고, qa-analyst와 같은 이유로 reviewer 라우팅을 받는다. `findings`는 선택 필드라 기존 receipt는 그대로 통과한다 — paper-researcher 계획이 이월했던 "조사형 역할의 산출물이 summary에만 남는" 공백을 닫는다.
 - **`aorch-model-upgrade` 스킬과 템플릿 2종**: 새 모델이 나올 때의 런북(`integrations/claude/skills/aorch-model-upgrade/SKILL.md`, install이 함께 복사). 감사 플랜 `examples/plan-model-upgrade.json`(ponytail → 교차 프로바이더 reviewer → 신모델 고정 auditor)과 적용 플랜 `examples/plan-model-upgrade-apply.json`(사용자가 고른 finding만 + 매핑표 기반 모델 참조 갱신). auditor는 새 플랜 필드 `allowedProfileIds`(`forbiddenProfileIds`의 양성 쌍둥이)로 신모델에 고정한다 — `minimumQuality`로는 안 된다는 것을 dry-run으로 실측(opus의 review 사전값+effort 가산이 fable을 이김). 실사용 실행과 모델 참조 인벤토리는 정찰이라 위임하지 않고 리드가 직접 한다. 새 모델은 `maturity: challenger`로 등록한다 — fable이 관측 0건인 채 stable로 들어가 있던 것을 2026-09-02에 발견.
 
