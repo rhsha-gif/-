@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{TITLE}}</title>
+</head>
+<body>
+<!-- ARTIFACT_BODY_START -->
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f7fb; --panel: #ffffff; --panel-soft: #eef3f8; --text: #172033;
+    --muted: #5d687b; --line: #d7dfeb; --accent: #2563eb; --good: #15803d;
+    --bad: #c2413b; --warn: #b36b00; --blocked: #64748b; --shadow: 0 10px 30px #17203312;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0d1320; --panel: #151d2c; --panel-soft: #1c2638; --text: #eef3fb;
+      --muted: #a8b3c5; --line: #334056; --accent: #70a0ff; --good: #55c87a;
+      --bad: #ff7b72; --warn: #e9a23b; --blocked: #94a3b8; --shadow: 0 10px 30px #0005;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0d1320; --panel: #151d2c; --panel-soft: #1c2638; --text: #eef3fb;
+    --muted: #a8b3c5; --line: #334056; --accent: #70a0ff; --good: #55c87a;
+    --bad: #ff7b72; --warn: #e9a23b; --blocked: #94a3b8; --shadow: 0 10px 30px #0005;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, sans-serif; }
+  .page { width: min(1500px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0 64px; }
+  h1 { margin: 0 0 8px; font-size: clamp(26px, 4vw, 42px); letter-spacing: -.04em; }
+  h2 { margin: 0 0 18px; font-size: 24px; } h3 { margin: 20px 0 10px; }
+  p { margin: 8px 0; } code { overflow-wrap: anywhere; }
+  .subtitle, .muted, .empty { color: var(--muted); }
+  section, .chart-card { margin-top: 22px; padding: 24px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: var(--shadow); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .term-list { display: grid; grid-template-columns: max-content 1fr; gap: 8px 18px; margin: 0; }
+  .term-list dt { font-weight: 750; } .term-list dd { margin: 0; color: var(--muted); }
+  .callout { margin-top: 18px; padding: 14px 16px; border-left: 4px solid var(--warn); background: var(--panel-soft); border-radius: 8px; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+  table { width: 100%; border-collapse: collapse; min-width: 680px; }
+  th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  thead th { background: var(--panel-soft); font-size: 13px; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: 0; }
+  .table-group th { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); color: var(--accent); }
+  .boolean, .pass { color: var(--good); font-weight: 800; } .fail { color: var(--bad); font-weight: 800; }
+  .action-pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--panel-soft); font-family: ui-monospace, monospace; }
+  .mermaid { overflow: auto; margin: 18px 0 0; padding: 18px; border: 1px dashed var(--line); border-radius: 12px; background: var(--panel-soft); }
+  .chart { width: 100%; height: 620px; } .performance-chart { height: 360px; } .reason-chart { height: 340px; }
+  .timeline { display: flex; height: 22px; margin-top: 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; }
+  .timeline span { flex: 1 1 0; min-width: 1px; }
+  .timeline-key { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 7px; color: var(--muted); font-size: 12px; }
+  .swatch { display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 2px; }
+  .summary-number { font-size: 30px; font-weight: 800; }
+  .hidden-marker-list { display: none; }
+  .kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 12px 0 18px; }
+  .kpi .card { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-soft); }
+  .kpi .n { font-size: 30px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .kpi .l { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .kpi .m { font-size: 12px; margin-top: 6px; }
+  .kpi .m.good { color: var(--good); } .kpi .m.bad { color: var(--bad); } .kpi .m.warn { color: var(--warn); }
+  .headline { font-size: 18px; font-weight: 700; margin: 0 0 12px; }
+  .status { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #fff; background: var(--blocked); white-space: nowrap; }
+  .status-implemented { background: var(--good); } .status-partial { background: var(--warn); } .status-different { background: var(--bad); } .status-missing { background: #7c3aed; } .status-not_applicable { background: var(--blocked); }
+  .conf { font-size: 11px; color: var(--muted); font-style: italic; }
+  .funnel { height: 320px; }
+  .wf-strip { display: flex; gap: 4px; flex-wrap: wrap; margin: 8px 0 4px; }
+  .wf-strip span { flex: 1 1 40px; min-width: 40px; height: 34px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; background: var(--blocked); }
+  .wf-strip span.pos { background: var(--good); } .wf-strip span.neg { background: var(--bad); }
+  .stage-tag { display: inline-block; padding: 1px 8px; border-radius: 6px; background: var(--panel-soft); font-size: 12px; margin-right: 4px; }
+  details.fold { margin-top: 12px; } details.fold summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+  .stack > * + * { margin-top: 14px; }
+  @media (max-width: 720px) { .page { width: min(100% - 18px, 1500px); } section, .chart-card { padding: 16px; border-radius: 12px; } .chart { height: 540px; } }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/6.1.0/echarts.min.js" integrity="sha384-C2iskrW/uPW46KzOjrvJIQo4YkV8lkD+QS0CrDN18IIPIpT/g2USu8bTP3nvmIAD" crossorigin="anonymous"></script>
+<script id="trace-data" type="application/json">{{TRACE_JSON}}</script>
+<script id="rules-data" type="application/json">{{RULES_JSON}}</script>
+<script id="protocol-data" type="application/json">{{PROTOCOL_JSON}}</script>
+
+<main class="page">
+  <div class="page-header">
+    <h1>{{TITLE}}</h1>
+    <p class="subtitle" id="trace-summary">전략 실행 기록을 규칙·가격·성과·개선 신호 순으로 읽는 지도입니다.</p>
+  </div>
+
+  <section id="guide">
+    <h2>1. 읽는 법</h2>
+    <div class="grid">
+      <div>
+        <h3>지표 용어</h3>
+        <dl class="term-list">
+          <dt>SMA20 / SMA120</dt><dd>20봉·120봉 단순이동평균으로 단기와 장기 추세를 비교합니다.</dd>
+          <dt>RSI</dt><dd>가격 움직임의 상대 강도입니다. 과매도·과열 임계값과 함께 봅니다.</dd>
+          <dt>ATR</dt><dd>평균 진폭으로 변동성 크기를 나타냅니다.</dd>
+          <dt>거래량 비율</dt><dd>기준 거래량 대비 현재 거래량의 비율입니다.</dd>
+          <dt>워밍업</dt><dd>장기 지표 계산에 필요한 초기 구간으로, 매매 판단이 제한될 수 있습니다.</dd>
+        </dl>
+      </div>
+      <div>
+        <h3>행동 용어</h3>
+        <dl class="term-list">
+          <dt>buy_ready</dt><dd>진입 조건이 갖춰진 상태</dd><dt>hold</dt><dd>현재 상태 유지</dd>
+          <dt>trim</dt><dd>보유 비중 일부 축소</dd><dt>exit</dt><dd>보유 포지션 청산</dd>
+          <dt>blocked</dt><dd>게이트에 의해 주문 또는 신호 차단</dd><dt>buy_wait</dt><dd>진입 전 추가 조건 대기</dd>
+        </dl>
+      </div>
+    </div>
+    <aside class="callout">
+      <strong>백테스트에서는 발동하지 않는 게이트</strong>
+      <ul id="stubbed-gates"></ul>
+    </aside>
+  </section>
+
+  <section id="protocol">
+    <h2>2. 내 프로토콜 대 구현 — 무엇이 있고, 무엇이 다르고, 무엇이 빈칸인가</h2>
+    <p class="headline" id="protocol-headline">프로토콜 대조 자료가 없습니다 (render 시 --protocol 미지정).</p>
+    <div class="kpi" id="protocol-kpi"></div>
+    <p class="muted">행마다: 프로토콜이 말하는 규칙 → 코드가 실제로 하는 일 → 실 봉에서 관측된 것 → 채우거나 고칠 것. 상태 배지: <span class="status status-implemented">구현됨</span> <span class="status status-partial">부분</span> <span class="status status-different">다르게 구현</span> <span class="status status-missing">없음</span> <span class="status status-not_applicable">프로토콜 밖</span>. 판단 신뢰도는 각 행 끝에 표시.</p>
+    <div class="table-wrap"><table data-table="protocol"><thead><tr><th>단계</th><th>내 프로토콜</th><th>코드가 하는 일</th><th>상태</th><th>임계값·설정</th><th>실 봉 관측</th><th>채울 것 / 고칠 것</th></tr></thead><tbody id="protocol-body"><tr><td colspan="7" class="empty">프로토콜 자료 없음</td></tr></tbody></table></div>
+  </section>
+
+  <section id="rules">
+    <h2>3. 코드의 규칙 — pullback_trend_v2가 실제로 보는 것</h2>
+    <p class="muted">아래 표는 코드에서 기계적으로 뽑았다. "결정 조건" 그룹의 값이 곧 손볼 수 있는 손잡이이고, "다른 모듈" 그룹은 이 알고리즘이 읽지 않는 값이다.</p>
+    <h3>임계값 (손잡이)</h3>
+    <div class="table-wrap"><table data-table="thresholds">
+      <thead><tr><th>필드</th><th>현재 값</th><th>허용 범위</th><th>이 알고리즘이 읽나</th><th>다른 사용처</th></tr></thead>
+      <tbody>{{THRESHOLD_ROWS}}</tbody>
+    </table></div>
+    <h3>결정 순서 — 봉마다 위에서부터 첫 번째로 맞는 행이 판정이 된다</h3>
+    <div class="table-wrap"><table data-table="decisions">
+      <thead><tr><th>순서</th><th>조건</th><th>행동</th><th>사유 코드</th><th>코드 줄</th></tr></thead>
+      <tbody>{{DECISION_ROWS}}</tbody>
+    </table></div>
+    <pre class="mermaid">{{MERMAID}}</pre>
+  </section>
+
+  <section id="symbol-section">
+    <h2>4. 종목별 차트 — 봉 위에서 규칙이 어떻게 발화했나</h2>
+    <p class="muted">캔들·이동평균·RSI·거래량을 한 축으로 탐색합니다. 스크롤 또는 하단 슬라이더로 구간을 확대하세요.</p>
+    <div id="symbol-charts"></div>
+    <ul class="hidden-marker-list" aria-hidden="true">{{TRADE_MARKERS}}</ul>
+  </section>
+
+  <section id="performance">
+    <h2>5. 성과 — 한눈에</h2>
+    <div class="kpi" id="kpi"></div>
+    <h3>왜 안 사나 — 진입 깔때기</h3>
+    <p class="muted">평가한 봉이 각 관문을 얼마나 통과했는지. 폭이 급격히 좁아지는 관문이 첫 번째 튜닝 후보다.</p>
+    <div id="funnel" class="funnel" role="img" aria-label="진입 깔때기"></div>
+    <h3>워크포워드 창별 결과 — 각 창의 총수익</h3>
+    <div class="wf-strip" id="wf-strip"></div>
+    <p class="muted" id="wf-note"></p>
+    <h3>자산곡선과 낙폭</h3>
+    <div id="performance-chart" class="performance-chart" role="img" aria-label="자산 곡선과 낙폭 차트"></div>
+    <details class="fold"><summary>지표 전체 · 수용성 검사 · 워크포워드 표 · 거래 목록 펼치기</summary>
+    <h3>성과 지표</h3><div class="table-wrap"><table><thead><tr><th>지표</th><th>값</th></tr></thead><tbody id="metrics-body"></tbody></table></div>
+    <h3>수용성 검사</h3><div class="table-wrap"><table data-table="acceptance"><thead><tr><th>name</th><th>passed</th><th>observed</th><th>threshold</th><th>detail</th></tr></thead><tbody>{{ACCEPTANCE_ROWS}}</tbody></table></div>
+    <h3>워크포워드 창</h3><div class="table-wrap"><table><thead><tr><th>window</th><th>train</th><th>test</th><th>metrics</th><th>checks</th></tr></thead><tbody id="walk-forward-body"></tbody></table></div>
+    <h3>거래 목록</h3><div class="table-wrap"><table><thead><tr><th>symbol</th><th>side</th><th>status</th><th>signal → fill</th><th>prices</th><th>quantity / notional</th><th>reason</th></tr></thead><tbody id="trades-body"></tbody></table></div>
+    </details>
+  </section>
+
+  <section id="improvement">
+    <h2>6. 개선 신호 — 어디를 손볼까</h2>
+    <ul id="improvement-list"></ul>
+    <div class="grid">
+      <div><h3>reason_code 빈도</h3><div id="reason-chart" class="reason-chart" role="img" aria-label="사유 코드 빈도"></div></div>
+      <div class="stack">
+        <div><h3>차단 거래 비중</h3><div id="blocked-share" class="summary-number">—</div><p class="muted" id="blocked-detail"></p></div>
+        <div><h3>실패한 수용성 검사 / 워크포워드 창</h3><ul id="failed-checks"></ul></div>
+      </div>
+    </div>
+    <h3>청산 후 5/10/20봉 뒤 종가 대비 %</h3>
+    <p id="exit-sample-note" class="muted"></p>
+    <div class="table-wrap"><table><thead><tr><th>symbol</th><th>fill date</th><th>fill price</th><th>+5봉</th><th>+10봉</th><th>+20봉</th></tr></thead><tbody id="exit-analysis-body"></tbody></table></div>
+  </section>
+</main>
+
+<script>
+(() => {
+  'use strict';
+  const trace = JSON.parse(document.getElementById('trace-data').textContent);
+  const rules = JSON.parse(document.getElementById('rules-data').textContent);
+  const protocol = JSON.parse(document.getElementById('protocol-data').textContent || 'null');
+  const meta = trace.meta || {};
+  const bars = Array.isArray(trace.bars) ? trace.bars : [];
+  const backtest = trace.backtest || {};
+  const trades = Array.isArray(backtest.trades) ? backtest.trades : [];
+  const esc = value => String(value ?? '—').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const text = value => value === undefined || value === null ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+  const number = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
+  const tableEmpty = (columns, message) => `<tr><td colspan="${columns}" class="empty">${esc(message)}</td></tr>`;
+  const chartText = () => getComputedStyle(document.documentElement).getPropertyValue('--text').trim();
+  const chartMuted = () => getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+  const chartLine = () => getComputedStyle(document.documentElement).getPropertyValue('--line').trim();
+
+  document.getElementById('trace-summary').textContent = `${meta.strategy_id || '전략'} · ${Number(meta.bar_count ?? bars.length).toLocaleString()}봉 · ${Array.isArray(meta.symbols) ? meta.symbols.length : new Set(bars.map(bar => bar.symbol)).size}종목`;
+  const stubbed = Array.isArray(meta.stubbed_gates) ? meta.stubbed_gates : [];
+  document.getElementById('stubbed-gates').innerHTML = stubbed.length ? stubbed.map(item => `<li><code>${esc(item)}</code></li>`).join('') : '<li class="muted">기록된 게이트 없음</li>';
+
+  const actionColors = {buy_ready:'#16a34a', hold:'#94a3b8', trim:'#d97706', exit:'#dc2626', blocked:'#64748b', buy_wait:'#3b82f6'};
+  const symbols = Array.isArray(meta.symbols) && meta.symbols.length ? meta.symbols : [...new Set(bars.map(bar => bar.symbol).filter(Boolean))];
+  const thresholdMap = Object.fromEntries((Array.isArray(rules.thresholds) ? rules.thresholds : []).filter(item => item && item.name).map(item => [item.name, item.default]));
+  const parameters = meta.parameters && typeof meta.parameters === 'object' ? meta.parameters : {};
+  const oversold = number(parameters.entry_rsi_max ?? parameters.rsi_oversold ?? thresholdMap.entry_rsi_max ?? thresholdMap.rsi_oversold) ?? 30;
+  const overheat = number(parameters.exit_rsi_min ?? parameters.rsi_overheat ?? thresholdMap.exit_rsi_min ?? thresholdMap.rsi_overheat) ?? 70;
+  const charts = [];
+
+  function markerKind(trade, symbolBars) {
+    const matching = symbolBars.find(bar => bar.date === trade.fill_date);
+    if (matching && matching.action === 'trim') return 'trim';
+    if (/trim|partial|reduce/i.test(String(trade.reason || ''))) return 'trim';
+    return trade.side === 'sell' ? 'sell' : 'buy';
+  }
+
+  function tradeSeries(symbol, symbolBars) {
+    const configs = {
+      buy: {name:'매수 체결', symbol:'triangle', rotate:0, color:'#16a34a'},
+      sell: {name:'매도 체결', symbol:'triangle', rotate:180, color:'#dc2626'},
+      trim: {name:'비중 축소', symbol:'diamond', rotate:0, color:'#d97706'},
+      blocked: {name:'차단 주문', symbol:'circle', rotate:0, color:'#64748b'}
+    };
+    return Object.entries(configs).map(([kind, config]) => ({
+      name: config.name, type: 'scatter', xAxisIndex: 0, yAxisIndex: 0,
+      symbol: config.symbol, symbolRotate: config.rotate, symbolSize: kind === 'blocked' ? 12 : 15,
+      itemStyle: kind === 'blocked' ? {color:'transparent', borderColor:config.color, borderWidth:2} : {color:config.color},
+      data: trades.filter(trade => trade && trade.symbol === symbol && (kind === 'blocked' ? trade.status === 'blocked' : trade.status === 'filled' && markerKind(trade, symbolBars) === kind))
+        .map(trade => [trade.fill_date || trade.signal_date, number(trade.fill_price) ?? number(trade.limit_price) ?? number(trade.signal_price), trade]),
+      tooltip: {valueFormatter: value => text(value)}
+    }));
+  }
+
+  function renderSymbol(symbol) {
+    const symbolBars = bars.filter(bar => bar && bar.symbol === symbol);
+    const card = document.createElement('article'); card.className = 'chart-card';
+    const heading = document.createElement('h3'); heading.textContent = symbol;
+    const chartNode = document.createElement('div'); chartNode.className = 'chart'; chartNode.setAttribute('role', 'img'); chartNode.setAttribute('aria-label', `${symbol} 가격과 지표 차트`);
+    const timeline = document.createElement('div'); timeline.className = 'timeline'; timeline.setAttribute('aria-label', `${symbol} 행동 타임라인`);
+    timeline.innerHTML = symbolBars.map(bar => `<span style="background:${actionColors[bar.action] || actionColors.hold}" title="${esc(`${bar.date} · ${bar.action || '—'}`)}"></span>`).join('');
+    const key = document.createElement('div'); key.className = 'timeline-key';
+    key.innerHTML = Object.entries(actionColors).map(([name, color]) => `<span><i class="swatch" style="background:${color}"></i>${name}</span>`).join('');
+    card.append(heading, chartNode, timeline, key); document.getElementById('symbol-charts').append(card);
+    const dates = symbolBars.map(bar => bar.date);
+    const values = keyName => symbolBars.map(bar => number((bar.indicators || {})[keyName]));
+    const chart = echarts.init(chartNode); charts.push(chart);
+    chart.setOption({
+      animation: symbolBars.length <= 500,
+      textStyle:{color:chartText()}, legend:{top:0, type:'scroll', textStyle:{color:chartText()}},
+      axisPointer:{link:[{xAxisIndex:'all'}]},
+      tooltip:{trigger:'axis', confine:true, formatter: params => {
+        const first = params.find(item => item.axisIndex === 0) || params[0];
+        const index = first ? first.dataIndex : -1; const bar = symbolBars[index] || {}; const indicators = bar.indicators || {};
+        const indicatorLines = Object.entries(indicators).map(([name, value]) => `${esc(name)}: ${esc(text(value))}`).join('<br>');
+        return `<strong>${esc(bar.date || '')}</strong><br>action: ${esc(text(bar.action))}<br>reason_codes: ${esc(text(bar.reason_codes || []))}<br>reason: ${esc(text(bar.reason))}${indicatorLines ? '<br>' + indicatorLines : ''}`;
+      }},
+      grid:[{left:58,right:28,top:48,height:'48%'},{left:58,right:28,top:'61%',height:'13%'},{left:58,right:28,top:'78%',height:'11%'}],
+      xAxis:[0,1,2].map((_, index) => ({type:'category', gridIndex:index, data:dates, boundaryGap:index === 2, axisLabel:{show:index === 2,color:chartMuted()}, axisLine:{lineStyle:{color:chartLine()}}, axisTick:{show:false}})),
+      yAxis:[
+        {scale:true, gridIndex:0, axisLabel:{color:chartMuted()}, splitLine:{lineStyle:{color:chartLine()}}},
+        {min:0,max:100,gridIndex:1,axisLabel:{color:chartMuted()},splitLine:{lineStyle:{color:chartLine()}}},
+        {scale:true,gridIndex:2,axisLabel:{color:chartMuted()},splitLine:{show:false}}
+      ],
+      dataZoom:[{type:'inside',xAxisIndex:[0,1,2],startValue:Math.max(0, dates.length - 100),endValue:Math.max(0, dates.length - 1)},{type:'slider',xAxisIndex:[0,1,2],bottom:4,height:20,startValue:Math.max(0, dates.length - 100),endValue:Math.max(0, dates.length - 1)}],
+      series:[
+        {name:'OHLC',type:'candlestick',xAxisIndex:0,yAxisIndex:0,data:symbolBars.map(bar => [bar.open,bar.close,bar.low,bar.high]),itemStyle:{color:'#16a34a',color0:'#dc2626',borderColor:'#16a34a',borderColor0:'#dc2626'}},
+        {name:'SMA20',type:'line',xAxisIndex:0,yAxisIndex:0,data:values('sma20'),showSymbol:false,sampling:'lttb',lineStyle:{width:1.5,color:'#3b82f6'},connectNulls:false},
+        {name:'SMA120',type:'line',xAxisIndex:0,yAxisIndex:0,data:values('sma120'),showSymbol:false,sampling:'lttb',lineStyle:{width:1.5,color:'#a855f7'},connectNulls:false},
+        {name:'RSI',type:'line',xAxisIndex:1,yAxisIndex:1,data:values('rsi'),showSymbol:false,sampling:'lttb',lineStyle:{color:'#0ea5e9'},markLine:{silent:true,symbol:'none',data:[{yAxis:oversold,name:`과매도 ${oversold}`},{yAxis:overheat,name:`과열 ${overheat}`}],lineStyle:{type:'dashed',color:'#d97706'}}},
+        {name:'거래량',type:'bar',xAxisIndex:2,yAxisIndex:2,data:symbolBars.map(bar => number(bar.volume)),large:symbolBars.length > 1000,itemStyle:{color:'#64748b88'}},
+        ...tradeSeries(symbol, symbolBars)
+      ]
+    });
+  }
+  symbols.forEach(renderSymbol);
+
+  // ---- protocol vs implementation ----
+  if (protocol && Array.isArray(protocol.rows) && protocol.rows.length) {
+    const statusLabel = {implemented:'구현됨', partial:'부분', different:'다르게 구현', missing:'없음', not_applicable:'프로토콜 밖'};
+    document.getElementById('protocol-headline').textContent = protocol.headline || '';
+    const summary = protocol.summary || {};
+    document.getElementById('protocol-kpi').innerHTML = ['implemented','partial','different','missing','not_applicable'].map(key => `<div class="card"><div class="n">${esc(summary[key] ?? protocol.rows.filter(r => r.status === key).length)}</div><div class="l">${esc(statusLabel[key])}</div></div>`).join('');
+    document.getElementById('protocol-body').innerHTML = protocol.rows.map(row => `<tr><td><span class="stage-tag">${esc(row.stage)}</span></td><td>${esc(row.protocol_rule)}<br><span class="conf">${esc(row.protocol_source)}</span></td><td>${esc(row.implementation)}<br><span class="conf">${(row.code_anchors || []).map(a => `<code>${esc(a)}</code>`).join(' ')}</span></td><td><span class="status status-${esc(row.status)}">${esc(statusLabel[row.status] || row.status)}</span></td><td>${(row.parameters || []).map(p => `<code>${esc(p)}</code>`).join('<br>') || '—'}</td><td>${esc(row.observed)}</td><td>${esc(row.gap)}<br><span class="conf">신뢰도 ${esc(row.confidence)}</span></td></tr>`).join('');
+  }
+
+  // ---- KPI strip ----
+  const metricsObj = backtest.metrics && typeof backtest.metrics === 'object' ? backtest.metrics : {};
+  const filled = trades.filter(tr => tr && tr.status === 'filled');
+  const buys = bars.filter(b => b.action === 'buy_ready').length;
+  const pct = v => number(v) === null ? '—' : `${(v * 100).toFixed(2)}%`;
+  const kpis = [
+    {n: pct(metricsObj.total_return), l: '총수익 (전 구간)', m: number(metricsObj.exposure) !== null && metricsObj.exposure < 0.1 ? `노출 ${pct(metricsObj.exposure)} — 거의 현금` : `노출 ${pct(metricsObj.exposure)}`, cls: number(metricsObj.exposure) !== null && metricsObj.exposure < 0.1 ? 'warn' : ''},
+    {n: pct(metricsObj.max_drawdown), l: '최대 낙폭', m: '작을수록 좋음', cls: ''},
+    {n: buys, l: `매수 진입 (평가 ${bars.length.toLocaleString('ko-KR')}봉 중)`, m: bars.length ? `봉 ${(buys / bars.length * 100).toFixed(2)}%` : '', cls: buys < 10 ? 'warn' : ''},
+    {n: filled.length, l: '체결 거래', m: `차단 ${trades.length - filled.length}건`, cls: ''},
+    {n: number(metricsObj.hit_rate) === null ? '—' : pct(metricsObj.hit_rate), l: '적중률', m: filled.length < 30 ? `표본 ${filled.length}건 — 통계로 믿기엔 작음` : `표본 ${filled.length}건`, cls: filled.length < 30 ? 'warn' : ''},
+    {n: number(metricsObj.simplified_sharpe) === null ? '—' : metricsObj.simplified_sharpe.toFixed(2), l: '단순 샤프', m: `변동성 ${pct(metricsObj.volatility)}`, cls: ''},
+  ];
+  document.getElementById('kpi').innerHTML = kpis.map(k => `<div class="card"><div class="n">${esc(k.n)}</div><div class="l">${esc(k.l)}</div><div class="m ${k.cls}">${esc(k.m)}</div></div>`).join('');
+
+  // ---- entry funnel from reason codes (derived from the decision order) ----
+  const codeCount = code => bars.filter(b => Array.isArray(b.reason_codes) && b.reason_codes.includes(code)).length;
+  const evaluated = bars.length;
+  const uptrend = evaluated - codeCount('no_uptrend');
+  const rsiOk = uptrend - codeCount('awaiting_rsi_pullback_cross');
+  const volOk = rsiOk - codeCount('awaiting_volume_confirmation');
+  const ready = buys;
+  const stages = [['평가한 봉', evaluated], ['상승 추세 (close > SMA120)', uptrend], ['RSI 풀백 교차 확인', rsiOk], ['거래량 확인 (≥ min_volume_ratio)', volOk], ['매수 준비 buy_ready', ready]];
+  const funnelChart = echarts.init(document.getElementById('funnel')); charts.push(funnelChart);
+  funnelChart.setOption({animation:false, textStyle:{color:chartText()}, tooltip:{trigger:'item', formatter: p => `${p.name}: ${p.value.toLocaleString('ko-KR')}봉 (${evaluated ? (p.value / evaluated * 100).toFixed(1) : 0}%)`},
+    series:[{type:'funnel', left:'6%', width:'88%', top:10, bottom:10, sort:'none', gap:4, minSize:'2%', label:{show:true, position:'inside', color:'#fff', formatter: p => `${p.name} · ${p.value.toLocaleString('ko-KR')}`}, itemStyle:{borderWidth:0}, data: stages.map(([name, value], i) => ({name, value: Math.max(0, value), itemStyle:{color: ['#64748b','#2563eb','#1d4ed8','#b36b00','#15803d'][i]}}))}]});
+
+  // ---- walk-forward strip ----
+  const wfWindows = Array.isArray(trace.walk_forward) ? trace.walk_forward : [];
+  const wfStrip = document.getElementById('wf-strip');
+  wfStrip.innerHTML = wfWindows.map(item => { const tr = number((item.metrics || {}).total_return); const cls = tr === null ? '' : (tr >= 0 ? 'pos' : 'neg'); const w = item.window || {}; return `<span class="${cls}" title="${esc(w.window_id)} ${esc(text(w.test_start))}→${esc(text(w.test_end))}">${tr === null ? '—' : (tr * 100).toFixed(1) + '%'}</span>`; }).join('');
+  const wfPos = wfWindows.filter(item => number((item.metrics || {}).total_return) !== null && item.metrics.total_return >= 0).length;
+  document.getElementById('wf-note').textContent = wfWindows.length ? `${wfWindows.length}개 창 중 ${wfPos}개가 양(+)의 수익. 각 칸은 한 검증 구간(test span)이며 마우스를 올리면 기간이 보인다.` : '워크포워드 창 없음';
+
+  // ---- improvement list (plain sentences) ----
+  const improvements = [];
+  const topBlock = [['awaiting_rsi_pullback_cross','RSI 풀백 교차 대기','oversold_rsi'],['awaiting_volume_confirmation','거래량 확인 대기','min_volume_ratio'],['no_uptrend','상승 추세 아님','trend_window']];
+  topBlock.forEach(([code, label, knob]) => { const c = codeCount(code); if (evaluated && c / evaluated > 0.2) improvements.push(`${label}이(가) 평가 봉의 ${(c / evaluated * 100).toFixed(0)}%를 막는다 → 손잡이 <code>${knob}</code>`); });
+  if (evaluated && buys / evaluated < 0.005) improvements.push(`매수 진입이 ${buys}회뿐이라(봉의 ${(buys / evaluated * 100).toFixed(2)}%) 전략이 사실상 현금을 들고 있다 — 진입 관문 중 하나를 완화하지 않으면 성과 수치는 현금 수익이다`);
+  if (filled.length && filled.length < 30) improvements.push(`체결 ${filled.length}건은 적중률·샤프를 믿기엔 작은 표본이다 — 종목 수나 기간을 늘려 재실행`);
+  const unusedKnobs = (rules.thresholds || []).filter(x => x && x.usage === 'elsewhere').map(x => x.name);
+  if (unusedKnobs.length) improvements.push(`이 알고리즘이 읽지 않는 임계값 ${unusedKnobs.length}개(${unusedKnobs.join(', ')}) — 표에 있어도 돌려봐야 소용없다`);
+  if (!((trace.acceptance || {}).checks || []).length) improvements.push('수용성 검사가 0건이다 — 합격 기준(최소 수익·최대 낙폭·최소 거래 수)이 비어 있어 "합격/불합격"을 말할 수 없다');
+  const neg = wfWindows.length - wfPos; if (wfWindows.length && neg / wfWindows.length > 0.4) improvements.push(`워크포워드 ${wfWindows.length}창 중 ${neg}창이 음(−)의 수익 — 구간에 따라 성과가 흔들린다`);
+  document.getElementById('improvement-list').innerHTML = improvements.length ? improvements.map(x => `<li>${x}</li>`).join('') : '<li class="muted">자동 신호 없음</li>';
+  if (!symbols.length) document.getElementById('symbol-charts').innerHTML = '<p class="empty">표시할 종목 없음</p>';
+
+  const curve = Array.isArray(backtest.equity_curve) ? backtest.equity_curve : [];
+  let peak = -Infinity;
+  const drawdown = curve.map(point => { const equity = number(point.equity); if (equity === null) return null; peak = Math.max(peak, equity); return peak > 0 ? (equity / peak - 1) * 100 : null; });
+  const performanceChart = echarts.init(document.getElementById('performance-chart')); charts.push(performanceChart);
+  performanceChart.setOption({animation:curve.length <= 500,textStyle:{color:chartText()},tooltip:{trigger:'axis'},legend:{textStyle:{color:chartText()}},grid:[{left:62,right:62,top:42,bottom:44}],xAxis:{type:'category',data:curve.map(point => point.date),axisLabel:{color:chartMuted()}},yAxis:[{type:'value',scale:true,axisLabel:{color:chartMuted()},splitLine:{lineStyle:{color:chartLine()}}},{type:'value',max:0,axisLabel:{formatter:'{value}%',color:chartMuted()},splitLine:{show:false}}],dataZoom:[{type:'inside'},{type:'slider',bottom:4,height:18}],series:[{name:'자산',type:'line',data:curve.map(point => number(point.equity)),showSymbol:false,sampling:'lttb',areaStyle:{opacity:.08}},{name:'낙폭',type:'line',yAxisIndex:1,data:drawdown,showSymbol:false,sampling:'lttb',lineStyle:{color:'#dc2626'},areaStyle:{color:'#dc262633'}}]});
+
+  const metrics = backtest.metrics && typeof backtest.metrics === 'object' ? backtest.metrics : {};
+  document.getElementById('metrics-body').innerHTML = Object.entries(metrics).map(([name,value]) => `<tr><td><code>${esc(name)}</code></td><td>${esc(text(value))}</td></tr>`).join('') || tableEmpty(2,'성과 지표 없음');
+  const windows = Array.isArray(trace.walk_forward) ? trace.walk_forward : [];
+  document.getElementById('walk-forward-body').innerHTML = windows.map(item => { const window = item.window || {}; const checks = ((item.acceptance || {}).checks || []); return `<tr><td>${esc(window.window_id)}</td><td>${esc(text(window.train_start))} → ${esc(text(window.train_end))}</td><td>${esc(text(window.test_start))} → ${esc(text(window.test_end))}</td><td>${esc(text(item.metrics || {}))}</td><td>${esc(text(checks))}</td></tr>`; }).join('') || tableEmpty(5,'워크포워드 창 없음');
+  document.getElementById('trades-body').innerHTML = trades.map(trade => `<tr><td>${esc(trade.symbol)}</td><td>${esc(trade.side)}</td><td>${esc(trade.status)}</td><td>${esc(text(trade.signal_date))} → ${esc(text(trade.fill_date))}</td><td>${esc(text(trade.signal_price))} / ${esc(text(trade.limit_price))} / ${esc(text(trade.fill_price))}</td><td>${esc(text(trade.quantity))} / ${esc(text(trade.notional))}</td><td>${esc(text(trade.reason))}</td></tr>`).join('') || tableEmpty(7,'거래 없음');
+
+  const counts = new Map(); bars.forEach(bar => (Array.isArray(bar.reason_codes) ? bar.reason_codes : []).forEach(code => counts.set(String(code), (counts.get(String(code)) || 0) + 1)));
+  stubbed.forEach(code => { if (!counts.has(String(code))) counts.set(String(code), 0); });
+  const reasonEntries = [...counts.entries()].sort((a,b) => b[1] - a[1]);
+  const reasonChart = echarts.init(document.getElementById('reason-chart')); charts.push(reasonChart);
+  reasonChart.setOption({animation:reasonEntries.length < 30,textStyle:{color:chartText()},tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},grid:{left:160,right:24,top:16,bottom:30},xAxis:{type:'value',minInterval:1,axisLabel:{color:chartMuted()},splitLine:{lineStyle:{color:chartLine()}}},yAxis:{type:'category',inverse:true,data:reasonEntries.map(([code]) => stubbed.includes(code) ? `${code} (백테스트 미발동 게이트)` : code),axisLabel:{color:chartMuted(),width:150,overflow:'truncate'}},series:[{type:'bar',data:reasonEntries.map(([code,count]) => ({value:count,itemStyle:{color:stubbed.includes(code) ? '#94a3b8' : '#3b82f6'}}))}]});
+  const blockedCount = trades.filter(trade => trade && trade.status === 'blocked').length;
+  document.getElementById('blocked-share').textContent = trades.length ? `${(blockedCount / trades.length * 100).toFixed(1)}%` : '—';
+  document.getElementById('blocked-detail').textContent = `${blockedCount} / ${trades.length}건`;
+  const failed = [];
+  const topChecks = ((trace.acceptance || {}).checks || []); topChecks.forEach(check => { if (check && check.passed === false) failed.push(`전체 · ${check.name}`); });
+  windows.forEach(item => ((item.acceptance || {}).checks || []).forEach(check => { if (check && check.passed === false) failed.push(`${(item.window || {}).window_id || '창'} · ${check.name}`); }));
+  document.getElementById('failed-checks').innerHTML = failed.length ? failed.map(item => `<li>${esc(item)}</li>`).join('') : '<li class="muted">기록된 실패 없음</li>';
+
+  const exits = trades.filter(trade => {
+    if (!trade || trade.status !== 'filled' || trade.side !== 'sell') return false;
+    const symbolBars = bars.filter(bar => bar && bar.symbol === trade.symbol);
+    return markerKind(trade, symbolBars) === 'sell';
+  });
+  const enoughExits = exits.length >= 10;
+  document.getElementById('exit-sample-note').textContent = enoughExits ? `${exits.length}건의 청산 표본을 표시합니다.` : `청산 표본이 ${exits.length}건으로 10건보다 작아 비율을 표시하지 않습니다.`;
+  const horizonValue = (trade, horizon) => {
+    if (!enoughExits) return '—';
+    const symbolBars = bars.filter(bar => bar && bar.symbol === trade.symbol); const index = symbolBars.findIndex(bar => bar.date === trade.fill_date); const base = number(trade.fill_price); const future = index >= 0 ? number((symbolBars[index + horizon] || {}).close) : null;
+    return base !== null && base !== 0 && future !== null ? `${((future / base - 1) * 100).toFixed(2)}%` : '—';
+  };
+  document.getElementById('exit-analysis-body').innerHTML = exits.map(trade => `<tr><td>${esc(trade.symbol)}</td><td>${esc(text(trade.fill_date))}</td><td>${esc(text(trade.fill_price))}</td><td>${horizonValue(trade,5)}</td><td>${horizonValue(trade,10)}</td><td>${horizonValue(trade,20)}</td></tr>`).join('') || tableEmpty(6,'청산 거래 없음');
+
+  let resizeFrame = 0;
+  addEventListener('resize', () => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(() => charts.forEach(chart => chart.resize())); }, {passive:true});
+})();
+</script>
+<!-- ARTIFACT_BODY_END -->
+</body>
+</html>
