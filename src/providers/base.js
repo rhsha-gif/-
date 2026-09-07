@@ -33,6 +33,10 @@ export function buildTaskPrompt({ task, route, capabilities = {}, receiptPath })
     `- Skills: ${capabilityIds(capabilities.skills).join(', ') || 'none'}\n` +
     `- Plugins: ${capabilityIds(capabilities.plugins).join(', ') || 'none'}\n` +
     `- Hooks: ${capabilityIds(capabilities.hooks).join(', ') || 'none'}\n\n` +
+    `Selected provider capability locations (metadata only):\n${bulletList(
+      [...(capabilities.skills ?? []), ...(capabilities.plugins ?? [])]
+        .filter(entry => entry.path).map(entry => `${entry.id}: ${JSON.stringify(entry.path)}`)
+    )}\n\n` +
     `Before substantive work, invoke each listed skill through the provider's native skill mechanism. Use only listed plugins when their tools are needed. Listed hooks are pre-installed provider lifecycle policies; the wrapper exports their exact IDs through AORCH_SELECTED_HOOKS but does not hot-load arbitrary hooks. If a required capability is unavailable or inactive, return blocked rather than silently replacing it.\n\n` +
     `## Verification\n${bulletList(task.verificationCommands)}\n\n` +
     `## Evidence contract\n` +

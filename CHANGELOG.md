@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Host parity and Astra
+
+- Added `codex-astra-deep` / `gpt-6-astra` as a high-only challenger with copied Sol quality priors and provisional resource indices, not measurements or claimed savings. Appended Astra/high to the OpenAI ladder; preserved old profiles, explicit pins, provider limits and critical challenger restrictions, including forced escalation.
+- Prefer a surviving stable candidate only on exact quality/token/latency equality, retaining normal challenger candidacy and explicit pins. Ineligible escalation rungs preserve structured prior-attempt evidence.
+- Both native spawn hooks now provide advisory context only, handle Claude and Codex input shapes, pin classification to the host provider, preserve inheritance/presets/user overrides, and never deny, retry or rewrite calls. Installation generates quoted absolute Node commands (including Windows), migrates only owned legacy handlers inside mixed groups, preserves custom config/user hooks and remains idempotent.
+- Shared workflow and recipes now install as `.aorch/workflow.md`; host skills describe equal leads, context-sharing native analysis/review, isolated low/standard native writes, sequential CLI high/critical/cross-provider work, lead diff/test verification and no recursive workers or fake native observations. Removed Claude-only API instructions from Codex skills.
+- Inventory discovers `.codex/skills` and uses `codex plugin list --json` for active user installations, resolving exact cache versions when temporary source paths disappear. Explicit active metadata remains a fallback when the listing is unavailable. Exact IDs/provider paths are preserved; disabled, malformed and cache-only activation claims are excluded without directly reading host config/auth files.
+- Claude activation comes from `claude plugin list --json`, including registry records without activation flags. Provider CLI probes run concurrently under bounded timeouts; classification performs no live discovery.
+- Install managed Claude hooks into existing local settings, migrating only owned handlers from shared settings while preserving user hooks and the shared-settings default for existing projects.
+- Recognize only the generated Node command structure for this project's managed hook paths, so Node-path changes and Windows path casing do not duplicate handlers. Preserve custom wrappers. Generated hook configuration is machine-local and requires reinstall after relocation.
+- Focused regressions cover Astra routing/CLI flags, advisory hooks, Windows Korean/space paths, mixed-hook migration, activation/deduplication and downstream provider path selection. Hooks and fixtures do not constitute live model measurements.
+
 ### Changed
 
 - **목적함수 개정**: "시간 + 구독 한도 절약" → **"사용자 개입 최소화 + 구독 한도 절약"**(품질 바닥선 유지). 벽시계 시간이 늘더라도 사람이 다시 손대는 횟수가 줄면 이득으로 친다. 귀결로 다운시프트의 기준이 "바닥선을 넘는 가장 싼 모델"에서 **"한 번에 검증을 통과할 모델"**이 됐고, `config`의 `quality.<kind>`는 `qualitySemantics` 필드로 그 의미(1회 통과 확률)를 명시한다.

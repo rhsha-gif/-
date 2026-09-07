@@ -1,6 +1,6 @@
 # Adaptive Orchestrator
 
-> **리빌드 릴리스** — 개인용 두 구독(Claude Code + Codex CLI)을 위한 **다운시프트 판단 층**입니다. 목적함수는 **사용자 개입 최소화**와 구독 한도 절약이고, 품질 바닥선(`minimumQuality`)이 하한을 지킵니다. 벽시계 시간이 다소 늘더라도 사람이 다시 손대는 횟수가 줄면 이득으로 칩니다 — 그래서 다운시프트의 기준은 "바닥선을 넘는 가장 싼 모델"이 아니라 "한 번에 검증을 통과할 모델"입니다. 프루닝(판단 코어 릴리스)으로 걷어낸 기반 위에 다운시프트 실효화, verify 게이트 + escalation, 서브에이전트 등급 강제 훅, provider limits + 크로스 fallback을 증축했습니다. 내역은 [`CHANGELOG.md`](CHANGELOG.md)를 보세요.
+> **리빌드 릴리스** — 개인용 두 구독(Claude Code + Codex CLI)을 위한 **다운시프트 판단 층**입니다. 목적함수는 **사용자 개입 최소화**와 구독 한도 절약이고, 품질 바닥선(`minimumQuality`)이 하한을 지킵니다. 벽시계 시간이 다소 늘더라도 사람이 다시 손대는 횟수가 줄면 이득으로 칩니다 — 그래서 다운시프트의 기준은 "바닥선을 넘는 가장 싼 모델"이 아니라 "한 번에 검증을 통과할 모델"입니다. 프루닝(판단 코어 릴리스)으로 걷어낸 기반 위에 다운시프트 실효화, verify 게이트 + escalation, 서브에이전트 경로 추천 훅, provider limits + 크로스 fallback을 증축했습니다. 내역은 [`CHANGELOG.md`](CHANGELOG.md)를 보세요.
 
 Adaptive Orchestrator는 Claude Code 또는 Codex CLI 아래에서 동작하는 소형 라우팅 런타임입니다. 분해 **문장을 지어내는 것은 호스트 모델(리드)의 네이티브 능력**이지만, 그 결과의 **형식은 aorch가 스키마로 강제하고 검증하며 실행까지 책임집니다**. 분해기를 따로 짓지 않고 리드의 분해에 올라타되, "성실히 따라주기"에 의존하지는 않는다는 뜻입니다. aorch는 계획의 각 작업에 대해 다음 조합을 판단하고 강제합니다.
 
@@ -19,11 +19,11 @@ provider
 사용자 프롬프트
 → 얇은 UserPromptSubmit 정책 게이트
 → adaptive-orchestrate root skill
-   └─ 리드가 분해해 계획 파일 하나로 쓴다 (aorch decompose --print-schema)
+   └─ 리드가 전체 단계/실행 경로와 CLI 부분 계획 하나를 쓴다 (aorch decompose --print-schema)
 → 계획 검증                                (aorch decompose --plan)
    ├─ agentRole 필수, role은 손으로 못 쓴다(파생됨)
    └─ decomposed:false면 작업 1개 — 분해 안 하는 것도 정상 결과
-→ 계획 전체 실행                              (aorch dispatch --plan)
+→ CLI 부분 순차 실행                              (aorch dispatch --plan)
    ├─ 작업마다 등급 판정 + 역할 에이전트 배정(worker/reviewer/fixer)
    ├─ receipt.filesChanged ↔ 실제 Git 변경·scope·HEAD 대조
    ├─ verificationCommands 실제 실행, 실패 시 escalation 사다리 상향
@@ -32,9 +32,24 @@ provider
 → 호스트 모델이 evidence와 실제 diff의 의미를 검토
 → 결과 통합
 
-(서브에이전트를 리드가 직접 띄우는 경로는 그대로 — PreToolUse 훅이 aorch classify로 등급을 강제한다)
+(native 분석/리뷰·격리된 low/standard 쓰기 → 리드가 실제 diff/test 검증; PreToolUse는 추천만 한다)
 ```
 
+## 호스트 동등성과 Astra
+
+Claude와 Codex는 동등한 리드이며 최초 요청 수신자가 작업이 끝날 때까지 리드를 유지합니다. 모든 실질 요청은 aorch 절차를 거치며, 단일 작업 계획도 정상입니다. 공통 절차·레시피는 `integrations/shared/workflow.md`에서 설치된 `.aorch/workflow.md`로 전달하고, 각 호스트 스킬은 이를 먼저 읽도록 지시하며 핵심 안전 규칙과 native 도구·모델 상속 차이를 설명합니다. native 에이전트는 컨텍스트를 공유하는 분석/리뷰와 경로가 겹치지 않는 격리된 low/standard 쓰기에 사용합니다. high/critical 쓰기 및 교차 공급자 호출은 기존 순차 CLI dispatch를 사용합니다. 리드는 전체 단계와 실행 경로, CLI 부분에 대한 기존 형식 계획 하나를 유지합니다. 재귀 워커는 금지합니다.
+
+리드는 native 결과의 실제 diff와 새로운 테스트 결과를 직접 확인합니다. native 결과를 자동 change-guard/verify 관측으로 기록하지 않습니다. 훅은 모든 실행 경로를 강제하지 않으며, CLI의 격리·change guard·검증을 대신하지 않습니다.
+
+`codex-astra-deep`은 `gpt-6-astra`의 별도 challenger입니다. 품질은 Sol의 prior를 복사했으며 Astra 실측이 아닙니다. tokenIndex/latencyIndex와 effort 배수도 임시 재사용값(provisional)이며 절약을 측정했다는 뜻이 아닙니다. 초기 effort는 `high`만 등록했습니다. 호스트의 xhigh/max/ultra 지원을 CLI/API와 같은 것으로 가정하지 않습니다. 특정 Astra 작업은 `allowedProfileIds: ["codex-astra-deep"]`로 핀합니다. 기존 프로필·critical challenger 제한·공급자 한도는 유지되며 강제 에스컬레이션에서도 핀과 critical 제한을 검사합니다.
+
+Astra는 일반 후보에서도 평가됩니다. 다만 최종 후보의 보수적 품질 추정치·tokenIndex·latencyIndex가 모두 정확히 같은 경우에는 stable 후보를 우선합니다. 복사한 prior와 이름 순서만으로 기본 모델이 바뀌지 않게 하며, 명시적 Astra 핀이나 차이가 나는 관측값을 무시하지 않습니다. 에스컬레이션에서 안전 조건을 충족하지 못하는 단계는 건너뛰고 기존 시도의 검증 근거를 유지합니다.
+
+인벤토리는 프로젝트/사용자의 `.agents/skills`와 `.codex/skills`를 모두 읽습니다. Codex 사용자 플러그인은 `codex plugin list --json`의 설치·활성 상태를 우선하며, 목록의 정확한 marketplace/package/version에 해당하는 경로만 사용합니다. 사라진 임시 설치 경로는 이름이 일치하는 해당 버전의 캐시로 보완합니다. CLI 목록을 읽을 수 없을 때만 기존의 명시적 활성 설치 메타데이터를 사용합니다. 캐시 파일이나 원격 ID의 존재만으로 활성 상태를 추정하지 않으며 disabled·잘못된 메타데이터는 제외합니다. 설정·인증 파일을 직접 읽지 않습니다. 정확한 plugin ID와 공급자별 경로(`providerPaths`)를 보존하며 선택된 공급자의 경로만 워커에 전달합니다.
+
+Claude 플러그인도 `claude plugin list --json`의 활성 상태와 설치 경로를 우선합니다. 일반적인 Claude 설치 레지스트리에 활성 플래그가 없다는 이유로 설치 자체를 활성 근거로 바꾸지 않습니다. 양쪽 CLI 조회는 각각 5초 제한으로 병렬 실행하며 `classify`에서는 수행하지 않습니다. 인벤토리는 설치·활성 메타데이터를 보여주며 플러그인의 도구 실행 성공을 보증하지 않습니다.
+
+공식 근거: [Codex hooks](https://learn.chatgpt.com/docs/hooks), [Codex subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents). 실제 호스트의 훅 신뢰/활성 상태는 별도 경계이며 단위 테스트는 라이브 모델 실행이나 절감량 측정을 대신하지 않습니다.
 ## 제작 우선순위와 런타임 정책
 
 TRIP, LazyCodex, autoresearch, SyMerge 등 참고 자료를 선별해 이 소스를 제작할 때의 우선순위는 다음과 같습니다.
@@ -57,7 +72,7 @@ TRIP, LazyCodex, autoresearch, SyMerge 등 참고 자료를 선별해 이 소스
 
 라우터는 모델 점수부터 비교하지 않습니다. 먼저 risk에 따라 허용되는 adapter maturity를 제한하고(experimental adapter는 `experimentalAdapterMaxRisk` 이하 risk에서만), critical 작업에서는 challenger 모델을 후보에서 제외합니다 — reviewer 역할이면서 `criticalMinimumSamples` 이상의 실효 표본을 가진 경우에만 남습니다. 그렇게 좁혀진 후보 안에서 model과 effort를 선택합니다. write isolation은 라우터가 아니라 실행 단계(`aorch exec`)가 강제합니다.
 
-### 다운시프트: classify와 서브에이전트 등급 강제
+### 다운시프트: classify와 서브에이전트 경로 추천
 
 `aorch classify --objective "<한 줄 목표>"`는 목표를 kind/complexity로 분류하고 구체적 route를 반환합니다. 바닥선은 complexity가 결정합니다(`low 0.72 / standard 0.80 / high 0.88`). low/standard는 tokens-first로 다운시프트하고, high(security/architecture/debugging)는 quality-first를 유지합니다 — 고난도가 다운시프트되지 않는 것은 의도된 동작입니다.
 
@@ -72,13 +87,13 @@ TRIP, LazyCodex, autoresearch, SyMerge 등 참고 자료를 선별해 이 소스
 | "Investigate and debug the deadlock" | debugging/high | opus |
 | "Design the auth architecture" | architecture/high | opus |
 
-리드가 서브에이전트를 직접 띄우면 PreToolUse 훅(`subagent-gate.mjs`, matcher `Task|Agent`)이 스폰의 objective를 classify하고 **모델 미지정·과등급 스폰을 정확한 모델 안내와 함께 차단**합니다. 안내대로 재시도하면 통과하므로 1회 수렴합니다. 이 훅은 비용 최적화이지 안전장치가 아니라서 모든 실패 경로가 fail-open이며, `AORCH_NO_ENFORCE=1`이 탈출구입니다.
+Claude Task/Agent(`prompt`/`description`)와 Codex spawn_agent(`message`/`agent_type`, Agent 별칭)의 PreToolUse 훅은 각각 `--providers anthropic` / `--providers openai`로 classify하고 `additionalContext`로 **추천만** 전달합니다. 모델 미지정·고비용 모델을 거부하거나 재시도시키지 않고 입력도 바꾸지 않습니다. 부모 상속, 프리셋 모델·effort, 명시적 사용자 선택을 보존합니다. worker/verifier는 훅을 건너뛰고 `AORCH_NO_ENFORCE=1`은 추천만 끕니다. CLI 안전 가드는 그대로 적용됩니다.
 
 ### change guard, verify 게이트와 escalation
 
 worker receipt는 완료 증명이 아니라 주장입니다. `aorch exec`는 각 worker 실행 전후의 Git 상태를 비교해 `receipt.filesChanged`와 실제 변경이 일치하는지, 변경이 `allowedScope` 안이고 `forbiddenScope` 밖인지, read-only 작업이 파일을 건드리지 않았는지, `HEAD`가 바뀌지 않았는지 확인합니다. orchestrator가 receipt와 evidence를 쓰는 configured state root는 비교에서 제외합니다. 위반은 더 강한 모델로 복구할 수 없으므로 escalation 없이 즉시 `verification.json` 증거와 함께 사람에게 반환합니다.
 
-task가 `verificationCommands`를 선언하면 **`aorch exec`가 change guard 통과 후 그 명령을 직접 실행**하고, 실패하면 같은 provider의 escalation 사다리(Claude: opus→fable, Codex: sol/high→sol/xhigh)를 실패 증거와 함께 상향합니다. 총 attempt는 3회이며, 소진되면 증거와 함께 사람에게 반환합니다. verify 결과는 quality 1.0/0.2 관측으로 자동 기록되어, 다운시프트된 모델이 반복 실패하면 라우팅이 스스로 상위 모델로 복귀합니다. Git 밖의 read-only 작업은 호환성을 유지하되 change guard가 `not-git-repository`로 기록됩니다.
+task가 `verificationCommands`를 선언하면 **`aorch exec`가 change guard 통과 후 그 명령을 직접 실행**하고, 실패하면 같은 provider의 escalation 사다리(Claude: opus→fable, Codex: sol/high→sol/xhigh→sol/max→astra/high)를 실패 증거와 함께 상향합니다. 기본 총 attempt는 3회이며(사다리 끝까지 도달한다는 보장은 없음), 소진되면 증거와 함께 사람에게 반환합니다. verify 결과는 quality 1.0/0.2 관측으로 자동 기록되어, 다운시프트된 모델이 반복 실패하면 라우팅이 스스로 상위 모델로 복귀합니다. Git 밖의 read-only 작업은 호환성을 유지하되 change guard가 `not-git-repository`로 기록됩니다.
 
 ### provider limits와 크로스 fallback
 
@@ -116,7 +131,7 @@ worker 종료 뒤에는 change guard가 actual/claimed diff, scope, read-only �
 1. Claude Code와 Codex의 `UserPromptSubmit` thin gate
 2. root `adaptive-orchestrate` skill과 `aorch-downshift` skill
 3. task-specific provider/model/effort router와 `aorch classify` 난이도 분류
-4. PreToolUse 서브에이전트 등급 강제 훅 (fail-open)
+4. PreToolUse 서브에이전트 경로 추천 훅 (fail-open)
 5. verify 게이트 + 같은 provider escalation 사다리 (Fable은 escalation 전용 잠금 프로필)
 6. claimed diff vs actual diff, scope, read-only, HEAD 대조 change guard
 7. provider limits 상태와 rate-limit 크로스 fallback
@@ -202,7 +217,11 @@ project/
    └─ agents/
 ```
 
-기존 `CLAUDE.md`와 `AGENTS.md`는 자동 편집하지 않습니다. 기존 hook도 command 단위로 병합하며 재설치해도 중복 등록하지 않습니다. `.aorch/config.json`은 이미 있으면 덮어쓰지 않습니다(`--force-config`로 강제). Codex project hook은 변경된 hook hash를 사용자가 `/hooks`에서 신뢰해야 실행될 수 있습니다.
+기존 `CLAUDE.md`와 `AGENTS.md`는 자동 편집하지 않습니다. 기존 aorch 소유 hook 명령만 교체하고, 사용자 hook이 섞인 그룹에서는 개별 handler만 이전합니다. 재설치는 중복을 만들지 않습니다. Node 실행 파일과 설치 스크립트의 인용된 절대 경로를 생성하므로 Windows 공백·한글 경로와 하위 작업 디렉터리를 지원합니다. Codex JSON에는 `commandWindows`도 기록합니다(TOML 명칭은 `command_windows`). `.aorch/config.json`은 이미 있으면 덮어쓰지 않습니다(`--force-config`로 강제). Codex project hook은 변경된 hook hash를 사용자가 `/hooks`에서 신뢰해야 실행될 수 있습니다.
+
+`.claude/settings.local.json`이 있으면 Claude 관리 훅은 그 파일에 설치하고, 공유 설정에 있던 aorch 훅만 이전합니다. 공유 설정을 버전 관리하는 프로젝트는 설치 전에 git에서 제외한 로컬 설정 파일(`{"hooks":{}}`)을 준비하면 됩니다. 로컬 설정이 없는 프로젝트는 기존처럼 `.claude/settings.json`을 사용합니다. 설치된 스킬은 해당 설치본의 CLI 절대 경로를 안내하므로 전역 `aorch`가 다른 checkout을 가리켜도 같은 실행본을 사용할 수 있습니다.
+
+생성된 훅 설정은 머신과 설치 경로에 종속됩니다. `commandWindows`는 Windows 실행 형식을 제공합니다. 다른 OS·머신에는 생성한 훅 파일을 복사하지 않고 소스에서 새 로컬 설정을 설치합니다. 설치기는 다른 프로젝트를 가리키는 훅을 자동 삭제하지 않습니다. Windows 경로의 공백·한글은 지원하며 shell 제어문자는 안전하게 직렬화할 수 없으면 설치를 거절합니다. 공유 설정에서 관리 훅을 이전하면 해당 파일도 설치 결과 목록에 표시됩니다. 공유·로컬 설정은 호스트에서 함께 적용되므로 어느 쪽이든 훅 구조가 잘못됐으면 부분 설치 대신 오류를 반환합니다.
 
 설치 확인:
 

@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { executeWithVerification } from '../src/run-loop.js';
+import { forceRoute } from '../src/router.js';
+import { loadConfig, DEFAULT_CONFIG_PATH } from '../src/config.js';
 
 function baseTask(overrides = {}) {
   return {
@@ -21,6 +23,12 @@ function baseTask(overrides = {}) {
 
 function baseConfig(overrides = {}) {
   return {
+    providers: [{ id: 'anthropic', adapterMaturity: 'stable' }],
+    models: [
+      { id: 'claude-sonnet-general', model: 'sonnet', efforts: [{ name: 'medium' }] },
+      { id: 'claude-opus-deep', model: 'opus', efforts: [{ name: 'high' }] },
+      { id: 'claude-fable-apex', model: 'fable', efforts: [{ name: 'high' }] }
+    ].map(profile => ({ ...profile, provider: 'anthropic', maturity: 'stable' })),
     escalation: {
       maxAttempts: 3,
       ladders: {
@@ -514,6 +522,187 @@ test('a ladder exhausted by task pins returns verification evidence to the human
       assert.equal(calls.length, 1);
     });
   }
+});
+
+test('critical escalation skips packaged Astra and runs the next eligible route', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const config = await loadConfig({ configPath: DEFAULT_CONFIG_PATH });
+  config.escalation = { maxAttempts: 2, ladders: { openai: [
+    { profileId: 'codex-astra-deep', effort: 'high' },
+    { profileId: 'codex-sol-deep', effort: 'high' }
+  ] } };
+  const executor = stubExecutor(dir, calls, { initialRoute: {
+    provider: 'openai', profileId: 'codex-terra-general', model: 'gpt-5.6-terra', effort: 'medium'
+  } });
+  const result = await executeLoop({
+    task: baseTask({ risk: 'critical', complexity: 'high' }),
+    config,
+    cwd: dir,
+    executeTaskImpl: async (options) => {
+      const route = options.forcedRoute && forceRoute({ catalog: config, task: options.task, ...options.forcedRoute });
+      const execution = await executor(options);
+      return route ? { ...execution, route } : execution;
+    },
+    runVerificationImpl: stubVerifier([false, true])
+  });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].forcedRoute, { profileId: 'codex-sol-deep', effort: 'high' });
+  assert.equal(result.route.profileId, 'codex-sol-deep');
+  assert.equal(result.attempts.length, 2);
+  assert.equal(result.verification.passed, true);
+});
+
+test('extra ladder fields cannot override eligibility inputs or discard prior verification evidence', async (t) => {
+  const observations = Array.from({ length: 8 }, () => ({
+    provider: 'anthropic', model: 'opus', effort: 'high', taskKind: 'implementation',
+    quality: 1, reviewed: true, recordedAt: new Date().toISOString()
+  }));
+  const cases = [
+    { task: { risk: 'low' } },
+    { catalog: baseConfig() },
+    { observations },
+    { now: 'invalid-date' }
+  ];
+  for (const extra of cases) {
+    await t.test(Object.keys(extra)[0], async (t) => {
+      const dir = await temporaryDirectory(t);
+      const calls = [];
+      const config = baseConfig();
+      config.models.find(profile => profile.id === 'claude-opus-deep').maturity = 'challenger';
+      config.escalation.ladders.anthropic = [
+        { profileId: 'claude-opus-deep', effort: 'high', ...extra }
+      ];
+      const executor = stubExecutor(dir, calls);
+      let failure;
+      await assert.rejects(executeLoop({
+        task: baseTask({ risk: 'critical', complexity: 'high', role: 'reviewer' }),
+        config, cwd: dir,
+        executeTaskImpl: async (options) => {
+          // Match executeTask's real forced-route input boundary.
+          if (options.forcedRoute) forceRoute({
+            catalog: config, task: options.task, observations: options.observations,
+            profileId: options.forcedRoute.profileId, effort: options.forcedRoute.effort
+          });
+          return executor(options);
+        },
+        runVerificationImpl: stubVerifier([false])
+      }), error => {
+        failure = error;
+        assert.match(error.message, /Verification failed after 1 attempt\(s\); escalation ladder exhausted/);
+        assert.equal(error.attempts.length, 1);
+        assert.equal(error.attempts[0].passed, false);
+        assert.equal(typeof error.runDir, 'string');
+        return true;
+      });
+      assert.equal(calls.length, 1);
+      const evidencePath = path.join(failure.runDir, 'verification.json');
+      assert.ok(failure.message.includes(evidencePath));
+      const evidence = JSON.parse(await readFile(evidencePath, 'utf8'));
+      assert.equal(evidence.passed, false);
+      assert.equal(evidence.results[0].stderrTail, 'assertion blew up');
+      assert.deepEqual(evidence.route, failure.attempts[0].route);
+    });
+  }
+});
+
+test('critical reviewer escalation preserves observations that make a challenger eligible', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const config = baseConfig();
+  config.models.find(profile => profile.id === 'claude-opus-deep').maturity = 'challenger';
+  const observations = Array.from({ length: 8 }, () => ({
+    provider: 'anthropic', model: 'opus', effort: 'high', taskKind: 'implementation',
+    quality: 1, reviewed: true, recordedAt: new Date().toISOString()
+  }));
+  const executor = stubExecutor(dir, calls);
+  const result = await executeLoop({
+    task: baseTask({ risk: 'critical', complexity: 'high', role: 'reviewer' }),
+    config, observations, cwd: dir,
+    executeTaskImpl: async (options) => {
+      if (options.forcedRoute) forceRoute({ catalog: config, task: options.task, observations: options.observations, ...options.forcedRoute });
+      return executor(options);
+    },
+    runVerificationImpl: stubVerifier([false, true])
+  });
+  assert.deepEqual(calls[1].forcedRoute, { profileId: 'claude-opus-deep', effort: 'high' });
+  assert.equal(result.attempts.length, 2);
+});
+
+test('ineligible escalation ladders retain attempts, run directory, and prior verification evidence', async (t) => {
+  const cases = [
+    { name: 'critical challenger', invalidate: config => {
+      for (const profile of config.models) profile.maturity = 'challenger';
+    } },
+    { name: 'disabled profiles', invalidate: config => {
+      for (const profile of config.models) profile.enabled = false;
+    } },
+    { name: 'disabled provider', invalidate: config => { config.providers[0].enabled = false; } },
+    { name: 'experimental adapter at critical risk', invalidate: config => {
+      config.providers[0].adapterMaturity = 'experimental';
+    } }
+  ];
+  for (const { name, invalidate } of cases) {
+    await t.test(name, async (t) => {
+      const dir = await temporaryDirectory(t);
+      const calls = [];
+      const config = baseConfig();
+      const executor = stubExecutor(dir, calls);
+      const verifier = stubVerifier([false]);
+      let failure;
+      await assert.rejects(executeLoop({
+        task: baseTask({ risk: 'critical', complexity: 'high' }),
+        config,
+        cwd: dir,
+        executeTaskImpl: async (options) => {
+          if (options.forcedRoute) forceRoute({ catalog: config, task: options.task, ...options.forcedRoute });
+          return executor(options);
+        },
+        runVerificationImpl: async (options) => {
+          const result = await verifier(options);
+          invalidate(config);
+          return result;
+        }
+      }), error => {
+        failure = error;
+        assert.match(error.message, /Verification failed after 1 attempt\(s\); escalation ladder exhausted/);
+        assert.match(error.message, /Last failing command: node --test \(exit 1\)/);
+        assert.equal(error.attempts.length, 1);
+        assert.equal(error.attempts[0].passed, false);
+        assert.equal(typeof error.runDir, 'string');
+        return true;
+      });
+      assert.equal(calls.length, 1, 'ineligible rungs must not execute or consume attempts');
+      const evidencePath = path.join(failure.runDir, 'verification.json');
+      assert.ok(failure.message.includes(evidencePath));
+      const evidence = JSON.parse(await readFile(evidencePath, 'utf8'));
+      assert.equal(evidence.passed, false);
+      assert.equal(evidence.results[0].stderrTail, 'assertion blew up');
+      assert.deepEqual(evidence.route, failure.attempts[0].route);
+    });
+  }
+});
+
+test('unrelated executor and routing errors still propagate unchanged', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const executor = stubExecutor(dir, calls);
+  const failure = new Error('unrelated worker failure');
+  await assert.rejects(executeLoop({
+    task: baseTask(), config: baseConfig(), cwd: dir,
+    executeTaskImpl: async (options) => {
+      if (options.forcedRoute) throw failure;
+      return executor(options);
+    },
+    runVerificationImpl: stubVerifier([false])
+  }), error => error === failure);
+
+  const config = baseConfig({ routing: { observationHalfLifeDays: -1 } });
+  config.models.find(profile => profile.id === 'claude-opus-deep').maturity = 'challenger';
+  await assert.rejects(executeLoop({
+    task: baseTask({ risk: 'critical', complexity: 'high', role: 'reviewer' }), config, cwd: dir,
+    executeTaskImpl: stubExecutor(dir, []), runVerificationImpl: stubVerifier([false])
+  }), /halfLifeDays must be positive/);
 });
 
 test('an empty ladder fails after the first attempt instead of retrying blindly', async (t) => {

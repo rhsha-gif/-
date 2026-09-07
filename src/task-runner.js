@@ -73,7 +73,7 @@ export async function executeTask({
 }) {
   task = validateTask(task, { forExecution: true });
   // Forced routes (escalation) skip the quota read entirely — the ladder
-  // bypasses every eligibility signal, so probing would be pure latency.
+  // bypasses soft quota scoring; forceRoute still checks hard constraints.
   // A dry run reads the cache without refreshing it: previewing a command
   // must stay fast and side-effect free.
   const quota = forcedRoute
@@ -85,7 +85,7 @@ export async function executeTask({
       cwd
     });
   const route = forcedRoute
-    ? forceRoute({ catalog: config, task, profileId: forcedRoute.profileId, effort: forcedRoute.effort })
+    ? forceRoute({ catalog: config, task, observations, profileId: forcedRoute.profileId, effort: forcedRoute.effort })
     : selectRoute({ task, catalog: config, observations, quota });
   const capabilities = selectCapabilities({
     requestedIds: task.capabilityIds ?? [],

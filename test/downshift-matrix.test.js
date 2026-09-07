@@ -97,8 +97,8 @@ test('debug wording is not misclassified as research by the new low-tier rules',
 // Cross-provider split: when a worker-delegation task leaves both providers in
 // play (allowedProviders unset by the host → probed here as anthropic+openai),
 // cheap/standard work stays on claude-haiku and deep architecture/security work
-// goes to the cost-effective deep model (codex-sol). Pins that the two
-// subscriptions are actually used and that the catalog economics don't drift.
+// goes to stable Sol. Equal-prior challenger Astra remains eligible but does
+// not replace a stable route solely through the identity tie-break.
 const CROSS_MATRIX = [
   { objective: 'Extract the atomic write helper into a shared module', provider: 'anthropic', model: 'haiku' },
   { objective: 'Fix the typo in the README', provider: 'anthropic', model: 'haiku' },
@@ -106,7 +106,7 @@ const CROSS_MATRIX = [
   { objective: 'Review the auth token handling for vulnerabilities', provider: 'openai', model: 'gpt-5.6-sol' }
 ];
 
-test('cross-provider routing: cheap stays on claude-haiku, deep goes to codex-sol', async () => {
+test('cross-provider routing: cheap stays on claude-haiku, deep goes to the OpenAI deep tier', async () => {
   const catalog = await loadPackagedCatalog();
   for (const expected of CROSS_MATRIX) {
     const { route } = routeObjective(catalog, expected.objective, ['anthropic', 'openai']);
@@ -117,7 +117,7 @@ test('cross-provider routing: cheap stays on claude-haiku, deep goes to codex-so
 
 // Deep-tier domain split (Part B): the deep tier is not monopolized by one
 // model. Reasoning-heavy debugging goes to claude-opus; systematic
-// architecture/security stays on the cheaper-yet-equal codex-sol. These are
+// architecture/security stays on Sol at cold start. These are
 // deliberate priors — the verify-gate observations refine actual quality over
 // time. Only debugging was moved (the one classifier-reachable reasoning kind);
 // risk-analysis is not emitted by the classifier, so it is not tuned here.
@@ -127,7 +127,7 @@ const DOMAIN_MATRIX = [
   { objective: 'Review the auth token handling for vulnerabilities', provider: 'openai', model: 'gpt-5.6-sol' }
 ];
 
-test('deep-tier domain split: debugging → claude-opus, architecture/security → codex-sol', async () => {
+test('deep-tier domain split: debugging → claude-opus, architecture/security → OpenAI deep tier', async () => {
   const catalog = await loadPackagedCatalog();
   for (const expected of DOMAIN_MATRIX) {
     const { classification, route } = routeObjective(catalog, expected.objective, ['anthropic', 'openai']);
@@ -159,11 +159,13 @@ test('writing kind: drafting lands deep, editing lands mid, low has no route', a
   const catalog = await loadPackagedCatalog();
 
   const drafting = selectRoute({ task: writingTask('high'), catalog, observations: [] });
-  assert.ok(['opus', 'gpt-5.6-sol', 'fable'].includes(drafting.model),
+  assert.ok(['opus', 'gpt-5.6-sol', 'gpt-6-astra', 'fable'].includes(drafting.model),
     `writing/high must land on a deep model, got ${drafting.model}`);
 
+  // This is critical complexity at standard risk; critical-risk challenger
+  // exclusion is separately exercised by astra-parity.test.js.
   const critical = selectRoute({ task: writingTask('critical'), catalog, observations: [] });
-  assert.ok(['opus', 'gpt-5.6-sol', 'fable'].includes(critical.model),
+  assert.ok(['opus', 'gpt-5.6-sol', 'gpt-6-astra', 'fable'].includes(critical.model),
     `writing/critical must land on a deep model, got ${critical.model}`);
 
   const editing = selectRoute({ task: writingTask('standard'), catalog, observations: [] });

@@ -30,88 +30,49 @@ function run(toolInput, { env = {}, toolName = 'Agent', raw, cwd = cleanCwd } = 
   });
 }
 
-function denyReason(result) {
+function advisory(result, provider) {
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.hookSpecificOutput.hookEventName, 'PreToolUse');
-  assert.equal(output.hookSpecificOutput.permissionDecision, 'deny');
-  return output.hookSpecificOutput.permissionDecisionReason;
+  assert.deepEqual(Object.keys(output), ["hookSpecificOutput"]);
+  assert.deepEqual(Object.keys(output.hookSpecificOutput).sort(), ["additionalContext", "hookEventName"]);
+  assert.equal(output.hookSpecificOutput.hookEventName, "PreToolUse");
+  const context = output.hookSpecificOutput.additionalContext;
+  assert.match(context, new RegExp(provider + " only"));
+  assert.ok(context.includes('parent inheritance, preset model/effort and explicit user overrides'));
+  assert.match(context, /Do not retry or rewrite/);
+  return context;
 }
 
-function assertAllowed(result) {
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), '');
+for (const toolName of ["Task", "Agent", "spawn_agent"]) {
+  for (const model of [undefined, "", "inherit", "opus", "gpt-6-astra", "my-custom-model"]) {
+    test(toolName + " remains advisory with model " + model, () => {
+      const codex = toolName === "spawn_agent";
+      const input = codex
+        ? { message: "Write unit tests for config parser edge cases.", agent_type: "aorch-scout", model }
+        : { prompt: "Write unit tests for config parser edge cases.", description: "Write unit tests", subagent_type: "aorch-scout", model };
+      const original = structuredClone(input);
+      const context = advisory(run(input, { toolName }), codex ? "openai" : "anthropic");
+      assert.match(context, codex ? /optional model gpt-/ : /optional model (haiku|claude-)/);
+      assert.deepEqual(input, original);
+    });
+  }
 }
 
-test('an over-tier subagent spawn is denied with the exact downshifted model', () => {
-  const result = run({
-    description: 'Write unit tests',
-    prompt: 'Write unit tests for the config parser edge cases.',
-    subagent_type: 'general-purpose',
-    model: 'opus'
-  });
-  const reason = denyReason(result);
-  assert.match(reason, /haiku/);
-  assert.match(reason, /AORCH_NO_ENFORCE/);
+test('Codex Agent alias handles message and preset shape', () => {
+  advisory(run({ message: "Implement parser tests", agent_type: "aorch-scout" }), "openai");
 });
 
-test('a spawn already at or below the classified tier is allowed', () => {
-  assertAllowed(run({
-    description: 'Write unit tests',
-    prompt: 'Write unit tests for the config parser edge cases.',
-    model: 'haiku'
-  }));
-  // Below the recommendation is a cheaper choice, never blocked.
-  assertAllowed(run({
-    description: 'Implement the parser',
-    prompt: 'Implement the new config parser module with error handling.',
-    model: 'haiku'
-  }));
+test('worker, verifier and optimization bypasses return no recommendation', () => {
+  for (const key of ["AORCH_WORKER", "AORCH_VERIFIER", "AORCH_NO_ENFORCE"]) {
+    const result = run({ description: "Write tests" }, { env: { [key]: "1" } });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "");
+  }
 });
 
-test('a spawn without an explicit model is denied and told what to set', () => {
-  const reason = denyReason(run({
-    description: 'Write unit tests',
-    prompt: 'Write unit tests for the config parser edge cases.'
-  }));
-  assert.match(reason, /model/i);
-  assert.match(reason, /haiku/);
-});
-
-test('full model identifiers are recognized when ranking tiers', () => {
-  const reason = denyReason(run({
-    description: 'Format the docs',
-    prompt: 'Format this JSON documentation file and fix indentation.',
-    model: 'claude-opus-5'
-  }));
-  assert.match(reason, /haiku/);
-});
-
-test('high-complexity work is not downshifted and its matching spawn passes', () => {
-  assertAllowed(run({
-    description: 'Design auth architecture',
-    prompt: 'Design the authentication architecture and threat model.',
-    model: 'opus'
-  }));
-});
-
-test('escape hatches bypass enforcement entirely', () => {
-  const input = {
-    description: 'Write unit tests',
-    prompt: 'Write unit tests for the config parser edge cases.',
-    model: 'opus'
-  };
-  assertAllowed(run(input, { env: { AORCH_NO_ENFORCE: '1' } }));
-  assertAllowed(run(input, { env: { AORCH_WORKER: '1' } }));
-});
-
-test('the gate fails open on malformed input and unrelated tools', () => {
-  assertAllowed(run(null, { raw: '{not-json' }));
-  assertAllowed(run({ description: 'anything', model: 'opus' }, { toolName: 'Bash' }));
-  // An unrecognized model tier is a user experiment, not a violation.
-  assertAllowed(run({
-    description: 'Write unit tests',
-    prompt: 'Write unit tests for the config parser edge cases.',
-    model: 'my-custom-local-model'
-  }));
+test('malformed input, empty objectives and unrelated tools fail open', () => {
+  for (const result of [run(null, { raw: "{bad" }), run({}), run({}, {toolName: "Bash"}), run(null)]) {
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "");
+  }
 });

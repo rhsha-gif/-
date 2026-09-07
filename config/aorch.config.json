@@ -622,6 +622,59 @@
           ]
         }
       ]
+    },
+    {
+      "id": "codex-astra-deep",
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "enabled": true,
+      "roles": [
+        "planner",
+        "executor",
+        "reviewer"
+      ],
+      "taskKinds": [
+        "architecture",
+        "planning",
+        "implementation",
+        "debugging",
+        "testing",
+        "review",
+        "research",
+        "security",
+        "qa",
+        "risk-analysis",
+        "writing"
+      ],
+      "quality": {
+        "default": 0.94,
+        "architecture": 0.97,
+        "planning": 0.96,
+        "implementation": 0.95,
+        "debugging": 0.95,
+        "testing": 0.94,
+        "review": 0.96,
+        "research": 0.94,
+        "security": 0.97,
+        "qa": 0.94,
+        "risk-analysis": 0.97
+      },
+      "tokenIndex": 1.8,
+      "latencyIndex": 1.4,
+      "maturity": "challenger",
+      "efforts": [
+        {
+          "name": "high",
+          "qualityDelta": 0.025,
+          "tokenMultiplier": 1,
+          "latencyMultiplier": 1,
+          "complexities": [
+            "high",
+            "critical"
+          ]
+        }
+      ],
+      "qualityEvidence": "Sol quality priors, not Astra measurements. Resource indices and effort multipliers reused provisionally; no measured savings."
     }
   ],
   "capabilities": [
@@ -715,6 +768,10 @@
         {
           "profileId": "codex-sol-deep",
           "effort": "max"
+        },
+        {
+          "profileId": "codex-astra-deep",
+          "effort": "high"
         }
       ]
     }

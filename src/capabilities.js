@@ -32,7 +32,13 @@ export function selectCapabilities({
 
     const bucket = TYPE_TO_BUCKET[capability.type];
     if (!bucket) throw new Error(`Unsupported capability type for ${id}: ${capability.type}`);
-    result[bucket].push(capability);
+    if (capability.providerPaths) {
+      const paths = capability.providerPaths[provider] ?? capability.providerPaths['*'] ?? [];
+      if (capability.path && paths.length === 0) throw new Error(`Capability ${id} has no path for provider ${provider}`);
+      result[bucket].push({ ...capability, path: paths[0], paths });
+    } else {
+      result[bucket].push(capability);
+    }
   }
 
   for (const [bucket, entries] of Object.entries(result)) {

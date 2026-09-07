@@ -15,7 +15,7 @@ permission / scope / isolation
 verification / escalation
 ```
 
-시스템의 주된 책임은 **작업별 등급 판정과 그 판정의 강제**다. 더 많은 agent를 만드는 것 자체는 목표가 아니다.
+시스템의 주된 책임은 **작업별 라우팅과 검증 가능한 위임**이다. native 모델 추천은 리드가 판단하며, CLI 위임의 변경 범위와 검증 게이트는 실행기가 검사한다. 더 많은 agent를 만드는 것 자체는 목표가 아니다.
 
 ## 2. 제작 우선순위와 런타임 정책의 분리
 
@@ -50,11 +50,11 @@ Thin UserPromptSubmit gate
   ├─ read-only / development / high-risk 분류
   └─ 최소 정책 context 주입
   ↓
-Host CLI + adaptive-orchestrate skill (리드가 분해 → aorch 스키마로 강제)
+Claude Code / Codex Desktop·CLI + adaptive-orchestrate skill (최초 수신자가 리드 유지)
   ↓
 서브태스크마다: aorch classify → 등급 판정
-  ├─ 리드가 서브에이전트를 직접 띄우면 PreToolUse subagent-gate가 등급 강제
-  └─ 워커 위임이면 task envelope 작성
+  ├─ native 분석·리뷰·격리된 low/standard 수정: 선택적 모델 추천 → 리드 diff·테스트 검증
+  └─ high/critical 수정·다른 provider 호출: 기존 CLI JSON 계획 → 순차 dispatch
   ↓
 aorch exec (run loop)
   ├─ route (limits의 forbiddenProviders 반영)
@@ -68,7 +68,7 @@ aorch exec (run loop)
 Receipt + verification evidence → 리드가 diff 검토 → 통합
 ```
 
-blocking hook은 inventory, route scoring, provider execution을 수행하지 않는다. 이 작업은 root skill과 aorch CLI가 수행한다. 모든 write task는 이미 격리된 환경이 아니라면 독립 worktree에서 실행하며, `aorch exec`가 linked-worktree 여부를 검사한다. low/standard in-place 예외는 명시적 사용자 승인과 `allowInPlaceWrite: true`가 있어야 하며 high/critical write에는 허용하지 않는다.
+UserPromptSubmit hook은 inventory, route scoring, provider execution을 수행하지 않는다. PreToolUse 추천 hook은 `classify`만 호출하며 실시간 플러그인 조회를 기다리지 않는다. CLI write task는 이미 격리된 환경이 아니라면 독립 worktree에서 실행하며, `aorch exec`가 linked-worktree 여부를 검사한다. low/standard in-place 예외는 명시적 사용자 승인과 `allowInPlaceWrite: true`가 있어야 하며 high/critical write에는 허용하지 않는다. native 병렬 수정은 소유 경로가 겹치지 않아야 하며 자동 change guard나 성과 관측을 통과한 것으로 기록하지 않는다.
 
 LLM이 담당하는 부분:
 
@@ -80,7 +80,7 @@ Node.js가 담당하는 부분:
 
 - prompt의 bounded first-pass classification (`gate.mjs`)
 - objective의 난이도·종류 분류 (`difficulty.js`)
-- route candidate 계산과 서브에이전트 등급 강제
+- route candidate 계산과 서브에이전트 모델 추천
 - provider command 생성, process 실행과 timeout
 - Git change guard, verification 명령 실행 게이트와 escalation
 - provider limits 상태와 크로스 fallback
@@ -94,14 +94,14 @@ Node.js가 담당하는 부분:
 
 - 바닥선은 complexity가 결정한다: `low 0.72 / standard 0.80 / high 0.88`.
 - low/standard는 `routingPriorities: [tokens, quality, latency]`로 다운시프트를 켠다. high는 quality-first를 유지한다 — security/architecture가 다운시프트되지 않는 것은 **의도된 동작**이다.
-- 기본 provider는 anthropic이다(Claude Code 서브에이전트의 모델은 Codex 모델일 수 없다). 크로스-provider 호출자는 `--providers`로 개방한다.
+- classify의 기존 기본 provider는 anthropic이다. native hook은 Claude에서 `--providers anthropic`, Codex에서 `--providers openai`를 명시한다. CLI 위임은 작업 제약이 없으면 양쪽 provider를 후보로 둔다.
 - 경계는 `test/downshift-matrix.test.js`가 실제 packaged config로 회귀 고정한다.
 
-### 서브에이전트 등급 강제 (PreToolUse)
+### 서브에이전트 모델 추천 (PreToolUse)
 
-`subagent-gate.mjs`는 리드가 Task/Agent 도구로 서브에이전트를 띄울 때 objective(description + prompt 첫 줄)를 classify하고, 모델 미지정·과등급 스폰을 정확한 모델 안내와 함께 차단한다(deny). 안내대로 재시도한 스폰은 등급 비교를 통과하므로 상태 없이 1회 수렴한다.
+`subagent-gate.mjs`는 Claude Task/Agent의 description·prompt 또는 Codex spawn_agent/Agent의 message로 objective를 만들고, 호스트 provider 안에서 모델·effort를 추천하는 `additionalContext`만 반환한다. 모델 미지정, 부모 상속, 프리셋과 사용자 모델 핀을 존중한다. 모델 비용이나 추천 등급을 이유로 호출을 차단·재시도하거나 입력을 바꾸지 않는다.
 
-이 게이트는 **비용 최적화이지 안전장치가 아니다**. 그래서 모든 실패 경로는 fail-open이다: 잘못된 입력, classify 실패, 미인식 모델은 통과시킨다. `AORCH_NO_ENFORCE=1`이 탈출구다.
+이 hook은 선택을 돕는 조언이며 안전 경계가 아니다. 잘못된 입력이나 classify 실패에서는 추천 없이 통과한다. 기존 `AORCH_NO_ENFORCE=1`은 호환성을 유지하며 추천을 생략한다. 안전 경계는 dispatch의 격리·변경 범위 검사·검증과 리드의 실제 결과 검토다.
 
 ## 5. Risk-first route
 
@@ -210,11 +210,12 @@ worker는 bounded task만 수행하며 재위임하지 않는다. worker receipt
 ### Claude Code
 
 - `UserPromptSubmit`: 3초 제한의 thin classification/policy gate
-- `PreToolUse` (matcher `Task|Agent`): 서브에이전트 스폰 등급 강제 (fail-open, `AORCH_NO_ENFORCE=1` 탈출구)
+- `PreToolUse` (matcher `Task|Agent`): anthropic 내 native 모델 추천 (`additionalContext`, `AORCH_NO_ENFORCE=1`이면 생략)
 
-### Codex CLI
+### Codex Desktop·CLI
 
 - `UserPromptSubmit`: 3초 제한의 thin classification/policy gate
+- `PreToolUse` (matcher `Agent|spawn_agent`): openai 내 native 모델 추천. 설치기는 Windows용 `commandWindows`를 제공한다. 생성된 절대 경로 설정은 해당 머신·설치 위치에만 유효하며, 다른 OS나 checkout에서는 재설치한다.
 
 Stop hook은 없다. Stop 게이트의 전제였던 durable run state는 프루닝에서 삭제된 평면이고, 완료 게이트는 이제 exec의 run loop 안에 산다. worker는 `AORCH_WORKER=1`, verification 명령은 `AORCH_VERIFIER=1`로 root hook을 우회한다.
 

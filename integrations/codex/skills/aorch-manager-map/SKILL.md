@@ -5,7 +5,7 @@ description: 프로젝트를 최종 관리자의 눈으로 보는 지도(어떻�
 
 # 관리자 지도 (manager map)
 
-지도는 렌더러가 아니라 **대조**다. 프로젝트가 이미 갖고 있는 관리자용 문서(현황판·수용 매트릭스·런북·체크리스트)를 코드(라우트·잡·상태 enum·플래그·스텁)와 맞춰 보고, 문서가 덮지 않는 곳과 문서와 코드가 어긋난 곳을 갭으로 드러낸다. 추출 스크립트·모델 파일은 두지 않는다(2026-09-03 포니테일 판정: 수십 개 노드에 파이프라인은 산출물보다 크다). Fable을 핀한 worker 태스크 하나가 아래 절차대로 읽고 곧바로 HTML을 쓴다. 반복 실행이 필요해지면 그때 존재 목록만 스크립트화한다.
+지도는 렌더러가 아니라 **대조**다. 프로젝트가 이미 갖고 있는 관리자용 문서(현황판·수용 매트릭스·런북·체크리스트)를 코드(라우트·잡·상태 enum·플래그·스텁)와 맞춰 보고, 문서가 덮지 않는 곳과 문서와 코드가 어긋난 곳을 갭으로 드러낸다. 추출 스크립트·모델 파일은 두지 않는다(2026-09-03 포니테일 판정: 수십 개 노드에 파이프라인은 산출물보다 크다). 명시한 모델을 핀한 worker 태스크 하나가 아래 절차대로 읽고 곧바로 HTML을 쓴다. 반복 실행이 필요해지면 그때 존재 목록만 스크립트화한다.
 
 ## 0. 입력 확정 (오케스트레이터)
 
@@ -15,7 +15,7 @@ description: 프로젝트를 최종 관리자의 눈으로 보는 지도(어떻�
 
 ## 1. 플랜
 
-`examples/plan-manager-map.json`을 복사해 치환자를 채운다. 태스크 `M1-manager-map`: agentRole `worker`(auditor 프리셋은 Write 금지), kind `writing`, complexity `critical`, `allowedProfileIds: ["claude-fable-apex"]`, verificationCommands는 `node scripts/manager-map-check.mjs <out>`. `--dry-run`으로 anthropic/fable 라우팅을 확인하고 git bash `nohup … &`로 dispatch한다(런북 `aorch-model-upgrade` §4·§6 함정 그대로).
+`examples/plan-manager-map.json`을 복사해 치환자를 채운다. 태스크 `M1-manager-map`: agentRole `worker`(auditor 프리셋은 Write 금지), kind `writing`, complexity `critical`, `allowedProfileIds: ["claude-fable-apex"]`, verificationCommands는 `node scripts/manager-map-check.mjs <out>`. 기존 템플릿의 모델 핀은 호스트가 바뀌어도 유지한다. `--dry-run`으로 anthropic/fable 라우팅을 확인하고 현재 호스트 실행 도구로 순차 dispatch한다(런북 `aorch-model-upgrade` §4·§6 함정 그대로).
 
 ## 2. 태스크가 하는 일 (objective 정본)
 
@@ -36,9 +36,9 @@ description: 프로젝트를 최종 관리자의 눈으로 보는 지도(어떻�
 
 ## 4. 측정과 후속
 
-- AskUserQuestion: 갭 상위 10개 중 현황판·체크리스트로 이미 알던 것이 아닌 **새 발견 수**(0~2 / 3~5 / 6~8 / 9~10) + 세 화면 판정(히트맵·흐름도·갭 목록: 그대로 / 손볼 것 / 빼도 됨).
+- 호스트 질문 도구 또는 대화: 갭 상위 10개 중 현황판·체크리스트로 이미 알던 것이 아닌 **새 발견 수**(0~2 / 3~5 / 6~8 / 9~10) + 세 화면 판정(히트맵·흐름도·갭 목록: 그대로 / 손볼 것 / 빼도 됨).
 - 새 발견 ≤2: 대조 장치를 줄이고 현황판 링크 지도로 축소. ≥3: 2차 순서 — 두 번째 흐름(권위 문서가 없는 것부터, 예: 승인 레일) → 실제 전이 표가 있는 상태 기계 → 반복 실행이 필요해지면 존재 목록 스크립트화 → 다음 프로젝트.
-- 갭 적용은 `aorch-model-upgrade` §5~§6과 같다: gaps.json을 findings로 보고 AskUserQuestion 선택 → `examples/plan-model-upgrade-apply.json` 복사.
+- 갭 적용은 `aorch-model-upgrade` §5~§6과 같다: gaps.json을 findings로 보고 호스트 질문 도구 또는 대화 선택 → `examples/plan-model-upgrade-apply.json` 복사.
 
 ## 5. 함정
 

@@ -5,6 +5,8 @@ const TASK_COMPLEXITIES = ['low', 'standard', 'high', 'critical'];
 const DEFAULT_COMPLEXITY_BY_RISK = Object.freeze({ low: 'low', standard: 'standard', high: 'high', critical: 'high' });
 const RISK_RANK = Object.freeze({ low: 0, standard: 1, high: 2, critical: 3 });
 
+// Only eligibility failures may be skipped while walking an escalation ladder.
+export class RouteIneligibleError extends Error {}
 
 function effectiveTaskComplexity(task) {
   const complexity = task.complexity ?? DEFAULT_COMPLEXITY_BY_RISK[task.risk] ?? 'standard';
@@ -218,22 +220,42 @@ function narrowByMetric(candidates, metric, policy) {
   return candidates.filter((candidate) => candidate[field] <= best * (1 + tolerance));
 }
 
-// Escalation deliberately bypasses the eligibility filters: a ladder is a
-// human-authored recovery path, and its profiles may be locked out of normal
-// routing on purpose (e.g. an apex model whose only effort is critical-only).
-export function forceRoute({ catalog, profileId, effort, task = {} }) {
+// Escalation bypasses ordinary task-fit/effort filters, not provider limits,
+// explicit pins, adapter safety or the critical challenger boundary.
+export function forceRoute({ catalog, profileId, effort, task = {}, observations = [], now = new Date() }) {
   const profile = (catalog.models ?? []).find((entry) => entry.id === profileId);
   if (!profile || profile.enabled === false) {
-    throw new Error(`Forced route requires an enabled profile: ${profileId}`);
+    throw new RouteIneligibleError(`Forced route requires an enabled profile: ${profileId}`);
   }
   const effortSpec = (profile.efforts ?? []).find((entry) => entry.name === effort);
   if (!effortSpec) {
     throw new Error(`Forced route effort is not defined for ${profileId}: ${effort}`);
   }
   const provider = providerMetadata(catalog, profile.provider);
+  if (provider.enabled === false
+    || !providerAllowedForTask(provider, task, catalog.controlPlane ?? {})
+    || (task.allowedProviders?.length && !task.allowedProviders.includes(profile.provider))
+    || (task.forbiddenProviders ?? []).includes(profile.provider)
+    || (task.allowedProfileIds?.length && !task.allowedProfileIds.includes(profile.id))
+    || (task.forbiddenProfileIds ?? []).includes(profile.id)
+    || !providerSupportsCapabilities(profile.provider, task.capabilityIds, catalog.capabilities)) {
+    throw new RouteIneligibleError(`Forced route violates task/provider constraints: ${profileId}`);
+  }
   const prior = clamp01(
     (profile.quality?.[task.kind] ?? profile.quality?.default ?? 0.5) + (effortSpec.qualityDelta ?? 0)
   );
+  if (task.risk === 'critical' && profile.maturity === 'challenger') {
+    const quality = estimateRouteQuality({
+      route: { provider: profile.provider, profileId, model: profile.model, effort },
+      task, priorQuality: prior, observations, now,
+      halfLifeDays: catalog.routing?.observationHalfLifeDays ?? 30,
+      priorWeight: catalog.routing?.priorWeight ?? 3,
+      uncertaintyPenalty: catalog.routing?.uncertaintyPenalty ?? 0.02
+    });
+    if (task.role !== 'reviewer' || quality.effectiveSamples < (catalog.routing?.criticalMinimumSamples ?? 3)) {
+      throw new RouteIneligibleError(`No proven route is eligible for critical task ${task.id ?? '<unknown>'}`);
+    }
+  }
   return {
     provider: profile.provider,
     profileId: profile.id,
@@ -325,7 +347,16 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
   }
 
   tier.sort(byStableIdentity);
-  const selected = tier[0];
+  const identityWinner = tier[0];
+  // Prefer a stable exact metric twin of the identity winner. Keeping that
+  // winner's metric class preserves ordering across unequal tuples and avoids
+  // a non-transitive pairwise maturity/identity comparator.
+  const selected = (identityWinner.maturity === 'challenger' && tier.find(candidate => (
+    candidate.maturity === 'stable'
+    && candidate.quality.conservative === identityWinner.quality.conservative
+    && candidate.tokenIndex === identityWinner.tokenIndex
+    && candidate.latencyIndex === identityWinner.latencyIndex
+  ))) || identityWinner;
   return {
     ...selected,
     decision: {

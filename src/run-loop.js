@@ -6,20 +6,28 @@ import { appendObservation } from './observations.js';
 import { detectRateLimit, setLimit, DEFAULT_LIMIT_MINUTES } from './limits.js';
 import { writeJsonAtomic } from './fs-util.js';
 import { captureGitSnapshot, evaluateChangeGuard } from './change-guard.js';
+import { forceRoute, RouteIneligibleError } from './router.js';
 
 function routeSummary(route) {
   return { provider: route.provider, profileId: route.profileId, model: route.model, effort: route.effort };
 }
 
-function nextLadderStep(config, provider, triedRoutes, task = {}) {
+function nextLadderStep(config, provider, triedRoutes, task = {}, observations = []) {
   const ladder = config.escalation?.ladders?.[provider] ?? [];
   if ((task.allowedProviders?.length && !task.allowedProviders.includes(provider))
     || (task.forbiddenProviders ?? []).includes(provider)) {
     return undefined;
   }
-  return ladder.find((step) => !triedRoutes.has(`${step.profileId}:${step.effort}`)
-    && (!task.allowedProfileIds?.length || task.allowedProfileIds.includes(step.profileId))
-    && !(task.forbiddenProfileIds ?? []).includes(step.profileId));
+  return ladder.find((step) => {
+    if (triedRoutes.has(`${step.profileId}:${step.effort}`)) return false;
+    try {
+      forceRoute({ catalog: config, task, observations, profileId: step.profileId, effort: step.effort });
+      return true;
+    } catch (error) {
+      if (error instanceof RouteIneligibleError) return false;
+      throw error;
+    }
+  });
 }
 
 async function failChangeGuard({ attempt, route, runDir, changeGuard, attempts, cause }) {
@@ -307,7 +315,7 @@ export async function executeWithVerification({
       error.runDir = execution.runDir;
       throw error;
     }
-    forcedRoute = nextLadderStep(config, execution.route.provider, triedRoutes, task);
+    forcedRoute = nextLadderStep(config, execution.route.provider, triedRoutes, currentTask, observations);
     if (!forcedRoute || attempt === maxAttempts) {
       const error = new Error(
         `Verification failed after ${attempt} attempt(s); escalation ${forcedRoute ? 'budget' : 'ladder'} exhausted. ` +

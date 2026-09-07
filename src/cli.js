@@ -194,10 +194,14 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   const config = await loadConfig({ cwd, configPath: flags.config });
-  config.capabilities = mergeCapabilities(
-    config.capabilities,
-    await discoverCapabilities({ cwd, includeUser: flags['project-only'] !== true })
-  );
+  // Classify requests no capabilities and backs the latency-sensitive advisory
+  // hook. Its routing must not wait for a live plugin-list subprocess.
+  if (command !== 'classify') {
+    config.capabilities = mergeCapabilities(
+      config.capabilities,
+      await discoverCapabilities({ cwd, includeUser: flags['project-only'] !== true })
+    );
+  }
 
   if (command === 'route') {
     const task = await applyActiveLimits(validateTask(await readJson(requireFlag(flags, 'task'), cwd)), config, cwd);

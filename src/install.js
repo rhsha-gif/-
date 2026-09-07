@@ -20,19 +20,121 @@ async function readJson(filePath, fallback = {}) {
   }
 }
 
-function mergeHook(target, fragment, targetPath) {
+const LEGACY_HOOK_COMMANDS = [
+  {
+    "event": "PreToolUse",
+    "command": "node \"${CLAUDE_PROJECT_DIR}/.aorch/hooks/subagent-gate.mjs\""
+  },
+  {
+    "event": "UserPromptSubmit",
+    "command": "node \"${CLAUDE_PROJECT_DIR}/.aorch/hooks/user-prompt-submit.mjs\""
+  },
+  {
+    "event": "UserPromptSubmit",
+    "command": "ROOT=\"$PWD\"; while [ ! -e \"$ROOT/.aorch/hooks/user-prompt-submit.mjs\" ] && [ \"$ROOT\" != \"/\" ]; do ROOT=\"$(dirname \"$ROOT\")\"; done; if [ -e \"$ROOT/.aorch/hooks/user-prompt-submit.mjs\" ]; then node \"$ROOT/.aorch/hooks/user-prompt-submit.mjs\"; else echo \"aorch: no .aorch/hooks above $PWD\" >&2; fi"
+  }
+];
+
+// Quote each argument for the host shell, including spaces and Unicode paths.
+export function hookCommand(scriptPath, provider, platform = process.platform, executable = process.execPath) {
+  const args = [executable, scriptPath, ...(provider ? [provider] : [])];
+  if (platform === 'win32') {
+    if (args.some(arg => /["&|<>^%!\x00-\x1f]/u.test(arg))) {
+      throw new Error('Cannot generate Windows hook command: argument contains unsafe shell characters');
+    }
+    return args.map(arg => `"${arg}"`).join(' ');
+  }
+  return args.map(arg => "'" + arg.replaceAll("'", "'\"'\"'") + "'").join(' ');
+}
+
+function resolveHookCommands(fragment, projectRoot, provider) {
+  for (const [event, groups] of Object.entries(fragment.hooks)) {
+    const script = event === 'PreToolUse' ? 'subagent-gate.mjs' : 'user-prompt-submit.mjs';
+    for (const group of groups) for (const hook of group.hooks) {
+      const scriptPath = path.resolve(projectRoot, '.aorch/hooks', script);
+      const hostProvider = event === 'PreToolUse' ? provider : undefined;
+      hook.command = hookCommand(scriptPath, hostProvider);
+      if (provider === 'openai') hook.commandWindows = hookCommand(scriptPath, hostProvider, 'win32');
+    }
+  }
+  return fragment;
+}
+
+// Accept only the quoted argv form emitted above, never wrappers or shell tails.
+function parseHookCommand(command) {
+  if (typeof command !== 'string') return null;
+  const windows = command.startsWith('"');
+  const token = windows ? /^"([^"]*)"(?: |$)/u : /^'((?:[^']|'"'"')*)'(?: |$)/u;
+  const args = [];
+  let remaining = command;
+  while (remaining) {
+    const match = token.exec(remaining);
+    if (!match) return null;
+    args.push(windows ? match[1] : match[1].replaceAll("'\"'\"'", "'"));
+    remaining = remaining.slice(match[0].length);
+  }
+  if (args.length !== 2 && args.length !== 3) return null;
+  try {
+    if (hookCommand(args[1], args[2], windows ? 'win32' : 'linux', args[0]) !== command) return null;
+  } catch { return null; }
+  return { args, windows };
+}
+
+function matchesGeneratedHook(command, expectedCommand) {
+  const actual = parseHookCommand(command);
+  const expected = parseHookCommand(expectedCommand);
+  if (!actual || !expected || actual.windows !== expected.windows) return false;
+  const paths = actual.windows ? path.win32 : path.posix;
+  const executable = paths.basename(actual.args[0]);
+  if (!paths.isAbsolute(actual.args[0]) || !(actual.windows ? /^node(?:\.exe)?$/iu : /^node$/u).test(executable)) return false;
+  const normalize = value => actual.windows ? paths.normalize(value).toLowerCase() : paths.normalize(value);
+  return actual.args.length === expected.args.length
+    && paths.isAbsolute(actual.args[1])
+    && normalize(actual.args[1]) === normalize(expected.args[1])
+    && actual.args[2] === expected.args[2];
+}
+
+function validateHookSettings(target, targetPath) {
+  const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!isObject(target)) throw new Error(`${targetPath} must be an object`);
+  if (!Object.hasOwn(target, 'hooks')) return;
+  if (!isObject(target.hooks)) throw new Error(`${targetPath} hooks must be an object`);
+  for (const [event, groups] of Object.entries(target.hooks)) {
+    if (!Array.isArray(groups)) throw new Error(`${targetPath} hooks.${event} must be an array to merge into`);
+    for (const group of groups) {
+      if (!isObject(group) || !Array.isArray(group.hooks) || !group.hooks.every(isObject)) {
+        throw new Error(`${targetPath} hooks.${event} must contain groups with a hooks array of objects`);
+      }
+    }
+  }
+}
+
+function mergeHook(target, fragment, targetPath, removeOnly = false) {
+  validateHookSettings(target, targetPath);
+  if (removeOnly && !target.hooks) return target;
   target.hooks ??= {};
   for (const [event, groups] of Object.entries(fragment.hooks ?? {})) {
+    if (removeOnly && !Object.hasOwn(target.hooks, event)) continue;
     target.hooks[event] ??= [];
     if (!Array.isArray(target.hooks[event])) {
       throw new Error(`${targetPath} hooks.${event} must be an array to merge into`);
     }
-    for (const group of groups) {
-      const command = group.hooks?.[0]?.command;
-      if (!command) continue;
-      const duplicate = target.hooks[event].some((existing) => existing.hooks?.some((hook) => hook.command === command));
-      if (!duplicate) target.hooks[event].push(group);
-    }
+    const ownedCommands = new Set([
+      ...LEGACY_HOOK_COMMANDS.filter(hook => hook.event === event).map(hook => hook.command),
+      ...groups.flatMap(group => group.hooks.map(hook => hook.command))
+    ]);
+    const generatedHooks = groups.flatMap(group => group.hooks);
+    // Remove individual owned handlers, not mixed groups containing user hooks.
+    target.hooks[event] = target.hooks[event].flatMap(group => {
+      if (!Array.isArray(group.hooks)) return [group];
+      const hooks = group.hooks.filter(hook => !ownedCommands.has(hook.command)
+        && !(hook.type === 'command' && generatedHooks.some(generated =>
+          matchesGeneratedHook(hook.command, generated.command)
+          && (hook.commandWindows === undefined || matchesGeneratedHook(hook.commandWindows, generated.commandWindows)))));
+      if (hooks.length === group.hooks.length) return [group];
+      return hooks.length ? [{ ...group, hooks }] : [];
+    });
+    if (!removeOnly) target.hooks[event].push(...groups);
   }
   return target;
 }
@@ -81,14 +183,20 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
   // Parse every JSON file this install will merge into BEFORE mutating
   // anything, so a malformed existing file cannot abort a half-written
   // install with a context-free error.
-  const settingsPath = path.join(projectRoot, '.claude/settings.json');
+  const sharedSettingsPath = path.join(projectRoot, '.claude/settings.json');
+  const localSettingsPath = path.join(projectRoot, '.claude/settings.local.json');
+  const useLocalSettings = wantsClaude && await exists(localSettingsPath);
+  const settingsPath = useLocalSettings ? localSettingsPath : sharedSettingsPath;
   const hooksPath = path.join(projectRoot, '.codex/hooks.json');
   const settings = wantsClaude ? await readJson(settingsPath, {}) : null;
+  const sharedSettings = useLocalSettings ? await readJson(sharedSettingsPath, {}) : null;
+  const sharedSettingsBefore = JSON.stringify(sharedSettings);
   const claudeFragment = wantsClaude ? await readJson(path.join(PACKAGE_ROOT, 'integrations/claude/settings.fragment.json')) : null;
   const codexHooks = wantsCodex ? await readJson(hooksPath, {}) : null;
   const codexFragment = wantsCodex ? await readJson(path.join(PACKAGE_ROOT, 'integrations/codex/hooks.json')) : null;
-  const mergedSettings = wantsClaude ? mergeHook(settings, claudeFragment, settingsPath) : null;
-  const mergedCodexHooks = wantsCodex ? mergeHook(codexHooks, codexFragment, hooksPath) : null;
+  const mergedSettings = wantsClaude ? mergeHook(settings, resolveHookCommands(claudeFragment, projectRoot, 'anthropic'), settingsPath) : null;
+  const mergedSharedSettings = useLocalSettings ? mergeHook(sharedSettings, claudeFragment, sharedSettingsPath, true) : null;
+  const mergedCodexHooks = wantsCodex ? mergeHook(codexHooks, resolveHookCommands(codexFragment, projectRoot, 'openai'), hooksPath) : null;
 
   const installed = [];
   const warnings = [];
@@ -103,6 +211,8 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
   }
 
   const projectConfig = path.join(aorchDir, 'config.json');
+  await installFile(path.join(PACKAGE_ROOT, 'integrations/shared/workflow.md'), path.join(aorchDir, 'workflow.md'));
+  installed.push('.aorch/workflow.md');
   if (forceConfig || !(await exists(projectConfig))) {
     await installFile(path.join(PACKAGE_ROOT, 'config/aorch.config.json'), projectConfig);
     installed.push('.aorch/config.json');
@@ -117,7 +227,11 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/skills'), path.join(projectRoot, '.claude/skills'));
     await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/agents'), path.join(projectRoot, '.claude/agents'));
     await writeJson(settingsPath, mergedSettings);
-    installed.push('.claude/skills/adaptive-orchestrate', '.claude/skills/aorch-downshift', '.claude/skills/aorch-model-upgrade', '.claude/skills/aorch-manager-map', '.claude/agents', '.claude/settings.json');
+    if (useLocalSettings && JSON.stringify(mergedSharedSettings) !== sharedSettingsBefore) {
+      await writeJson(sharedSettingsPath, mergedSharedSettings);
+      installed.push('.claude/settings.json');
+    }
+    installed.push('.claude/skills/adaptive-orchestrate', '.claude/skills/aorch-downshift', '.claude/skills/aorch-model-upgrade', '.claude/skills/aorch-manager-map', '.claude/agents', useLocalSettings ? '.claude/settings.local.json' : '.claude/settings.json');
   }
 
   if (wantsCodex) {

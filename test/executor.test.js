@@ -97,7 +97,8 @@ test('Windows command resolution executes a PATH command shim with argv and stdi
     }
   };
 
-  const resolved = executor.resolveWindowsCommandSpec(spec);
+  // Isolate the fixture PATH from the host's differently cased Path key.
+  const resolved = executor.resolveWindowsCommandSpec(spec, { env: spec.env });
   const result = await runCommand(resolved);
 
   assert.equal(resolved.command, process.env.ComSpec);

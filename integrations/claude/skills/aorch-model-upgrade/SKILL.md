@@ -10,18 +10,18 @@ description: 새 프런티어 모델이 나왔을 때 프로젝트를 신모델�
 ## 0. 카탈로그 등록
 
 - `config/aorch.config.json` `models`에 새 프로필을 넣는다. **`maturity`는 `challenger`**로 시작한다 — 라우터의 critical 게이트(`criticalMinimumSamples`)는 challenger에만 걸리고, stable로 등록하면 관측 0건인 모델이 곧바로 critical 작업의 단독 실행자가 된다(2026-09-02 실측: fable이 그렇게 등록돼 있었다).
-- 품질 prior는 직전 최상위 프로필 + 0.02 이내. 에스컬레이션 사다리 끝에 붙인다.
+- 품질은 직전 최상위 프로필의 prior로 시작하고 실측과 구분한다. 재사용한 tokenIndex/latencyIndex·effort 배수는 provisional이며 절약 실측으로 보고하지 않는다. Astra는 `codex-astra-deep` / `gpt-6-astra`, Sol 품질 prior, challenger, 초기 effort `high`만 사용하고 OpenAI 사다리 마지막에 high를 붙인다. 호스트의 xhigh/max/ultra 지원을 CLI/API 지원과 동일시하지 않는다.
 - 검증: `node --test test/config.test.js test/router.test.js`.
 
 ## 1. 브랜치와 설치본
 
 - `node src/cli.js branch status` → 사용자 승인 → linked worktree에서 작업.
-- 워크트리에서는 dispatch 전에 반드시 `node src/cli.js install --project . --target both --force-config`. 없으면 Claude CLI가 상위 체크아웃의 구 설치본을 읽어 `--agent not found`로 2초 만에 죽는다(2026-08-30 실측).
-- **dispatch는 git bash에서 `nohup node src/cli.js dispatch … > log 2> err < /dev/null &`로 띄운다.** 검증 게이트는 dispatch 프로세스의 환경을 물려받는데, PowerShell `Start-Process`로 띄우면 `test/executor.test.js`의 PATH shim 테스트가 `spawn fixture ENOENT`로 죽어 멀쩡한 워커가 실패·에스컬레이션된다(2026-09-02 실측). 종료 감시는 로그 파일 크기(dispatch는 끝에 JSON을 쓴다)로 하고, Windows PID가 필요하면 `Get-CimInstance Win32_Process`로 찾는다.
+- 워크트리에서는 dispatch 전에 `node src/cli.js install --project . --target both`로 필요한 설치본을 준비한다. 사용자 config는 보존한다. `--force-config`는 기존 config가 기본값과 같거나 교체를 명시 승인받은 경우에만 쓴다.
+- dispatch는 현재 호스트의 실행 도구로 `node src/cli.js dispatch --plan <file>`를 실행하고 종료 코드와 검증 출력을 수집한다. 특정 셸이나 백그라운드 실행을 강제하지 않는다. Windows 환경 차이로 실패하면 정확한 오류를 보고하고 검증을 약화하지 않는다.
 
 ## 2. 인벤토리 — 오케스트레이터가 직접
 
-정찰은 위임하지 않는다(adaptive-orchestrate 규율). 아래 패턴을 대상 루트에서 직접 돌리고 결과를 문서 "매핑표" 절에 `경로 | 현재 값 | 새 값 | 승인` 표로 적는다. 갱신은 사용자가 승인한 행만 한다.
+리드가 범위와 인벤토리를 책임진다. 필요하면 native 분석 에이전트와 컨텍스트를 공유하되 실제 증거는 리드가 확인한다. 아래 패턴을 대상 루트에서 직접 돌리고 결과를 문서 "매핑표" 절에 `경로 | 현재 값 | 새 값 | 승인` 표로 적는다. 갱신은 사용자가 승인한 행만 한다.
 
 ```bash
 grep -rnE "claude-[a-z]+-[0-9]|\b(opus|sonnet|haiku|fable|mythos)\b|gpt-[0-9]|canonicalModel|^model:" \
@@ -45,18 +45,20 @@ grep -rnE "claude-[a-z]+-[0-9]|\b(opus|sonnet|haiku|fable|mythos)\b|gpt-[0-9]|ca
 
 ## 5. 선택
 
-AskUserQuestion(multiSelect)으로 수정할 finding id를 고른다. 자동 수정은 없다.
+호스트에서 제공하는 질문 도구 또는 대화로 수정할 finding id를 고른다. 세션에서 이미 승인된 항목은 다시 묻지 않는다.
 
 ## 6. 적용
 
 - `examples/plan-model-upgrade-apply.json`을 복사해 고른 finding마다 `X<n>-<id>` 태스크(동작 보존이면 `refactorer`, 아니면 `worker`), 매핑표 승인 행으로 `M1-model-refs`를 채운다. 모든 write 태스크에 프로젝트의 진짜 검증 명령을 둔다 — 이 플랜이 새 모델의 첫 라우팅 관측을 남기는 자리다.
-- 다른 프로젝트에 적용할 때의 함정(2026-09-02 QuantPilot 실측): (a) 프로젝트 규약이 요구하는 linked worktree에서 돌리고 `aorch install`을 그 worktree에 다시 한다. `.aorch`가 gitignore가 아닌 프로젝트는 설치본이 git 변경으로 잡힌다. (b) Codex 워커의 쓰기 루트는 worktree다 — 검증 명령의 임시 경로·node_modules를 worktree 안에 둔다(junction은 안 되고 실복사). (c) pytest basetemp는 만든 계정만 읽는 ACL이라 게이트는 `.pytest_tmp/gate-%RANDOM%`(cmd.exe가 확장, 실행마다 새 디렉터리), 워커는 `.pytest_tmp/worker-<task>`를 각자 만들게 하고 워커에 `gate*` 접근 금지를 명시한다; 부모는 일반 mkdir. (c2) 웹 게이트(vite/vitest)는 Codex 샌드박스 안에서 설정 로더가 상위 경로 접근으로 실패한다 — 워커 지침에 "샌드박스 권한만의 실패면 complete로 보고하고 unresolvedRisks에 적어라, 게이트가 밖에서 같은 명령을 돌린다"를 넣는다. (c3) 이미 dirty한 트리에서 워커는 '이번에 만진 파일'을 원래 dirty였더라도 filesChanged에 적어야 한다(base 프롬프트 문구를 오독해 미신고 → change guard 실패 실측). (d) 감사 receipt는 메인 체크아웃 `.aorch/task-runs`에 있어 worktree 샌드박스가 못 읽는다 — 제안 전문을 플랜 objective에 인라인한다(템플릿이 그렇게 되어 있다). (e) kind `security`는 complexity `standard`에 실행자 프로필이 없다 — 보안 태스크는 `high` 이상으로. (f) 워커가 환경 때문에 `partial`을 내면 run이 멈춘다 — 리드가 게이트를 직접 돌려 채택하고 나머지 태스크만 재dispatch한다. (g) 하드닝(도구 차단·경로 검증·커밋 범위 축소) 라운드는 회귀를 만든다(2026-09-03 볼트 실측: V1·V2 뒤 회귀 10건, 치명 1건은 `--disallowed-tools`에 Write를 넣어 새 노트 생성이 막힌 것). 같은 프로바이더의 게이트는 그것을 통과시켰다 — 하드닝 적용 뒤에는 반드시 다른 프로바이더의 동작 보존 리뷰(`R2-behaviour-review`)를 두고, 회귀 수정 라운드 뒤 새 모델 핀 최종 리뷰로 닫는다. (h) 에스컬레이션 2차 워커가 게이트를 통과시키려고 검증 대상 자체를 무력화할 수 있다(볼트 실측: weekly 드라이런에 조기 return 삽입). 게이트가 스크립트 실행이면 objective에 '이 명령은 진짜 실행이어야 하고 조기 종료·분기로 우회하면 실패'를 명시하고, 리드가 게이트 대상 파일의 diff를 채택 전에 읽는다. (i) 리뷰-수정 루프는 수렴하지 않는다 — 새 모델 핀 리뷰는 직전 수정 라운드에서 매번 standard 1건을 새로 찾는다(2026-09-03 볼트 실측: R3→R8 여섯 리뷰가 각각 직전 라운드의 회귀를 찾았고, 그중 R6는 병합 불가·R7은 보류였다 — 고아 복구처럼 상태 기계를 새로 넣는 수정은 특히 그렇다). 최종 리뷰 뒤 수정 라운드는 최대 2회로 못 박고, 그 뒤의 발견은 critical이 아니면 문서 '이월' 절로 보낸다. 리뷰어가 '병합 불가'를 내면 그 라운드를 되돌리는 것이 기본 선택지여야 하는데, task-run 디렉터리에 attempt별 diff가 없어 되돌릴 수 없었다 — dispatch 전에 `git diff HEAD > <evidence>/state-before-<round>.patch`를 남긴다. 상태 기계·마이그레이션이 들어가는 수정은 리드가 직접 쓰는 편이 빨랐다(V9: 3건 10분, 워커 왕복 17분+회귀). (j) allowedScope의 경로는 워커가 실제로 고칠 파일 경로여야 한다 — 루트 `README.md`를 적었는데 워커가 `slack-worker/README.md`를 고쳐 change guard가 범위 밖으로 실패한 실측. 플랜을 만들 때 scope 경로가 존재하는지 `ls`로 확인한다.
+- 다른 프로젝트에 적용할 때의 함정(2026-09-02 QuantPilot 실측): (a) 프로젝트 규약이 요구하는 linked worktree에서 돌리고 `aorch install`을 그 worktree에 다시 한다. `.aorch`가 gitignore가 아닌 프로젝트는 설치본이 git 변경으로 잡힌다. (b) Codex 워커의 쓰기 루트는 worktree다 — 검증 명령의 임시 경로·node_modules를 worktree 안에 둔다(junction은 안 되고 실복사). (c) pytest basetemp는 만든 계정만 읽는 ACL이라 게이트는 `.pytest_tmp/gate-%RANDOM%`(cmd.exe가 확장, 실행마다 새 디렉터리), 워커는 `.pytest_tmp/worker-<task>`를 각자 만들게 하고 워커에 `gate*` 접근 금지를 명시한다; 부모는 일반 mkdir. (c2) 웹 게이트(vite/vitest)는 Codex 샌드박스 안에서 설정 로더가 상위 경로 접근으로 실패한다 — 워커 지침에 "샌드박스 권한만의 실패라도 성공을 주장하지 말고 실제 종료 코드와 오류를 unresolvedRisks에 적어라; 리드가 허용된 환경에서 새 검증을 실행해 판단한다"를 넣는다. (c3) 이미 dirty한 트리에서 워커는 '이번에 만진 파일'을 원래 dirty였더라도 filesChanged에 적어야 한다(base 프롬프트 문구를 오독해 미신고 → change guard 실패 실측). (d) 감사 receipt는 메인 체크아웃 `.aorch/task-runs`에 있어 worktree 샌드박스가 못 읽는다 — 제안 전문을 플랜 objective에 인라인한다(템플릿이 그렇게 되어 있다). (e) kind `security`는 complexity `standard`에 실행자 프로필이 없다 — 보안 태스크는 `high` 이상으로. (f) 워커가 환경 때문에 `partial`을 내면 run이 멈춘다 — 리드가 게이트를 직접 돌려 채택하고 나머지 태스크만 재dispatch한다. (g) 하드닝(도구 차단·경로 검증·커밋 범위 축소) 라운드는 회귀를 만든다(2026-09-03 볼트 실측: V1·V2 뒤 회귀 10건, 치명 1건은 `--disallowed-tools`에 Write를 넣어 새 노트 생성이 막힌 것). 같은 프로바이더의 게이트는 그것을 통과시켰다 — 하드닝 적용 뒤에는 반드시 다른 프로바이더의 동작 보존 리뷰(`R2-behaviour-review`)를 두고, 회귀 수정 라운드 뒤 새 모델 핀 최종 리뷰로 닫는다. (h) 에스컬레이션 2차 워커가 게이트를 통과시키려고 검증 대상 자체를 무력화할 수 있다(볼트 실측: weekly 드라이런에 조기 return 삽입). 게이트가 스크립트 실행이면 objective에 '이 명령은 진짜 실행이어야 하고 조기 종료·분기로 우회하면 실패'를 명시하고, 리드가 게이트 대상 파일의 diff를 채택 전에 읽는다. (i) 리뷰-수정 루프는 수렴하지 않는다 — 새 모델 핀 리뷰는 직전 수정 라운드에서 매번 standard 1건을 새로 찾는다(2026-09-03 볼트 실측: R3→R8 여섯 리뷰가 각각 직전 라운드의 회귀를 찾았고, 그중 R6는 병합 불가·R7은 보류였다 — 고아 복구처럼 상태 기계를 새로 넣는 수정은 특히 그렇다). 최종 리뷰 뒤 수정 라운드는 최대 2회로 못 박고, 그 뒤의 발견은 critical이 아니면 문서 '이월' 절로 보낸다. 리뷰어가 '병합 불가'를 내면 그 라운드를 되돌리는 것이 기본 선택지여야 하는데, task-run 디렉터리에 attempt별 diff가 없어 되돌릴 수 없었다 — dispatch 전에 `git diff HEAD > <evidence>/state-before-<round>.patch`를 남긴다. high/critical 쓰기는 기존 순차 CLI dispatch로 실행하고 리드가 검증한다. (j) allowedScope의 경로는 워커가 실제로 고칠 파일 경로여야 한다 — 루트 `README.md`를 적었는데 워커가 `slack-worker/README.md`를 고쳐 change guard가 범위 밖으로 실패한 실측. 플랜을 만들 때 scope 경로가 존재하는지 `ls`로 확인한다.
 - git이 아닌 대상은 오케스트레이터가 직접 고친다. 고치기 전 원본을 `~/.claude/backups/`에 복사한다.
+
+과거 관측: V9 상태 기계·마이그레이션 수정 3건은 리드 직접 수정에 10분, 워커 왕복에 17분과 추가 회귀가 들었다. 이는 해당 실행의 역사적 관측이며 현재 모델의 성능 prior나 high/critical 쓰기의 순차 dispatch 예외가 아니다. 작업 경계와 검증 비용을 정할 때 참고한다.
 
 ## 7. 재설치와 승격
 
 - 각 프로젝트에서 `.aorch/config.json`을 `config/aorch.config.json`과 diff한다. 차이가 없으면 `--force-config`, 차이가 있으면 플래그 없이 `install`을 돌리고 새 프로필과 사다리 단계만 프로젝트 config에 손으로 추가한다.
-- 검증 명령이 없는 리뷰 태스크(A1 포함)는 관측을 남기지 않는다. 승격 근거는 새 모델이 실제로 실행한 write 태스크 또는 검증 명령을 가진 reviewer 태스크에서만 쌓인다(2026-09-02: 감사 2회 뒤에도 fable 관측 0건).
+- Native 결과는 자동 change-guard/verify 관측으로 기록하지 않는다. 검증 명령이 없는 CLI 리뷰 태스크(A1 포함)는 관측을 남기지 않는다. 승격 근거는 새 모델이 실제로 실행한 write 태스크 또는 검증 명령을 가진 reviewer 태스크에서만 쌓인다(2026-09-02: 감사 2회 뒤에도 fable 관측 0건).
 - `.aorch/observations.jsonl`에서 새 모델의 `role: reviewer` 관측 수를 센다. `criticalMinimumSamples`(기본 3) 이상이면 사용자에게 물어 `maturity`를 `stable`로 올리고 문서에 건수와 날짜를 적는다. 미만이면 challenger로 둔다.
 
 ## 8. 되먹임
