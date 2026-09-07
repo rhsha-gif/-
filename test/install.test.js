@@ -1,11 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { installProject } from '../src/install.js';
+import { installProject, installUserDefinitions } from '../src/install.js';
+
+test('user updates preserve installed targets and reject overlapping project ownership', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'aorch-user-target-'));
+  await installUserDefinitions({ homeDir, target: 'claude' });
+  assert.equal((await installUserDefinitions({ homeDir })).status, 'current');
+  await assert.rejects(stat(path.join(homeDir, '.codex/agents/aorch-worker.toml')), /ENOENT/);
+  await installUserDefinitions({ homeDir, target: 'both' });
+  await installUserDefinitions({ homeDir, target: 'claude' });
+  assert.ok((await stat(path.join(homeDir, '.codex/agents/aorch-worker.toml'))).isFile());
+  await assert.rejects(installProject({ projectRoot: homeDir }), /share the user/);
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-scope-collision-'));
+  await installProject({ projectRoot });
+  await assert.rejects(installUserDefinitions({ homeDir: projectRoot }), /share a root/);
+  assert.ok((await stat(path.join(projectRoot, '.aorch/hooks/gate.mjs'))).isFile());
+});
+
+test('detaching the model gate preserves unrelated empty hook groups and security hooks', async () => {
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-hook-preserve-'));
+  await mkdir(path.join(projectRoot, '.claude'));
+  const groups = [{ matcher: 'Bash', hooks: [] }, { matcher: 'Read' }, { matcher: 'Agent', hooks: [{ type: 'command', command: 'security-check' }, { type: 'command', command: 'node .aorch/hooks/subagent-gate.mjs' }] }];
+  await writeFile(path.join(projectRoot, '.claude/settings.json'), JSON.stringify({ hooks: { PreToolUse: groups } }));
+  await installProject({ projectRoot });
+  const { hooks } = JSON.parse(await readFile(path.join(projectRoot, '.claude/settings.json')));
+  assert.deepEqual(hooks.PreToolUse, [groups[0], groups[1], { ...groups[2], hooks: [groups[2].hooks[0]] }]);
+});
 
 // Installs record themselves in a user-level registry; keep these tests out of
 // the real home directory.
@@ -23,14 +48,12 @@ test('installs both CLI integrations idempotently without editing root instructi
   // now lives inside the exec loop, so no Stop hook may be installed.
   assert.equal(claudeSettings.hooks.Stop, undefined);
   assert.equal(claudeSettings.hooks.SessionEnd, undefined);
-  assert.equal(claudeSettings.hooks.PreToolUse.length, 1);
-  assert.equal(claudeSettings.hooks.PreToolUse[0].matcher, 'Task|Agent');
-  assert.match(claudeSettings.hooks.PreToolUse[0].hooks[0].command, /subagent-gate\.mjs/);
+  assert.equal(claudeSettings.hooks.PreToolUse, undefined, 'a model-tier veto must not be reinstalled');
   // The installed gate must know where this package lives so it can invoke
   // the classify CLI from an arbitrary project.
   const installedGate = await readFile(path.join(projectRoot, '.aorch/hooks/subagent-gate.mjs'), 'utf8');
   assert.ok(!installedGate.includes('{{AORCH_ROOT}}'), 'gate placeholder must be resolved at install time');
-  assert.match(installedGate, /src[/\\]cli\.js|src', 'cli\.js/);
+  assert.doesNotMatch(installedGate, /spawnSync|execFile|import\(/);
   assert.equal(codexHooks.hooks.UserPromptSubmit.length, 1);
   assert.equal(codexHooks.hooks.Stop, undefined);
   const codexPromptCommand = codexHooks.hooks.UserPromptSubmit[0].hooks[0].command;
@@ -48,7 +71,7 @@ test('installs both CLI integrations idempotently without editing root instructi
       encoding: 'utf8'
     });
     assert.equal(hookResult.status, 0, hookResult.stderr);
-    assert.match(JSON.parse(hookResult.stdout).hookSpecificOutput.additionalContext, /orchestrator must run first/i);
+    assert.match(JSON.parse(hookResult.stdout).hookSpecificOutput.additionalContext, /Complete small clear work directly/i);
   }
   const receiptSchema = await readFile(path.join(projectRoot, '.aorch/schemas/worker-receipt.schema.json'), 'utf8');
   assert.match(receiptSchema, /filesChanged/);
@@ -160,8 +183,9 @@ test('the installed root skill directs the lead through the plan pipeline', asyn
     assert.match(skill, /aorch decompose --print-schema/, `${rel} must point at the plan contract`);
     assert.match(skill, /aorch dispatch --plan/, `${rel} must dispatch the plan`);
     assert.match(skill, /`agentRole`/, `${rel} must ask for agentRole`);
-    assert.match(skill, /Never write `role` yourself/, `${rel} must forbid a hand-written role`);
-    assert.match(skill, /Do not delegate reconnaissance/, `${rel} must keep scouting with the lead`);
+    assert.match(skill, /In a dispatch plan, never write `role`/, `${rel} must preserve the plan's derived role contract`);
+    assert.match(skill, /Do not impose a minimum number of tasks or roles/, `${rel} must keep decomposition proportional`);
+    assert.match(skill, /No plan file, inventory call or worker is required/, `${rel} must allow direct work`);
 
     // The old per-task envelope loop must not survive as a second instruction:
     // two routes through the same decision is how the lead ends up skipping the

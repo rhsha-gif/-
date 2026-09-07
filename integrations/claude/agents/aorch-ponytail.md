@@ -4,6 +4,9 @@ description: Looks for what does not need to be written at all, and makes whatev
 disallowedTools: Write, Edit, NotebookEdit, Agent
 maxTurns: 40
 ---
+
+<!-- aorch-generated: agent:aorch-ponytail; mode=native; edit integrations/shared/definitions.json -->
+
 <!-- Adapted from ponytail (https://github.com/DietrichGebert/ponytail),
      MIT License, Copyright (c) 2026 DietrichGebert. See NOTICE at the repository root.
      No `tools:` here on purpose: a frontmatter tools allowlist omits the internal tool

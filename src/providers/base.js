@@ -3,7 +3,7 @@ function bulletList(items = []) {
 }
 
 function capabilityIds(entries = []) {
-  return entries.map((entry) => entry.id);
+  return entries.map((entry) => entry.path ? `${entry.id} (${entry.path})` : entry.id);
 }
 
 export function buildTaskPrompt({ task, route, capabilities = {}, receiptPath }) {
@@ -33,10 +33,11 @@ export function buildTaskPrompt({ task, route, capabilities = {}, receiptPath })
     `- Skills: ${capabilityIds(capabilities.skills).join(', ') || 'none'}\n` +
     `- Plugins: ${capabilityIds(capabilities.plugins).join(', ') || 'none'}\n` +
     `- Hooks: ${capabilityIds(capabilities.hooks).join(', ') || 'none'}\n\n` +
-    `Before substantive work, invoke each listed skill through the provider's native skill mechanism. Use only listed plugins when their tools are needed. Listed hooks are pre-installed provider lifecycle policies; the wrapper exports their exact IDs through AORCH_SELECTED_HOOKS but does not hot-load arbitrary hooks. If a required capability is unavailable or inactive, return blocked rather than silently replacing it.\n\n` +
+    `Read the selected SKILL.md files at the listed paths only when needed for this task; use native skill invocation when available. Use only listed plugins when their tools are needed. Listed hooks are pre-installed provider lifecycle policies; the wrapper exports their exact IDs through AORCH_SELECTED_HOOKS but does not hot-load arbitrary hooks. If a required capability is unavailable or inactive, return blocked rather than silently replacing it.\n\n` +
     `## Verification\n${bulletList(task.verificationCommands)}\n\n` +
     `## Evidence contract\n` +
     `Return a final JSON receipt matching the supplied schema; the wrapper will persist it to ${receiptPath}. Include status, files inspected, files changed, commands with exit codes, acceptance-criterion evidence, findings (an empty list unless the task asked you to rank findings), unresolved risks, and confidence.\n` +
     `filesChanged is checked for exact equality against the working-tree delta between the moment your task started and the moment you finish: list every path you or your verification commands changed during this task and nothing else. That includes the source path of any rename or move, every deleted path, and any file your verification commands create (build output, coverage, snapshots) unless it is gitignored. Do not list files that were already modified before your task started — git status may show them, but they are not your changes. If you changed nothing, filesChanged must be an empty array. Omitting or over-listing a path fails the change guard.\n` +
+    `If you need user clarification or approval, stop dependent work and return status blocked with inputRequest: {kind: "clarification" or "approval", questions: [{id, prompt, options?}]}. Ask one to three concise questions, include current changes and completed evidence in the receipt, and leave dependent criteria not-run. The parent conversation obtains and relays answers. Do not call interactive question tools in this headless process, assume approval, or retry the request yourself. Omit inputRequest (or use null in the strict wire schema) when no input is needed.\n` +
     `Never report success without fresh verification evidence.`;
 }

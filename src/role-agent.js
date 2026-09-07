@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -53,7 +54,17 @@ export function roleMcp(agentRole) {
   return entry ? { mcpConfig: entry.configPath, mcpTools: [...entry.tools] } : {};
 }
 
-export function roleAgentName({ config, agentRole, adapter }) {
+export function roleAgentName({ config, agentRole, agentId, adapter }) {
+  if (agentId) {
+    const provider = adapter === 'claude' ? 'anthropic' : adapter === 'codex' ? 'openai' : adapter;
+    const entries = (config.capabilities ?? []).filter((entry) => entry.type === 'agent' && entry.id === agentId);
+    const entry = entries[0];
+    if (entries.length !== 1 || entry.enabled === false || !(entry.executionProviders ?? entry.providers ?? []).includes(provider)
+      || entry.bindings?.[provider]?.mode === 'bridge' || entry.bindings?.[provider]?.enabled === false) {
+      throw new Error(`Agent ${agentId} is unavailable on ${adapter}; check aorch inventory and enable its required provider`);
+    }
+    return entry.bindings?.[provider]?.name ?? agentId;
+  }
   if (!agentRole) return undefined;
   const entry = config?.roleAgents?.[agentRole];
   if (!entry) {
@@ -73,7 +84,9 @@ export function roleAgentName({ config, agentRole, adapter }) {
 // and this is the only key we consume from them.
 export function extractCodexInstructions(toml) {
   const match = /^developer_instructions\s*=\s*"""\r?\n?([\s\S]*?)"""/m.exec(toml);
-  return match ? match[1].trim() : '';
+  if (match) return match[1].trim().replace(/\\([\\"])/g, '$1');
+  const single = /^developer_instructions\s*=\s*("(?:[^"\\]|\\.)*")\s*$/m.exec(toml);
+  return single ? JSON.parse(single[1]) : '';
 }
 
 // Only key we read out of a Claude preset's frontmatter. A YAML parser would be
@@ -101,8 +114,8 @@ async function readFirstExisting(candidates) {
 // Claude selects the preset by name (`--agent`), which also applies its tool
 // restrictions. Codex has no such flag, so its preset reaches the worker as
 // prompt text and only `--sandbox` constrains tools.
-export async function resolveRoleAgent({ config, agentRole, adapter, cwd = process.cwd() }) {
-  if (!agentRole) return {};
+export async function resolveRoleAgent({ config, agentRole, agentId, adapter, cwd = process.cwd() }) {
+  if (!agentRole && !agentId) return {};
 
   // Checked before the name lookup: on an adapter with no preset mechanism the
   // problem is the adapter, and reporting a missing config entry would send the
@@ -111,14 +124,18 @@ export async function resolveRoleAgent({ config, agentRole, adapter, cwd = proce
     throw new Error(`Adapter ${adapter} cannot apply agentRole ${agentRole}`);
   }
 
-  const name = roleAgentName({ config, agentRole, adapter });
+  const name = roleAgentName({ config, agentRole, agentId, adapter });
+  const provider = adapter === 'claude' ? 'anthropic' : 'openai';
+  const custom = agentId ? config.capabilities.find((entry) => entry.type === 'agent' && entry.id === agentId) : null;
+  const binding = custom?.bindings?.[provider];
+  if (custom && ['conflict', 'stale', 'not-installed'].includes(binding?.syncStatus)) throw new Error(`Agent ${agentId} definitions are ${binding.syncStatus}; run aorch update before execution`);
 
   if (adapter === 'claude') {
     // The CLI already fails closed on an unknown --agent, but it does so after
     // the process has started and reports it as an opaque exit 1. Checking here
     // keeps both adapters failing at the same point, before anything spawns,
     // and lets the message name the fix.
-    const locations = PRESET_LOCATIONS.claude.map((resolve) => resolve(cwd, name));
+    const locations = custom ? [binding?.path ?? path.join(cwd, '.claude/agents', `${agentId}.md`)] : [...PRESET_LOCATIONS.claude.map((resolve) => resolve(cwd, name)), path.join(os.homedir(), '.claude/agents', `${name}.md`)];
     const preset = await readFirstExisting(locations);
     if (preset === null) {
       throw new Error(
@@ -129,7 +146,7 @@ export async function resolveRoleAgent({ config, agentRole, adapter, cwd = proce
     return { agent: name, ...(maxTurns === undefined ? {} : { maxTurns }), ...roleMcp(agentRole) };
   }
 
-  const locations = PRESET_LOCATIONS.codex.map((resolve) => resolve(cwd, name));
+  const locations = custom ? [binding?.path ?? path.join(cwd, '.codex/agents', `${agentId}.toml`)] : [...PRESET_LOCATIONS.codex.map((resolve) => resolve(cwd, name)), path.join(os.homedir(), '.codex/agents', `${name}.toml`)];
   const toml = await readFirstExisting(locations);
   if (toml === null) {
     throw new Error(`Codex agent preset ${name}.toml not found for agentRole ${agentRole}`);
@@ -138,11 +155,12 @@ export async function resolveRoleAgent({ config, agentRole, adapter, cwd = proce
   if (agentInstructions === '') {
     throw new Error(`Codex agent preset ${name}.toml has no developer_instructions`);
   }
+  const sandboxMode = /^sandbox_mode\s*=\s*"([^"]+)"\s*$/m.exec(toml)?.[1];
   // Codex has no --mcp-config; the same checked-in file is read here and
   // reaches `codex exec` as -c mcp_servers.<name>.* overrides (measured
   // 2026-08-30: the worker listed the tools as mcp__paper_search__*).
   const mcp = roleMcp(agentRole);
-  if (!mcp.mcpConfig) return { agentInstructions };
+  if (!mcp.mcpConfig) return { agentInstructions, ...(sandboxMode ? { sandboxMode } : {}) };
   const { mcpServers } = JSON.parse(await readFile(mcp.mcpConfig, 'utf8'));
-  return { agentInstructions, mcpServers };
+  return { agentInstructions, mcpServers, ...(sandboxMode ? { sandboxMode } : {}) };
 }

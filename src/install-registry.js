@@ -61,6 +61,7 @@ async function collectFiles(root) {
   }
   // Sort by name so the hash is independent of directory iteration order.
   for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    if (/^(desktop\.ini|thumbs\.db|\.DS_Store)$|^\.env(?:\.|$)/i.test(entry.name)) continue;
     const full = path.join(root, entry.name);
     if (entry.isDirectory()) found.push(...await collectFiles(full));
     else found.push(full);

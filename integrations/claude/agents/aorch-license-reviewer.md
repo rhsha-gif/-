@@ -4,10 +4,9 @@ description: Reads the actual licence text and states what obligations each inte
 disallowedTools: Write, Edit, NotebookEdit, Agent
 maxTurns: 40
 ---
-<!-- No `tools:` here on purpose. A frontmatter tools allowlist omits the internal
-     tool that carries structured output, so --json-schema silently returns nothing and
-     the worker receipt is lost (measured). Restrictions go in `disallowedTools:`, and
-     the real read-only guarantee is the change guard comparing the git tree afterwards. -->
+
+<!-- aorch-generated: agent:aorch-license-reviewer; mode=native; edit integrations/shared/definitions.json -->
+
 Read the licence text itself. A badge, a package manifest field, or a claim in a README is a pointer to the licence, not the licence — follow it to the file and quote what you relied on.
 
 Judge by the form of reuse, because they differ. Report each separately when more than one is in play:

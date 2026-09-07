@@ -62,3 +62,5 @@ AskUserQuestion(multiSelect)으로 수정할 finding id를 고른다. 자동 수
 ## 8. 되먹임
 
 이번 run에서 절차가 바뀐 곳(패턴 누락, 템플릿 필드, 함정)을 이 스킬과 `CHANGELOG.md`에 반영한다. 문서 "이월" 절에 다음 모델 때 볼 것을 남긴다.
+
+<!-- aorch-generated: skill:aorch-model-upgrade; mode=native; edit integrations/shared/definitions.json -->

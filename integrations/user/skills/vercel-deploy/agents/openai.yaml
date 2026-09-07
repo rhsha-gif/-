@@ -1,0 +1,6 @@
+interface:
+  display_name: "Vercel Deploy"
+  short_description: "Deploy and manage projects on Vercel from the CLI."
+  icon_small: "./assets/vercel-small.svg"
+  icon_large: "./assets/vercel.png"
+  default_prompt: "Use $vercel-deploy to deploy this project to Vercel and return the verified URL."

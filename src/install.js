@@ -1,8 +1,11 @@
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeJsonAtomic as writeJson } from './fs-util.js';
 import { computePayloadHash, mergeTargets, readStamp, recordInstall, writeStamp } from './install-registry.js';
+import os from 'node:os';
+import { readdir } from 'node:fs/promises';
+import { loadDefinitions, renderDefinitions } from './definitions.js';
+import { syncGeneratedFiles, readOptional } from './definition-sync.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT_PLACEHOLDER = '{{AORCH_ROOT}}';
@@ -22,6 +25,15 @@ async function readJson(filePath, fallback = {}) {
 
 function mergeHook(target, fragment, targetPath) {
   target.hooks ??= {};
+  if (Array.isArray(target.hooks.PreToolUse)) {
+    target.hooks.PreToolUse = target.hooks.PreToolUse.flatMap((group) => {
+      if (!Array.isArray(group.hooks)) return [group];
+      const hooks = group.hooks.filter((hook) => !/\.aorch[\\/]hooks[\\/]subagent-gate\.mjs/.test(hook.command ?? ''));
+      if (hooks.length === group.hooks.length) return [group];
+      return hooks.length ? [{ ...group, hooks }] : [];
+    });
+    if (!target.hooks.PreToolUse.length) delete target.hooks.PreToolUse;
+  }
   for (const [event, groups] of Object.entries(fragment.hooks ?? {})) {
     target.hooks[event] ??= [];
     if (!Array.isArray(target.hooks[event])) {
@@ -44,37 +56,41 @@ function resolvePlaceholders(content) {
   return content.replaceAll(ROOT_PLACEHOLDER, PACKAGE_ROOT.replaceAll('\\', '/'));
 }
 
-// Write only when the bytes actually change. Re-installs (and the automatic
-// refresh) must not rewrite an unchanged hook file that a live session is
-// executing, which Windows can reject with EBUSY.
-async function installFile(source, destination) {
-  const raw = await readFile(source);
-  const payload = raw.includes(ROOT_PLACEHOLDER)
-    ? Buffer.from(resolvePlaceholders(raw.toString('utf8')), 'utf8')
-    : raw;
-  try {
-    if ((await readFile(destination)).equals(payload)) return false;
-  } catch {
-    // Destination absent or unreadable: fall through and write it.
-  }
-  await mkdir(path.dirname(destination), { recursive: true });
-  await writeFile(destination, payload);
-  return true;
-}
 
-async function copyTree(source, destination) {
-  const { readdir } = await import('node:fs/promises');
-  await mkdir(destination, { recursive: true });
+async function treePayload(source, destination) {
+  const files = [];
   for (const entry of await readdir(source, { withFileTypes: true })) {
+    if (/^(desktop\.ini|thumbs\.db|\.DS_Store)$/i.test(entry.name)) continue;
+    if (entry.isSymbolicLink()) throw new Error(`Integration payload cannot contain symlinks: ${entry.name}`);
     const src = path.join(source, entry.name);
-    const dst = path.join(destination, entry.name);
-    if (entry.isDirectory()) await copyTree(src, dst);
-    else await installFile(src, dst);
+    const dst = `${destination}/${entry.name}`;
+    if (entry.isDirectory()) files.push(...await treePayload(src, dst));
+    else files.push({ path: dst, content: resolvePlaceholders(await readFile(src, 'utf8')) });
   }
+  return files;
 }
 
-export async function installProject({ projectRoot = process.cwd(), target = 'both', forceConfig = false } = {}) {
+export async function installUserDefinitions({ homeDir = os.homedir(), target, check = false } = {}) {
+  if (await readStamp(homeDir)) throw new Error('User definitions cannot share a root with a project installation; keep the project in its own directory');
+  const ledgerPath = '.aorch/generated-user-files.json';
+  const raw = await readOptional(path.join(homeDir, ledgerPath));
+  if (raw) {
+    const providers = new Set(Object.values(JSON.parse(raw).files ?? {}).map((entry) => entry.provider));
+    const previousTarget = providers.has('anthropic') && providers.has('openai') ? 'both' : providers.has('anthropic') ? 'claude' : providers.has('openai') ? 'codex' : undefined;
+    target = target ? mergeTargets(previousTarget, target) : previousTarget;
+  }
+  const definitions = (await loadDefinitions({ cwd: homeDir, includeUser: true })).filter((entry) => entry.sourceScope !== 'project');
+  return syncGeneratedFiles({ root: homeDir, files: await renderDefinitions({ definitions, target: target ?? 'both' }), ledgerPath, check });
+}
+
+export async function installProject({ projectRoot = process.cwd(), target = 'both', forceConfig = false, check = false } = {}) {
   if (!['both', 'claude', 'codex'].includes(target)) throw new Error(`Unknown installation target: ${target}`);
+  projectRoot = path.resolve(projectRoot);
+  if (projectRoot === path.resolve(os.homedir()) || await exists(path.join(projectRoot, '.aorch/generated-user-files.json'))) {
+    throw new Error('Project installation cannot share the user definition root; use --user or a separate project directory');
+  }
+  // A narrow re-install keeps the other integration current too.
+  target = mergeTargets((await readStamp(projectRoot))?.target, target);
   const wantsClaude = target === 'both' || target === 'claude';
   const wantsCodex = target === 'both' || target === 'codex';
 
@@ -90,54 +106,27 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
   const mergedSettings = wantsClaude ? mergeHook(settings, claudeFragment, settingsPath) : null;
   const mergedCodexHooks = wantsCodex ? mergeHook(codexHooks, codexFragment, hooksPath) : null;
 
-  const installed = [];
-  const warnings = [];
-  const aorchDir = path.join(projectRoot, '.aorch');
-  await mkdir(path.join(aorchDir, 'hooks'), { recursive: true });
+  const definitions = await loadDefinitions({ cwd: projectRoot });
+  const generated = await renderDefinitions({ definitions, target });
+  const files = [...generated, ...await treePayload(path.join(PACKAGE_ROOT, 'schemas'), '.aorch/schemas')];
   for (const script of ['gate.mjs', 'user-prompt-submit.mjs', 'subagent-gate.mjs']) {
-    await installFile(
-      path.join(PACKAGE_ROOT, 'integrations/shared', script),
-      path.join(aorchDir, 'hooks', script)
-    );
-    installed.push(`.aorch/hooks/${script}`);
+    files.push({ path: `.aorch/hooks/${script}`, content: resolvePlaceholders(await readFile(path.join(PACKAGE_ROOT, 'integrations/shared', script), 'utf8')) });
   }
-
-  const projectConfig = path.join(aorchDir, 'config.json');
-  if (forceConfig || !(await exists(projectConfig))) {
-    await installFile(path.join(PACKAGE_ROOT, 'config/aorch.config.json'), projectConfig);
-    installed.push('.aorch/config.json');
+  const configPath = path.join(projectRoot, '.aorch/config.json');
+  if (forceConfig || !(await exists(configPath))) files.push({ path: '.aorch/config.json', content: await readFile(path.join(PACKAGE_ROOT, 'config/aorch.config.json')), merge: true });
+  if (wantsClaude) files.push({ path: '.claude/settings.json', content: `${JSON.stringify(mergedSettings, null, 2)}\n`, merge: true });
+  if (wantsCodex) files.push({ path: '.codex/hooks.json', content: `${JSON.stringify(mergedCodexHooks, null, 2)}\n`, merge: true });
+  const sync = await syncGeneratedFiles({ root: projectRoot, files, check });
+  if (check) return { projectRoot, target, ...sync };
+  if (sync.status === 'conflict') {
+    const error = new Error(`Generated-file conflict; edit the canonical source or restore the generated copy: ${sync.conflicts.map((entry) => entry.path).join(', ')}`);
+    error.conflicts = sync.conflicts;
+    throw error;
   }
-
-  // Installed skills reference these schemas; without them the task and
-  // receipt instructions point at files that do not exist in the target.
-  await copyTree(path.join(PACKAGE_ROOT, 'schemas'), path.join(aorchDir, 'schemas'));
-  installed.push('.aorch/schemas');
-
-  if (wantsClaude) {
-    await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/skills'), path.join(projectRoot, '.claude/skills'));
-    await copyTree(path.join(PACKAGE_ROOT, 'integrations/claude/agents'), path.join(projectRoot, '.claude/agents'));
-    await writeJson(settingsPath, mergedSettings);
-    installed.push('.claude/skills/adaptive-orchestrate', '.claude/skills/aorch-downshift', '.claude/skills/aorch-model-upgrade', '.claude/skills/aorch-manager-map', '.claude/agents', '.claude/settings.json');
-  }
-
-  if (wantsCodex) {
-    await copyTree(path.join(PACKAGE_ROOT, 'integrations/codex/skills'), path.join(projectRoot, '.agents/skills'));
-    await copyTree(path.join(PACKAGE_ROOT, 'integrations/codex/agents'), path.join(projectRoot, '.codex/agents'));
-    await writeJson(hooksPath, mergedCodexHooks);
-    installed.push('.agents/skills/adaptive-orchestrate', '.agents/skills/aorch-model-upgrade', '.agents/skills/aorch-manager-map', '.codex/agents', '.codex/hooks.json');
-  }
-
-  // Record what this project now holds so `aorch update` and the prompt hook
-  // can tell a current install from a stale one.
-  // A narrower re-install does not remove the other integration, so the stamp
-  // records the union — that is what a later refresh has to keep current.
   const payloadHash = await computePayloadHash();
-  const stampTarget = mergeTargets((await readStamp(projectRoot))?.target, target);
-  await writeStamp(projectRoot, { target: stampTarget, payloadHash });
-  installed.push('.aorch/install-stamp.json');
-
-  const registry = await recordInstall(projectRoot, target);
-  if (registry.warning) warnings.push(registry.warning);
-
-  return { projectRoot, target, installed, payloadHash, ...(warnings.length ? { warnings } : {}) };
+  const stamp = await readStamp(projectRoot);
+  if (stamp?.payloadHash !== payloadHash || stamp?.target !== target || stamp?.packageRoot !== PACKAGE_ROOT.replaceAll('\\', '/')) await writeStamp(projectRoot, { target, payloadHash });
+  const registry = sync.status !== 'current' ? await recordInstall(projectRoot, target) : {};
+  return { projectRoot, target, status: sync.status, installed: files.map((entry) => entry.path), changed: sync.changed, payloadHash,
+    ...(sync.backup ? { backup: sync.backup } : {}), ...(registry.warning ? { warnings: [registry.warning] } : {}) };
 }

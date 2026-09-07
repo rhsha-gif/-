@@ -1,0 +1,4 @@
+interface:
+  display_name: "Real App Screenshot Tour"
+  short_description: "Capture real app mobile screenshots"
+  default_prompt: "Use $real-app-screenshot-tour to run this app, prepare realistic demo state, and capture a mobile screenshot tour."

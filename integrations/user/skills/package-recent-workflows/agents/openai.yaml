@@ -1,0 +1,7 @@
+interface:
+  display_name: "Package Recent Workflows"
+  short_description: "Audit recent work and package repeatable workflows."
+  default_prompt: "Use $package-recent-workflows to audit recent work and package high-confidence repeated workflows."
+
+policy:
+  allow_implicit_invocation: true

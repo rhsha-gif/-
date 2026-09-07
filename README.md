@@ -1,6 +1,6 @@
 # Adaptive Orchestrator
 
-> **리빌드 릴리스** — 개인용 두 구독(Claude Code + Codex CLI)을 위한 **다운시프트 판단 층**입니다. 목적함수는 **사용자 개입 최소화**와 구독 한도 절약이고, 품질 바닥선(`minimumQuality`)이 하한을 지킵니다. 벽시계 시간이 다소 늘더라도 사람이 다시 손대는 횟수가 줄면 이득으로 칩니다 — 그래서 다운시프트의 기준은 "바닥선을 넘는 가장 싼 모델"이 아니라 "한 번에 검증을 통과할 모델"입니다. 프루닝(판단 코어 릴리스)으로 걷어낸 기반 위에 다운시프트 실효화, verify 게이트 + escalation, 서브에이전트 등급 강제 훅, provider limits + 크로스 fallback을 증축했습니다. 내역은 [`CHANGELOG.md`](CHANGELOG.md)를 보세요.
+> Claude Code와 Codex를 위한 공통 작업 판단·라우팅 런타임입니다. 품질과 안전 조건을 유지하며 필요한 작업만 분해·위임합니다. 공통 원본, 동기화, 제공자 호환성과 입력 후 재개는 [정의와 동기화](docs/definition-sync.md), 근거와 축소 결정은 [결정 기록](docs/harness-decisions-20260908.md)을 참고하세요.
 
 Adaptive Orchestrator는 Claude Code 또는 Codex CLI 아래에서 동작하는 소형 라우팅 런타임입니다. 분해 **문장을 지어내는 것은 호스트 모델(리드)의 네이티브 능력**이지만, 그 결과의 **형식은 aorch가 스키마로 강제하고 검증하며 실행까지 책임집니다**. 분해기를 따로 짓지 않고 리드의 분해에 올라타되, "성실히 따라주기"에 의존하지는 않는다는 뜻입니다. aorch는 계획의 각 작업에 대해 다음 조합을 판단하고 강제합니다.
 
@@ -19,7 +19,8 @@ provider
 사용자 프롬프트
 → 얇은 UserPromptSubmit 정책 게이트
 → adaptive-orchestrate root skill
-   └─ 리드가 분해해 계획 파일 하나로 쓴다 (aorch decompose --print-schema)
+   ├─ 작고 명확하면 직접 처리하고 관련 검증·자체 검토
+   └─ 위임이 유익할 때만 계약/계획을 작성 (aorch decompose --print-schema)
 → 계획 검증                                (aorch decompose --plan)
    ├─ agentRole 필수, role은 손으로 못 쓴다(파생됨)
    └─ decomposed:false면 작업 1개 — 분해 안 하는 것도 정상 결과
@@ -32,7 +33,7 @@ provider
 → 호스트 모델이 evidence와 실제 diff의 의미를 검토
 → 결과 통합
 
-(서브에이전트를 리드가 직접 띄우는 경로는 그대로 — PreToolUse 훅이 aorch classify로 등급을 강제한다)
+(독립 검토는 위험하거나 불확실한 변경에 추가한다. 고정 역할 수와 스폰 거절·재시도는 강제하지 않는다.)
 ```
 
 ## 제작 우선순위와 런타임 정책
@@ -57,7 +58,7 @@ TRIP, LazyCodex, autoresearch, SyMerge 등 참고 자료를 선별해 이 소스
 
 라우터는 모델 점수부터 비교하지 않습니다. 먼저 risk에 따라 허용되는 adapter maturity를 제한하고(experimental adapter는 `experimentalAdapterMaxRisk` 이하 risk에서만), critical 작업에서는 challenger 모델을 후보에서 제외합니다 — reviewer 역할이면서 `criticalMinimumSamples` 이상의 실효 표본을 가진 경우에만 남습니다. 그렇게 좁혀진 후보 안에서 model과 effort를 선택합니다. write isolation은 라우터가 아니라 실행 단계(`aorch exec`)가 강제합니다.
 
-### 다운시프트: classify와 서브에이전트 등급 강제
+### 선택적인 route 평가
 
 `aorch classify --objective "<한 줄 목표>"`는 목표를 kind/complexity로 분류하고 구체적 route를 반환합니다. 바닥선은 complexity가 결정합니다(`low 0.72 / standard 0.80 / high 0.88`). low/standard는 tokens-first로 다운시프트하고, high(security/architecture/debugging)는 quality-first를 유지합니다 — 고난도가 다운시프트되지 않는 것은 의도된 동작입니다.
 
@@ -72,7 +73,7 @@ TRIP, LazyCodex, autoresearch, SyMerge 등 참고 자료를 선별해 이 소스
 | "Investigate and debug the deadlock" | debugging/high | opus |
 | "Design the auth architecture" | architecture/high | opus |
 
-리드가 서브에이전트를 직접 띄우면 PreToolUse 훅(`subagent-gate.mjs`, matcher `Task|Agent`)이 스폰의 objective를 classify하고 **모델 미지정·과등급 스폰을 정확한 모델 안내와 함께 차단**합니다. 안내대로 재시도하면 통과하므로 1회 수렴합니다. 이 훅은 비용 최적화이지 안전장치가 아니라서 모든 실패 경로가 fail-open이며, `AORCH_NO_ENFORCE=1`이 탈출구입니다.
+기존 PreToolUse 등급 강제 훅은 더 이상 등록하지 않습니다. classify는 선택적인 경로 평가이며, 리드는 사용자의 모델 지정과 실제 기능 지원·품질 요구를 보존합니다.
 
 ### change guard, verify 게이트와 escalation
 
@@ -116,11 +117,11 @@ worker 종료 뒤에는 change guard가 actual/claimed diff, scope, read-only �
 1. Claude Code와 Codex의 `UserPromptSubmit` thin gate
 2. root `adaptive-orchestrate` skill과 `aorch-downshift` skill
 3. task-specific provider/model/effort router와 `aorch classify` 난이도 분류
-4. PreToolUse 서브에이전트 등급 강제 훅 (fail-open)
+4. 공통 정의의 제품별 생성, 충돌 감지와 반복 업데이트 무변경
 5. verify 게이트 + 같은 provider escalation 사다리 (Fable은 escalation 전용 잠금 프로필)
 6. claimed diff vs actual diff, scope, read-only, HEAD 대조 change guard
 7. provider limits 상태와 rate-limit 크로스 fallback
-8. 설치된 skill/plugin/hook exact-ID inventory
+8. agent/skill/plugin/hook 출처·활성 설정·실행 관측·동기화 inventory
 9. 시간 감쇠가 적용된 모델 성과 관측(provider·model·effort·taskKind 4차원) + verify-gate 자동 관측
 10. 설정만으로 추가 가능한 모델과 generic provider
 11. bounded worker 디스패치와 receipt 스키마 전달(구조화 출력 강제는 provider CLI에 위임)
@@ -217,13 +218,13 @@ aorch inventory
 
 ```bash
 aorch update              # 등록된 모든 설치본 갱신
-aorch update --check      # 갱신하지 않고 current/stale만 보고
+aorch update --check      # 파일 변경 없이 current/stale/conflict 검사
 aorch update --project /path/to/project
 ```
 
 갱신은 훅·스킬·에이전트·스키마만 다시 쓰고 `.aorch/config.json`은 건드리지 않습니다. 경로가 사라졌거나 통합이 제거된 항목은 레지스트리에서 자동으로 정리됩니다.
 
-**자동 갱신** — 설치된 `user-prompt-submit` 훅이 매 프롬프트마다 payload 해시를 대조하고, 낡았으면 분리된 프로세스로 `aorch update --project <root>`를 띄웁니다(훅의 3초 제한 안에 머물기 위한 구조라 갱신은 다음 프롬프트부터 반영). 실패는 전부 fail-open이고, 스탬프가 없는(설치된 적 없는) 프로젝트에는 절대 설치하지 않습니다. 끄려면 `AORCH_NO_AUTOUPDATE=1`.
+**명시적 갱신** — install/update가 원본을 생성·반영합니다. 프롬프트 훅은 파일을 갱신하거나 프로세스를 띄우지 않습니다. 변경 없는 재실행은 다시 쓰지 않고, 생성 파일의 별도 수정은 충돌로 보고합니다. 전역 정의는 `aorch update --user`로 갱신합니다.
 
 ## 평상시 사용
 

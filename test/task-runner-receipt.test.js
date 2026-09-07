@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { strictReceiptSchema } from '../src/receipts.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -131,7 +132,8 @@ test('the receipt schema carries a required findings list on the shared four-tie
   const schemaPath = new URL('../schemas/worker-receipt.schema.json', import.meta.url);
   const schema = JSON.parse(await readFile(schemaPath, 'utf8'));
   assert.ok(schema.required.includes('findings'), 'strict structured output needs every key required');
-  assert.deepEqual(schema.required, Object.keys(schema.properties), 'required must list every property for OpenAI strict mode');
+  assert.deepEqual(strictReceiptSchema(schema).required, Object.keys(schema.properties), 'the Codex wire schema must require every property');
+  assert.equal(schema.required.includes('inputRequest'), false, 'existing portable receipts remain valid');
   const finding = schema.properties.findings.items;
   assert.deepEqual(finding.required, ['id', 'severity', 'fixCost', 'axis', 'location', 'evidence', 'proposal']);
   assert.equal(finding.additionalProperties, false);
@@ -163,5 +165,5 @@ test('the receipt schema satisfies the Codex strict structured-output contract r
   const schemaPath = new URL('../schemas/worker-receipt.schema.json', import.meta.url);
   const schema = JSON.parse(await readFile(schemaPath, 'utf8'));
 
-  assertStrictObjectContracts(schema);
+  assertStrictObjectContracts(strictReceiptSchema(schema));
 });

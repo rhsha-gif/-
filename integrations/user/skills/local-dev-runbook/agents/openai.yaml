@@ -1,0 +1,7 @@
+interface:
+  display_name: "Local Dev Runbook"
+  short_description: "Run, restart, and diagnose local app environments."
+  default_prompt: "Use $local-dev-runbook to inspect this project, give or run the correct local commands, and verify its services, ports, and origins."
+
+policy:
+  allow_implicit_invocation: true

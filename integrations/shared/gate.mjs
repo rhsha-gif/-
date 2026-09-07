@@ -97,14 +97,8 @@ export function classifyPrompt(prompt) {
 }
 
 export function buildGateContext(classification) {
-  const requestClass = classification?.requestClass ?? 'read-only';
-  const riskHint = classification?.riskHint ?? 'low';
-  const failPolicy = classification?.failPolicy ?? 'open';
-
-  return `ROOT GATE: The adaptive orchestrator must run first for this prompt.\n` +
-    `Classification: ${requestClass}; risk hint: ${riskHint}; gate failure policy: ${failPolicy}.\n` +
-    `This blocking hook is intentionally thin. Perform task decomposition, inventory lookup, route scoring, and provider execution outside this hook by invoking the adaptive-orchestrate skill.\n` +
-    `The orchestrator must preserve the user's final goal, avoid unnecessary task splitting, and choose each bounded task's provider, model, reasoning effort, skills, hooks, plugins, permissions, isolation, and verification plan from capabilities that are actually installed for the task risk.\n` +
-    `Treat worker output as a claim, not proof. aorch exec runs each task's verificationCommands itself and escalates on failure; give development tasks real verification commands. Keep delegation shallow and do not let workers modify the harness or control-plane policy.\n` +
-    `A simple read-only request may be completed directly after this classification. Development or high-risk work must carry explicit acceptance criteria, bounded scope, and verification commands.`;
+  return `aorch / adaptive-orchestrate: ${classification?.requestClass ?? 'unknown'}; risk hint ${classification?.riskHint ?? 'unknown'}. ` +
+    'The lead decides decomposition outside this hook. Complete small clear work directly; delegate only for useful independence or context separation. ' +
+    'Select provider, model, reasoning effort, skills, hooks and plugins only when needed. Preserve project permissions, change guard and relevant verification. ' +
+    'Return delegated questions to this conversation. Synchronize definitions through install/update, never from a prompt hook.';
 }

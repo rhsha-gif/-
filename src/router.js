@@ -1,4 +1,5 @@
 import { estimateRouteQuality } from './performance-store.js';
+import { providerBindingKey } from './capabilities.js';
 
 const ROUTE_METRICS = ['quality', 'tokens', 'latency'];
 const TASK_COMPLEXITIES = ['low', 'standard', 'high', 'critical'];
@@ -21,20 +22,23 @@ function clamp01(value) {
   return Math.min(1, Math.max(0, value));
 }
 
-function providerSupportsCapabilities(provider, requestedIds, inventory) {
+function providerSupportsCapabilities(provider, requestedIds, inventory, type) {
+  const key = providerBindingKey(provider);
   if (!requestedIds?.length) return true;
   const byId = new Map();
   const ambiguousIds = new Set();
   for (const entry of inventory ?? []) {
+    if (type ? entry.type !== type : entry.type === 'agent') continue;
     if (byId.has(entry.id)) ambiguousIds.add(entry.id);
     else byId.set(entry.id, entry);
   }
   return requestedIds.every((id) => {
     if (ambiguousIds.has(id)) return false;
     const capability = byId.get(id);
-    if (!capability || capability.enabled === false) return false;
-    const providers = capability.providers ?? ['*'];
-    return providers.includes('*') || providers.includes(provider);
+    if (!capability || capability.enabled === false || capability.bindings?.[key]?.enabled === false || capability.bindings?.[key]?.mode === 'bridge'
+      || ['conflict', 'stale', 'not-installed'].includes(capability.bindings?.[key]?.syncStatus)) return false;
+    const providers = capability.executionProviders ?? capability.providers ?? ['*'];
+    return providers.includes('*') || providers.includes(key) || providers.includes(provider?.id ?? provider);
   });
 }
 
@@ -55,11 +59,20 @@ function providerAllowedForTask(provider, task, policy) {
   return true;
 }
 
+function agentSupportsProfile(profile, task, catalog) {
+  const agent = task.agentId && catalog.capabilities?.find((entry) => entry.type === 'agent' && entry.id === task.agentId);
+  const settings = agent?.bindings?.[providerBindingKey(providerMetadata(catalog, profile.provider))]?.settings;
+  // Native preset models are interactive defaults. As for agentRole, aorch
+  // owns the headless model/effort; an explicit task profile pin is binding.
+  return !(task.write === true && settings?.sandbox_mode === 'read-only');
+}
+
 function supportsTask(profile, task, catalog) {
   const provider = providerMetadata(catalog, profile.provider);
   return profile.enabled !== false
     && provider.enabled !== false
     && providerAllowedForTask(provider, task, catalog.controlPlane ?? {})
+    && agentSupportsProfile(profile, task, catalog)
     && (profile.roles?.includes(task.role) ?? true)
     && (profile.taskKinds?.includes(task.kind) ?? true)
     && (!task.allowedProviders?.length || task.allowedProviders.includes(profile.provider))
@@ -70,7 +83,8 @@ function supportsTask(profile, task, catalog) {
     // audit); routing by quality cannot express that, because a cheaper tier
     // with an effort bump ties or wins on the prior.
     && (!task.allowedProfileIds?.length || task.allowedProfileIds.includes(profile.id))
-    && providerSupportsCapabilities(profile.provider, task.capabilityIds, catalog.capabilities);
+    && providerSupportsCapabilities(provider, task.capabilityIds, catalog.capabilities)
+    && providerSupportsCapabilities(provider, task.agentId ? [task.agentId] : [], catalog.capabilities, 'agent');
 }
 
 function expandCandidates(task, catalog, complexity) {
@@ -231,6 +245,16 @@ export function forceRoute({ catalog, profileId, effort, task = {} }) {
     throw new Error(`Forced route effort is not defined for ${profileId}: ${effort}`);
   }
   const provider = providerMetadata(catalog, profile.provider);
+  if (provider.enabled === false
+    || !agentSupportsProfile(profile, task, catalog)
+    || (task.allowedProviders?.length && !task.allowedProviders.includes(profile.provider))
+    || (task.forbiddenProviders ?? []).includes(profile.provider)
+    || (task.allowedProfileIds?.length && !task.allowedProfileIds.includes(profile.id))
+    || (task.forbiddenProfileIds ?? []).includes(profile.id)
+    || !providerSupportsCapabilities(provider, task.capabilityIds, catalog.capabilities)
+    || !providerSupportsCapabilities(provider, task.agentId ? [task.agentId] : [], catalog.capabilities, 'agent')) {
+    throw new Error(`Forced route ${profileId} cannot satisfy the task's provider or capability requirements`);
+  }
   const prior = clamp01(
     (profile.quality?.[task.kind] ?? profile.quality?.default ?? 0.5) + (effortSpec.qualityDelta ?? 0)
   );
@@ -274,7 +298,7 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
   // Report generic ineligibility before the critical challenger gate so an
   // empty candidate set is not misattributed to model maturity.
   if (candidates.length === 0) {
-    throw new Error(`No eligible route for task ${task.id ?? '<unknown>'}`);
+    throw new Error(`No eligible route for task ${task.id ?? '<unknown>'}. Check aorch inventory, provider limits and required agent/capabilities${task.agentId ? ` (${task.agentId})` : ''}; enable the required provider or install/update its definitions before execution.`);
   }
 
   if (task.risk === 'critical') {

@@ -372,7 +372,7 @@ export function validateConfig(input) {
   }
 
   const normalizedCapabilities = (input.capabilities ?? []).map((capability) => {
-    if (!['skill', 'plugin', 'hook'].includes(capability.type)) {
+    if (!['skill', 'plugin', 'hook', 'agent'].includes(capability.type)) {
       throw new Error(`Unsupported capability type for ${capability.id}: ${capability.type}`);
     }
     assertNonEmptyStrings(capability.providers ?? ['*'], `capability ${capability.id}.providers`);

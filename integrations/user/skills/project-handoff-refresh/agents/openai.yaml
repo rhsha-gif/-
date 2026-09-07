@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Handoff Refresh"
+  short_description: "Refresh project state and next slice"
+  default_prompt: "Use $project-handoff-refresh to inspect this project and tell me the current state, stale docs, next slice, and validation commands."

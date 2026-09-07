@@ -47,3 +47,5 @@ description: 프로젝트를 최종 관리자의 눈으로 보는 지도(어떻�
 - 존재 사실과 판단을 한 종류의 배지로 섞으면 갭 목록 전체의 신뢰가 떨어진다. 판단에는 반드시 근거 인용.
 - dispatch가 도는 동안 워크트리의 어떤 파일도(미추적 계획 문서 포함) 편집하지 않는다. change guard가 범위 밖 변경으로 잡아 run을 실패 처리한다(2026-09-03 1회차 실측: 리드가 계획 문서 체크박스를 갱신해 실패, 산출물은 게이트 통과라 채택).
 - 워커의 판단 신뢰도 low 항목은 receipt의 unresolvedRisks에 함께 나온다. 갭 목록의 low 항목은 사용자에게 보이되 '판단' 배지로 구분되므로 그대로 둔다.
+
+<!-- aorch-generated: skill:aorch-manager-map; mode=native; edit integrations/shared/definitions.json -->

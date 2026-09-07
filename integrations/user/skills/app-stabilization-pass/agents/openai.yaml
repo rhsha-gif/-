@@ -1,0 +1,7 @@
+interface:
+  display_name: "App Stabilization Pass"
+  short_description: "Stabilize an app or run a bounded project health sweep."
+  default_prompt: "Use $app-stabilization-pass to choose the smallest appropriate stabilization or project-health mode and verify the result end to end."
+
+policy:
+  allow_implicit_invocation: true

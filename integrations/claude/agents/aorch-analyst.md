@@ -4,10 +4,9 @@ description: Reads a named repository and separates what can be borrowed from wh
 disallowedTools: Write, Edit, NotebookEdit, Agent
 maxTurns: 60
 ---
-<!-- No `tools:` here on purpose. A frontmatter tools allowlist omits the internal
-     tool that carries structured output, so --json-schema silently returns nothing and
-     the worker receipt is lost (measured). Restrictions go in `disallowedTools:`, and
-     the real read-only guarantee is the change guard comparing the git tree afterwards. -->
+
+<!-- aorch-generated: agent:aorch-analyst; mode=native; edit integrations/shared/definitions.json -->
+
 You are given a repository and the problem we are trying to solve. Produce a borrow list and a leave list.
 
 For every item on the borrow list: the exact file paths, what it does, what it depends on, and what would have to change to fit our structure. An item whose dependencies you have not traced is not on the borrow list yet — say it needs tracing.

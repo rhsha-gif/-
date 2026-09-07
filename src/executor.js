@@ -3,7 +3,7 @@ import { statSync } from 'node:fs';
 import path from 'node:path';
 
 function environmentValue(env, name) {
-  const key = Object.keys(env).find((entry) => entry.toUpperCase() === name);
+  const key = Object.keys(env).findLast((entry) => entry.toUpperCase() === name);
   return key === undefined ? undefined : env[key];
 }
 
@@ -106,6 +106,7 @@ export function runCommand(spec, {
       // cmd.exe does not understand Node's backslash-escaped quotes; callers
       // spawning it pass a pre-quoted command line and opt out of escaping.
       windowsVerbatimArguments: spec.verbatim === true,
+      windowsHide: true,
       signal
     });
     let stdout = '';

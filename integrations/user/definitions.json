@@ -1,0 +1,295 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "id": "plan",
+      "description": "Write an executable plan only when requested or consequential design uncertainty remains.",
+      "instructions": "agents/plan.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Agent"
+        },
+        "openai": {
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    },
+    {
+      "id": "metis",
+      "description": "Identify consequential ambiguity, missing constraints and execution risks before planning.",
+      "instructions": "agents/metis.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent"
+        },
+        "openai": {
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "momus",
+      "description": "Review whether a supplied plan is executable and its checks prove the stated outcome.",
+      "instructions": "agents/momus.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent"
+        },
+        "openai": {
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "explorer",
+      "description": "Map a bounded repository question to concrete files, symbols and evidence.",
+      "instructions": "agents/explorer.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent"
+        },
+        "openai": {
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "librarian",
+      "description": "Research official documentation or open-source implementations and return verifiable citations.",
+      "instructions": "agents/librarian.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent"
+        },
+        "openai": {
+          "sandbox_mode": "read-only"
+        }
+      }
+    }
+  ],
+  "skills": [
+    {
+      "id": "dependency-audit",
+      "description": "Check the need, compatibility and maintenance cost of a proposed new dependency.",
+      "source": "skills/dependency-audit",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "execute-plan",
+      "description": "Execute an approved plan or continue interrupted work from current changes and saved evidence.",
+      "source": "skills/execute-plan",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "interview",
+      "description": "Clarify consequential requirements when the user asks for an interview or unresolved choices prevent useful progress.",
+      "source": "skills/interview",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "invest-judge",
+      "description": "개인 투자 판단을 감사해 결정 레코드로 남기는 스킬. 새 자산에 들어갈지 고민할 때, 보유 자산의 테제가 바뀌었거나 폐기해야 할 때, 무효화 조건을 고치려 할 때, 전면 매도를 검토할 때 반드시 사용한다. \"이거 사도 될까\", \"판단 좀 봐줘\", \"테제가 바뀐 것 같다\", \"들어가도 되나\", \"지금 팔아야 하나\", \"투자 검토해줘\" 같은 요청이 전부 해당된다. 사전 규칙대로의 스케줄 집행(정해둔 날 정해둔 금액 매수)에는 쓰지 않는다 — 그건 판단이 아니라 실행이다. 지표 관측값을 기록하거나 시한이 온 예측을 판정할 때는 invest-resolve를 쓴다.",
+      "source": "skills/invest-judge",
+      "providers": [
+        "anthropic"
+      ]
+    },
+    {
+      "id": "invest-resolve",
+      "description": "투자 판단의 지표 관측값을 원장에 기록하고 시한이 온 예측을 판정하는 스킬. 무효화 조건이나 판정 지표를 확인했을 때, 재심사 시점이 왔을 때, 무효화가 발동했을 때, 예측의 시한이 도래했을 때 반드시 사용한다. \"T-Q6 확인했어\", \"지표 기록해줘\", \"거래대금 이랬어\", \"이 판단 어떻게 됐지\", \"시한 지났는데\", \"관측값 남겨줘\", \"재심사 할 때야\" 같은 요청이 전부 해당된다. 새로 판단을 내리거나 테제를 바꿀 때는 invest-judge를 쓴다 — 이 스킬은 이미 내린 판단을 채점하는 쪽이다.",
+      "source": "skills/invest-resolve",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "plan",
+      "description": "Turn agreed requirements into a bounded executable plan when requested or when unresolved design choices need a durable record.",
+      "source": "skills/plan",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "project-health-check",
+      "description": "프로젝트 전체를 파악해 디버깅 → 실사용 문제 발굴 → 코드 부채 제거까지 수행하는 종합 점검 워크플로. 사용자가 \"프로젝트 파악해서 디버깅\", \"실사용시 문제점 파악해서 해결\", \"코드 부채 없애고 리팩토링\", \"최대한의 자유도를 갖고 최적화\", \"debug and refactor\", \"tech debt sweep\", \"전체 점검\" 등 프로젝트 단위의 진단+수리+정리를 요청하면 반드시 이 스킬을 사용한다. 단일 버그 수정 요청에는 사용하지 않는다.",
+      "source": "skills/project-health-check",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "resume-work",
+      "description": "Alias for execute-plan when the user asks to continue interrupted work.",
+      "source": "skills/resume-work",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "ship",
+      "description": "검증 → 논리적 커밋 분할 → 푸시 확인까지 한 번에 처리하는 마감 스킬. 사용자가 \"커밋해\", \"커밋하고 푸시해\", \"푸시해\", \"마감해\", \"정리해서 올려\", \"테스트 통과하면 커밋까지\"처럼 변경사항의 저장소 반영을 요청하면 반드시 사용한다. 프로젝트 규약의 검증 명령을 먼저 통과시킨 뒤에만 커밋하고, 검증 실패 시 커밋하지 않는다.",
+      "source": "skills/ship",
+      "providers": [
+        "anthropic"
+      ]
+    },
+    {
+      "id": "app-stabilization-pass",
+      "description": "Stabilize, optimize, harden, baseline, or clean up an application after feature work, and perform a project-wide health sweep when explicitly requested. Use for post-MVP stabilization, full-project debugging, real-user-flow inspection, bounded technical-debt cleanup, operational AGENTS/docs repair, and final build/test/manual validation without broad redesign or feature expansion.",
+      "source": "skills/app-stabilization-pass",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "karpathy-guidelines",
+      "description": "Keep coding changes small, scoped and verifiable when implementation judgement would benefit from a checklist.",
+      "source": "skills/karpathy-guidelines",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "local-dev-runbook",
+      "description": "Inspect, run, safely restart, and smoke-test local applications, including domain, origin, port, API URL, CORS, cookie, auth callback, WebSocket, and environment-variable diagnostics. Use when the user needs exact PowerShell/CMD commands, a verified localhost workflow, a deterministic frontend/backend restart, or help resolving mixed local, preview, and production URLs on Windows or other local development environments.",
+      "source": "skills/local-dev-runbook",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "package-recent-workflows",
+      "description": "Audit recent Codex work history to find repeated manual workflows worth packaging as skills, custom subagents, or automations. Use when the user asks to look back over recent work, identify recurring workflows, avoid duplicate reusable assets, create only high-confidence missing packages, or summarize packaging decisions from Codex sessions, memories, rollout summaries, Chronicle, skills, agents, or automations.",
+      "source": "skills/package-recent-workflows",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "paper-lookup",
+      "description": "Find scholarly sources, identifiers and reproducible retrieval evidence. Verify source content separately before using it to support a claim.",
+      "source": "skills/paper-lookup",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "playwright",
+      "description": "Use when the task requires automating a real browser from the terminal (navigation, form filling, snapshots, screenshots, data extraction, UI-flow debugging) via `playwright-cli` or the bundled wrapper script.",
+      "source": "skills/playwright",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "project-handoff-refresh",
+      "description": "Use when a user asks to inspect project status, continue unfinished Codex work, refresh AGENTS.md, roadmap, progress, or handoff docs, identify stale assumptions, choose the next implementation slice, or produce exact validation commands after prior sessions.",
+      "source": "skills/project-handoff-refresh",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "real-app-screenshot-tour",
+      "description": "Use when a user asks for real running-app screenshots, mobile screenshot tours, product demo captures, Playwright screenshots, before/after visual evidence, or app-store/portfolio images captured from localhost or a deployed app rather than generated imagery.",
+      "source": "skills/real-app-screenshot-tour",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "vercel-deploy",
+      "description": "Use when deploying, previewing, promoting, inspecting logs, pulling env vars, or managing a Vercel-hosted app, especially when the user asks to deploy, push live, create a preview URL, check Vercel logs, or sync Vercel environment variables.",
+      "source": "skills/vercel-deploy",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "book-illustration-director",
+      "description": "Plan, register, and review book artwork for projects whose illustrationMode is optional or required, including art briefs, slots, manifests, final assets, alt text, captions, hashes, and rights status. Use when an art-enabled book needs illustration direction or asset integration. Do not use or create art work, folders, placeholders, prompts, or blockers when illustrationMode is none.",
+      "source": "skills/book-illustration-director",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "book-pdf-production",
+      "description": "Validate and render repository book projects into fixed-page HTML previews and PDFs, then inspect page count, trim size, overflow, navigation, assets, and representative screenshots. Use for preview generation, PDF export, rendering diagnostics, or layout fixes. Do not use to grant editorial readiness, invent manual QA results, or create human approvals.",
+      "source": "skills/book-pdf-production",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "book-production-coordinator",
+      "description": "Initialize, inspect, resume, migrate, and route repository book projects through planning, research, manuscript, optional art, PDF, and QA. Use for a new book, an existing books directory handoff, a next-step or status question, or cross-stage coordination. Do not use for a single already-routed writing, research, art, PDF, or QA task unless its handoff or readiness state also needs coordination.",
+      "source": "skills/book-production-coordinator",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "book-production-qa",
+      "description": "Perform acceptance QA for fixed-page repository books using contract validation, full PDF QA, review evidence, representative screenshots, Korean/CJK glyph inspection, corrections, blockers, and readiness gates. Use before sharing, editorial-ready transition, publication, release, or when diagnosing acceptance failures. Do not use for drafting, source discovery, or automated approval creation.",
+      "source": "skills/book-production-qa",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "book-project-architect",
+      "description": "Create and revise schemaVersion 2 planning contracts for PDF-first books: editorial brief, reader model, book structure, chapter plans, page plan, format, and quality assumptions. Use when a topic, audience, notes, or rough outline needs a production-ready structure. Do not use to draft page prose, retrieve sources, create art, render PDFs, or perform final QA.",
+      "source": "skills/book-project-architect",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "manuscript-writing-review",
+      "description": "Review and improve sentence-level clarity, terminology, voice, numerical consistency, and citation integrity in scientific or engineering manuscripts. Use implicitly only for scientific or engineering prose, research-paper-style text, or an explicit request for this review method. Do not trigger for ordinary Korean book prose, general proofreading, factual verification, statistical analysis, or citation formatting.",
+      "source": "skills/manuscript-writing-review",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "page-manuscript-writer",
+      "description": "Draft and revise schemaVersion 2 fixed-page book prose from approved chapter and page plans, including valid page frontmatter and claim anchors. Use when converting plans into pages/page-NNN.md files, revising book prose, or fixing content-driven page-fit issues. Do not use for planning-only work, source discovery, scientific-review methodology, art production, PDF export, or final acceptance QA.",
+      "source": "skills/page-manuscript-writer",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    }
+  ]
+}

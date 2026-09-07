@@ -1,9 +1,16 @@
 const DEFAULT_LIMITS = Object.freeze({ skills: 3, plugins: 2, hooks: 3 });
 const TYPE_TO_BUCKET = Object.freeze({ skill: 'skills', plugin: 'plugins', hook: 'hooks' });
 
+export function providerBindingKey(provider) {
+  return provider?.adapter === 'claude' ? 'anthropic' : provider?.adapter === 'codex' ? 'openai' : provider?.id ?? provider;
+}
+
 function isCompatible(capability, provider) {
-  const providers = capability.providers ?? ['*'];
-  return providers.includes('*') || providers.includes(provider);
+  const key = providerBindingKey(provider);
+  if (capability.bindings?.[key]?.enabled === false || capability.bindings?.[key]?.mode === 'bridge') return false;
+  if (['conflict', 'stale', 'not-installed'].includes(capability.bindings?.[key]?.syncStatus)) return false;
+  const providers = capability.executionProviders ?? capability.providers ?? ['*'];
+  return providers.includes('*') || providers.includes(key) || providers.includes(provider?.id ?? provider);
 }
 
 export function selectCapabilities({
@@ -12,6 +19,7 @@ export function selectCapabilities({
   const byId = new Map();
   const ambiguousIds = new Set();
   for (const entry of inventory) {
+    if (entry.type === 'agent') continue;
     if (byId.has(entry.id)) ambiguousIds.add(entry.id);
     else byId.set(entry.id, entry);
   }
@@ -32,7 +40,7 @@ export function selectCapabilities({
 
     const bucket = TYPE_TO_BUCKET[capability.type];
     if (!bucket) throw new Error(`Unsupported capability type for ${id}: ${capability.type}`);
-    result[bucket].push(capability);
+    result[bucket].push({ ...capability, path: capability.bindings?.[providerBindingKey(provider)]?.path ?? capability.path });
   }
 
   for (const [bucket, entries] of Object.entries(result)) {

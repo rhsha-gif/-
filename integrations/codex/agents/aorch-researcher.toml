@@ -1,3 +1,4 @@
+# aorch-generated: agent:aorch-researcher; mode=native; edit integrations/shared/definitions.json
 name = "aorch_researcher"
 description = "Finds candidate open-source projects on the web and records verifiable evidence about each one."
 sandbox_mode = "read-only"

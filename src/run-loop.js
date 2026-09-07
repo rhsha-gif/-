@@ -6,6 +6,7 @@ import { appendObservation } from './observations.js';
 import { detectRateLimit, setLimit, DEFAULT_LIMIT_MINUTES } from './limits.js';
 import { writeJsonAtomic } from './fs-util.js';
 import { captureGitSnapshot, evaluateChangeGuard } from './change-guard.js';
+import { normalizeReceiptInputRequest } from './receipts.js';
 
 function routeSummary(route) {
   return { provider: route.provider, profileId: route.profileId, model: route.model, effort: route.effort };
@@ -204,6 +205,15 @@ export async function executeWithVerification({
       });
     }
 
+    try { execution.receipt = normalizeReceiptInputRequest(execution.receipt); }
+    catch (error) {
+      await failReceiptVerdict({ attempt, route: execution.route, runDir: execution.runDir, changeGuard, attempts, receipt: execution.receipt, verdict: error.message });
+    }
+    if (execution.receipt.inputRequest) {
+      attempts.push({ attempt, route: routeSummary(execution.route), passed: null, changeGuardPassed: true, awaitingInput: true });
+      await writeJsonAtomic(evidencePath, { attempt, route: routeSummary(execution.route), passed: null, results: [], changeGuard, inputRequest: execution.receipt.inputRequest });
+      return { ...execution, status: 'awaiting-input', inputRequest: execution.receipt.inputRequest, verification: null, attempts };
+    }
     const verdict = receiptVerdict(execution.receipt);
     if (verdict) {
       await failReceiptVerdict({

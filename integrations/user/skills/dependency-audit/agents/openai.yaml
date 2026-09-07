@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dependency Audit"
+  short_description: "Review dependency risk before adding packages."
+  default_prompt: "Use $dependency-audit to evaluate this package before adding it to the project."

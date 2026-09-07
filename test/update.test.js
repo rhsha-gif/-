@@ -49,16 +49,16 @@ test('update refreshes a stale install and leaves a current one untouched', asyn
   assert.equal(untouched.results[0].status, 'current');
   assert.equal(untouched.refreshed, 0);
 
-  // Simulate a package change: the stamp no longer matches the payload, and a
-  // hand-edited installed file must be restored.
+  // A stale stamp does not authorize overwriting a user's generated-file edit.
   await markStale(projectRoot);
   const hookPath = path.join(projectRoot, '.aorch/hooks/gate.mjs');
   await writeFile(hookPath, '// clobbered\n', 'utf8');
 
   const refreshed = await updateInstalls({ projects: [projectRoot] });
-  assert.equal(refreshed.results[0].status, 'refreshed');
-  assert.match(await readFile(hookPath, 'utf8'), /classifyPrompt/);
-  assert.equal((await readStamp(projectRoot)).payloadHash, await computePayloadHash());
+  assert.equal(refreshed.results[0].status, 'failed');
+  assert.equal(refreshed.results[0].conflicts[0].reason, 'edited-generated-file');
+  assert.equal(await readFile(hookPath, 'utf8'), '// clobbered\n');
+  assert.equal((await readStamp(projectRoot)).payloadHash, 'stale-payload-hash');
 });
 
 test('update preserves a project-tuned config and reports check mode without writing', async () => {
@@ -98,72 +98,14 @@ test('update prunes registry entries whose project is gone or uninstalled', asyn
   assert.ok(!(registryKey(uninstalled) in registry.projects));
 });
 
-test('auto-refresh never installs into a project that never opted in', async () => {
-  const bare = await newProject('aorch-autoupdate-bare-');
-  const result = await refreshIfStale({ projectRoot: bare, wait: true, env: {} });
-  assert.equal(result.status, 'unmanaged');
-  await assert.rejects(() => readFile(path.join(bare, '.claude/settings.json'), 'utf8'), /ENOENT/);
-});
-
-test('auto-refresh restores a stale install and honours the opt-out', async () => {
-  const projectRoot = await newProject('aorch-autoupdate-');
+test('old prompt-hook callers never spawn or mutate, even with a stale install', async () => {
+  const projectRoot = await newProject('aorch-explicit-update-');
   await installProject({ projectRoot, target: 'claude' });
   await markStale(projectRoot);
-
-  const optedOut = await refreshIfStale({
-    projectRoot,
-    wait: true,
-    env: { ...process.env, AORCH_NO_AUTOUPDATE: '1' }
-  });
-  assert.equal(optedOut.status, 'disabled');
+  let calls = 0;
+  const results = await Promise.all(Array.from({ length: 8 }, () => refreshIfStale({ projectRoot, wait: true, env: {}, spawnProcess: () => { calls += 1; } })));
+  assert.ok(results.every((result) => result.reason === 'explicit-update-required'));
+  assert.equal(calls, 0);
   assert.equal((await readStamp(projectRoot)).payloadHash, 'stale-payload-hash');
-
-  const refreshed = await refreshIfStale({ projectRoot, wait: true, env: {} });
-  assert.equal(refreshed.status, 'refreshed');
-  assert.equal((await readStamp(projectRoot)).payloadHash, await computePayloadHash());
-  assert.equal(await refreshIfStale({ projectRoot, wait: true, env: {} }).then((r) => r.status), 'current');
-});
-
-test('the background refresh spawns at most one updater per project', async () => {
-  const projectRoot = await newProject('aorch-autoupdate-lock-');
-  await installProject({ projectRoot, target: 'claude' });
-  await markStale(projectRoot);
-
-  // Stub the spawn: a real detached updater would race this test's assertions.
-  const spawned = [];
-  const spawnProcess = (command, args) => {
-    spawned.push({ command, args });
-    return { unref() {} };
-  };
-
-  const first = await refreshIfStale({ projectRoot, env: {}, spawnProcess });
-  const second = await refreshIfStale({ projectRoot, env: {}, spawnProcess });
-  assert.equal(first.status, 'spawned');
-  assert.equal(second.status, 'pending');
-  assert.equal(spawned.length, 1);
-  assert.deepEqual(spawned[0].args.slice(-3), ['update', '--project', path.resolve(projectRoot)]);
-
-  // A stale lock must not block refreshes forever.
-  const later = await refreshIfStale({ projectRoot, env: {}, now: Date.now() + 120_000, spawnProcess });
-  assert.equal(later.status, 'spawned');
-  assert.equal(spawned.length, 2);
-});
-
-test('the background refresh claims a missing lock exclusively', async () => {
-  const projectRoot = await newProject('aorch-autoupdate-exclusive-lock-');
-  await installProject({ projectRoot, target: 'claude' });
-  await markStale(projectRoot);
-
-  const spawned = [];
-  const spawnProcess = (command, args) => {
-    spawned.push({ command, args });
-    return { unref() {} };
-  };
-
-  const results = await Promise.all(Array.from({ length: 8 }, () => (
-    refreshIfStale({ projectRoot, env: {}, spawnProcess })
-  )));
-  assert.equal(results.filter((result) => result.status === 'spawned').length, 1);
-  assert.equal(results.filter((result) => result.status === 'pending').length, 7);
-  assert.equal(spawned.length, 1);
+  assert.equal((await updateInstalls({ projects: [projectRoot] })).refreshed, 1);
 });

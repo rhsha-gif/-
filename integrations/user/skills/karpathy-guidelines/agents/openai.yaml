@@ -1,0 +1,7 @@
+interface:
+  display_name: "Karpathy Guidelines"
+  short_description: "Minimal, surgical, test-driven coding workflow."
+  default_prompt: "Use $karpathy-guidelines when writing, reviewing, debugging, or refactoring code."
+
+policy:
+  allow_implicit_invocation: true

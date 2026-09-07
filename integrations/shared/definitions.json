@@ -1,0 +1,287 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "id": "aorch-analyst",
+      "description": "Reads a named repository and separates what can be borrowed from what cannot, with file paths and dependencies.",
+      "instructions": "agents/aorch-analyst.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-analyst",
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent",
+          "maxTurns": 60
+        },
+        "openai": {
+          "name": "aorch_analyst",
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "aorch-auditor",
+      "description": "Synthesises the review receipts and usage evidence for one project into ranked findings; judges only, edits nothing.",
+      "instructions": "agents/aorch-auditor.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-auditor",
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent",
+          "maxTurns": 60
+        },
+        "openai": {
+          "name": "aorch_auditor",
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "aorch-editor",
+      "description": "Edits wording, phrasing and typos in drafted prose directly; reports substance concerns instead of rewriting them.",
+      "instructions": "agents/aorch-editor.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-editor",
+          "disallowedTools": "Agent",
+          "maxTurns": 60
+        },
+        "openai": {
+          "name": "aorch_editor",
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    },
+    {
+      "id": "aorch-fixer",
+      "description": "Repairs a bounded task that failed its verification gate, using the failure output and the existing diff.",
+      "instructions": "agents/aorch-fixer.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-fixer",
+          "disallowedTools": "Agent",
+          "maxTurns": 80
+        },
+        "openai": {
+          "name": "aorch_fixer",
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    },
+    {
+      "id": "aorch-invest-analyst",
+      "description": "Analyses gathered investment evidence into support, refutation and blind spots, shaped as decision-record input.",
+      "instructions": "agents/aorch-invest-analyst.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-invest-analyst",
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent",
+          "maxTurns": 50
+        },
+        "openai": {
+          "name": "aorch_invest_analyst",
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "aorch-license-reviewer",
+      "description": "Reads the actual licence text and states what obligations each intended form of reuse would carry.",
+      "instructions": "agents/aorch-license-reviewer.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-license-reviewer",
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent",
+          "maxTurns": 40
+        },
+        "openai": {
+          "name": "aorch_license_reviewer",
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "aorch-paper-researcher",
+      "description": "Searches academic sources through the paper-search MCP and records verifiable bibliographic evidence without ranking.",
+      "instructions": "agents/aorch-paper-researcher.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-paper-researcher",
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent",
+          "maxTurns": 40
+        },
+        "openai": {
+          "name": "aorch_paper_researcher",
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "aorch-ponytail",
+      "description": "Looks for what does not need to be written at all, and makes whatever survives justify itself. The user may name this role in Korean as 포니테일.",
+      "instructions": "agents/aorch-ponytail.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-ponytail",
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent",
+          "maxTurns": 40
+        },
+        "openai": {
+          "name": "aorch_ponytail",
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "aorch-qa-analyst",
+      "description": "Reads what the book QA commands already computed and renders a verdict, opening only changed or machine-flagged pages.",
+      "instructions": "agents/aorch-qa-analyst.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-qa-analyst",
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent",
+          "maxTurns": 40
+        },
+        "openai": {
+          "name": "aorch_qa_analyst",
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "aorch-refactorer",
+      "description": "Performs behavior-preserving restructuring directly; reports any public-API or behavior change as a judgement instead of making it.",
+      "instructions": "agents/aorch-refactorer.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-refactorer",
+          "disallowedTools": "Agent",
+          "maxTurns": 80
+        },
+        "openai": {
+          "name": "aorch_refactorer",
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    },
+    {
+      "id": "aorch-researcher",
+      "description": "Finds candidate open-source projects on the web and records verifiable evidence about each one.",
+      "instructions": "agents/aorch-researcher.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-researcher",
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent",
+          "maxTurns": 40
+        },
+        "openai": {
+          "name": "aorch_researcher",
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "aorch-reviewer",
+      "description": "Deep independent correctness and risk reviewer for high-impact changes.",
+      "instructions": "agents/aorch-reviewer.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-reviewer",
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent",
+          "maxTurns": 60
+        },
+        "openai": {
+          "name": "aorch_reviewer",
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "aorch-scout",
+      "description": "Fast read-only repository scout used for bounded code mapping and evidence collection.",
+      "instructions": "agents/aorch-scout.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-scout",
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent",
+          "model": "haiku",
+          "effort": "low",
+          "maxTurns": 25
+        },
+        "openai": {
+          "name": "aorch_scout",
+          "model": "gpt-5.6-terra",
+          "model_reasoning_effort": "low",
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "aorch-worker",
+      "description": "General bounded implementation worker with explicit acceptance criteria and verification commands.",
+      "instructions": "agents/aorch-worker.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-worker",
+          "disallowedTools": "Agent",
+          "maxTurns": 80
+        },
+        "openai": {
+          "name": "aorch_worker",
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    },
+    {
+      "id": "aorch-writer",
+      "description": "Drafts bounded book prose — a chapter or page set — following the workspace manuscript skill.",
+      "instructions": "agents/aorch-writer.md",
+      "providers": {
+        "anthropic": {
+          "name": "aorch-writer",
+          "disallowedTools": "Agent",
+          "maxTurns": 80
+        },
+        "openai": {
+          "name": "aorch_writer",
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    }
+  ],
+  "skills": [
+    {
+      "id": "adaptive-orchestrate",
+      "description": "Choose task boundaries, needed capabilities and execution providers. Complete small clear tasks directly; delegate when independence or context separation helps.",
+      "source": "skills/adaptive-orchestrate",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "aorch-downshift",
+      "description": "작업을 서브태스크로 나눠 워커(서브에이전트)에게 위임하기 직전에 사용. 각 서브태스크의 등급(모델)을 수동으로 고르지 말고 aorch에 판정을 위임한다.",
+      "source": "skills/aorch-downshift",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "aorch-manager-map",
+      "description": "프로젝트를 최종 관리자의 눈으로 보는 지도(어떻게 돌아가나·사람이 어디서 개입하나·무엇이 돼 있고 빈칸인가·어디를 개선하나)를 aorch 태스크 하나로 만들어 아티팩트로 발행하는 런북. 사용자가 \"관리자 지도\", \"프로젝트가 어떻게 돌아가는지 보여줘\", \"워크플로 점검\", \"빈칸 찾아줘\", \"운영 지도\"라고 할 때 사용한다. 코드 구조·의존 그래프·핫스팟 같은 개발자 지표 요청에는 쓰지 않는다.",
+      "source": "skills/aorch-manager-map",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "aorch-model-upgrade",
+      "description": "새 프런티어 모델이 나왔을 때 프로젝트를 신모델의 판단으로 점검·개선하고 모델 참조를 옮기는 런북. 사용자가 \"신모델 나왔어\", \"모델 업그레이드\", \"새 모델로 점검해\", \"Fable 6 대응\", \"모델 바뀌었으니 점검\"이라고 하거나 카탈로그에 새 모델 프로필을 넣을 때 사용한다. 단일 파일의 모델 ID 치환 요청에는 쓰지 않는다.",
+      "source": "skills/aorch-model-upgrade",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    }
+  ]
+}

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node scripts/check-syntax.mjs && node --test"
+    "check": "node scripts/check-syntax.mjs && node scripts/generate-integrations.mjs --check && node --test"
   },
   "engines": {
     "node": ">=20"

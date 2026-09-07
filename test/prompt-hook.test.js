@@ -27,7 +27,7 @@ test('injects the root orchestration directive for every user prompt', () => {
   assert.equal(result.status, 0);
   const output = JSON.parse(result.stdout);
   const context = output.hookSpecificOutput.additionalContext;
-  assert.match(context, /orchestrator must run first/i);
+  assert.match(context, /Complete small clear work directly/i);
   assert.match(context, /provider.*model.*reasoning effort.*skills.*hooks.*plugins/i);
   assert.doesNotMatch(context, /selection priority is lexicographic/i);
   assert.match(context, /adaptive-orchestrate/);
@@ -51,6 +51,6 @@ test('does not read lessons or perform heavy orchestration in the blocking hook 
   assert.equal(result.status, 0, result.stderr);
   const context = JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
   assert.doesNotMatch(context, /prevention lessons/i);
-  assert.match(context, /classification:/i);
+  assert.match(context, /risk hint/i);
   assert.ok(elapsedMs < 1500, `hook took ${elapsedMs}ms`);
 });

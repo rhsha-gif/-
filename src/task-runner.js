@@ -15,6 +15,7 @@ import { resolveWindowsCommandSpec, runCommand } from './executor.js';
 import { validateTask } from './task.js';
 import { resolveRoleAgent } from './role-agent.js';
 import { runGit } from './change-guard.js';
+import { strictReceiptSchema, normalizeReceiptInputRequest } from './receipts.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RECEIPT_SCHEMA_PATH = path.join(PACKAGE_ROOT, 'schemas', 'worker-receipt.schema.json');
@@ -87,27 +88,32 @@ export async function executeTask({
   const route = forcedRoute
     ? forceRoute({ catalog: config, task, profileId: forcedRoute.profileId, effort: forcedRoute.effort })
     : selectRoute({ task, catalog: config, observations, quota });
+  const provider = providerById(config, route.provider);
   const capabilities = selectCapabilities({
     requestedIds: task.capabilityIds ?? [],
     inventory: config.capabilities,
-    provider: route.provider,
+    provider,
     limits: config.capabilityLimits
   });
-  const provider = providerById(config, route.provider);
   const runId = task.runId ?? randomUUID();
   const runDir = path.join(stateRoot, 'task-runs', runId, task.id);
   const receiptPath = path.join(runDir, 'receipt.json');
   const outputPath = path.join(runDir, 'worker-output.json');
   const schema = JSON.parse(await readFile(RECEIPT_SCHEMA_PATH, 'utf8'));
+  const schemaPath = path.join(runDir, 'receipt-schema.json');
   const prompt = buildTaskPrompt({ task, route, capabilities, receiptPath });
   // A task without agentRole keeps the pre-pipeline behaviour exactly: no
   // preset is resolved and the adapters build the same command as before.
   const rolePreset = await resolveRoleAgent({
     config,
     agentRole: task.agentRole,
+    agentId: task.agentId,
     adapter: provider.adapter,
     cwd
   });
+  if (task.write === true && rolePreset.sandboxMode === 'read-only') {
+    throw new Error('Selected agent is read-only; choose a writing agent or a read-only task before execution');
+  }
 
   let commandSpec;
   if (provider.adapter === 'claude') {
@@ -130,7 +136,7 @@ export async function executeTask({
       prompt,
       route,
       write: task.write === true,
-      schemaPath: RECEIPT_SCHEMA_PATH,
+      schemaPath,
       outputPath,
       ...(rolePreset.agentInstructions ? { agentInstructions: rolePreset.agentInstructions } : {}),
       ...(rolePreset.mcpServers ? { mcpServers: rolePreset.mcpServers } : {}),
@@ -155,7 +161,15 @@ export async function executeTask({
 
   await assertWriteIsolation(task, cwd);
   await mkdir(runDir, { recursive: true });
-  const result = await runCommand(commandSpec, { cwd, timeoutMs });
+  if (provider.adapter === 'codex') await writeJsonAtomic(schemaPath, strictReceiptSchema(schema));
+  let result;
+  try { result = await runCommand(commandSpec, { cwd, timeoutMs }); }
+  catch (error) {
+    error.route = route;
+    error.runDir = runDir;
+    if (error.code === 'ENOENT') error.message = `Provider executable ${provider.executable ?? provider.adapter} is unavailable; install or enable ${provider.id} before retrying`;
+    throw error;
+  }
   if (result.exitCode !== 0) {
     // The run loop needs the route and raw output to tell a rate-limited
     // provider apart from a genuine worker failure. The message carries a
@@ -170,10 +184,13 @@ export async function executeTask({
       `Worker exited with ${result.exitCode}${evidence ? `\n${evidence}` : ''}`
     );
     error.route = route;
+    error.runDir = runDir;
     error.result = result;
     throw error;
   }
-  const receipt = await parseWorkerOutput({ provider, stdout: result.stdout, outputPath });
+  let receipt;
+  try { receipt = normalizeReceiptInputRequest(await parseWorkerOutput({ provider, stdout: result.stdout, outputPath })); }
+  catch (error) { error.route = route; error.runDir = runDir; error.result = result; throw error; }
   // The worker prompt promises the wrapper persists the receipt here, and the
   // CLI hands this path back to the caller. Keep both true.
   await writeJsonAtomic(receiptPath, receipt);

@@ -16,19 +16,24 @@ export async function updateInstalls({ projects, check = false, prune = true } =
     // A project that moved away or was uninstalled stays in the registry
     // forever otherwise, and every later update reports the same dead entry.
     if (inspected.status === 'missing' || inspected.status === 'unmanaged') {
-      if (prune && !explicit) await forgetInstall(inspected.projectRoot);
-      results.push({ projectRoot: inspected.projectRoot, target: inspected.target, status: inspected.status });
-      continue;
-    }
-    if (inspected.status === 'current' || check) {
+      if (prune && !explicit && !check) await forgetInstall(inspected.projectRoot);
       results.push({ projectRoot: inspected.projectRoot, target: inspected.target, status: inspected.status });
       continue;
     }
     try {
+      const sync = await installProject({ projectRoot: inspected.projectRoot, target: inspected.target, check: true });
+      if (sync.status === 'conflict') {
+        results.push({ projectRoot: inspected.projectRoot, target: inspected.target, status: 'failed', conflicts: sync.conflicts, error: 'Generated-file conflict; no files changed' });
+        continue;
+      }
+      if (check || (inspected.status === 'current' && sync.status === 'current')) {
+        results.push({ projectRoot: inspected.projectRoot, target: inspected.target, status: sync.status === 'current' ? inspected.status : 'stale', changed: sync.changed });
+        continue;
+      }
       // forceConfig stays false: a refresh must never discard a project's
       // tuned .aorch/config.json.
-      await installProject({ projectRoot: inspected.projectRoot, target: inspected.target, forceConfig: false });
-      results.push({ projectRoot: inspected.projectRoot, target: inspected.target, status: 'refreshed' });
+      const result = await installProject({ projectRoot: inspected.projectRoot, target: inspected.target, forceConfig: false });
+      results.push({ projectRoot: inspected.projectRoot, target: inspected.target, status: 'refreshed', changed: result.changed, backup: result.backup });
     } catch (error) {
       results.push({
         projectRoot: inspected.projectRoot,

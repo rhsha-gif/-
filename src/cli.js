@@ -8,11 +8,13 @@ import { readObservations, appendObservation } from './observations.js';
 import { selectRoute } from './router.js';
 import { executeWithVerification } from './run-loop.js';
 import { discoverCapabilities, getInventory, mergeCapabilities } from './inventory.js';
-import { installProject } from './install.js';
+import { installProject, installUserDefinitions } from './install.js';
 import { updateInstalls } from './update.js';
 import { validateTask } from './task.js';
 import { validateTaskPlan } from './decompose.js';
 import { dispatchPlan } from './dispatch.js';
+import { continuationPlan, resumeOnce } from './continuation.js';
+import { writeJsonAtomic } from './fs-util.js';
 import { classifyDifficulty } from './difficulty.js';
 import { clearLimits, readLimits, setLimit } from './limits.js';
 
@@ -33,16 +35,17 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  record    Append an independently reviewed model-performance observation\n` +
   `  limits    Show, set, or clear provider usage limits (limits [set <provider> --minutes N | clear [provider]])\n` +
   `  branch    Branch lifecycle: status | apply --action <start|finish|cleanup|sync>\n` +
-  `  inventory Print configured providers, models, skills, plugins, and hooks\n` +
+  `  inventory Print agents, skills, plugins and hooks with source and sync state (--type, --match, --runtime)\n` +
   `  quota     Report each provider's remaining subscription quota via its usageProbe\n` +
-  `  install   Install project-local Claude Code and/or Codex integration\n` +
-  `  update    Refresh installed integrations (update [--project <path>] [--check])\n\n` +
+  `  install   Generate Claude/Codex integrations ([--project <path> | --user] [--target both|claude|codex] [--check])\n` +
+  `  update    Refresh installed integrations ([--project <path> | --user] [--check])\n` +
+  `  dispatch --plan <path> [--resume <dispatch.json> --answers <answers.json>] [--output <path>]\n\n` +
   `Common options:\n` +
   `  --config <path>       Config JSON; defaults to .aorch/config.json or packaged config\n` +
   `  --cwd <path>          Project working directory\n` +
   `  --observations <path> Reviewed outcomes JSONL\n`;
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h', 'approved', 'confirm-unmerged', 'check', 'print-schema']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h', 'approved', 'confirm-unmerged', 'check', 'print-schema', 'user']);
 
 const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
 const COMMAND_FLAGS = Object.freeze({
@@ -50,14 +53,14 @@ const COMMAND_FLAGS = Object.freeze({
   exec: [...COMMON_FLAGS, 'task', 'observations', 'timeout-ms', 'dry-run'],
   classify: [...COMMON_FLAGS, 'objective', 'role', 'risk', 'providers', 'observations'],
   decompose: [...COMMON_FLAGS, 'plan', 'print-schema'],
-  dispatch: [...COMMON_FLAGS, 'plan', 'observations', 'timeout-ms', 'dry-run'],
+  dispatch: [...COMMON_FLAGS, 'plan', 'observations', 'timeout-ms', 'dry-run', 'resume', 'answers', 'output'],
   record: [...COMMON_FLAGS, 'input', 'observations'],
   limits: [...COMMON_FLAGS, 'minutes', 'note'],
-  inventory: [...COMMON_FLAGS],
+  inventory: [...COMMON_FLAGS, 'runtime', 'type', 'match'],
   quota: [...COMMON_FLAGS],
   branch: [...COMMON_FLAGS, 'action', 'approved', 'confirm-unmerged', 'name', 'observations', 'task'],
-  install: ['cwd', 'help', 'h', 'target', 'project', 'force-config'],
-  update: ['cwd', 'help', 'h', 'project', 'check']
+  install: ['cwd', 'help', 'h', 'target', 'project', 'force-config', 'check', 'user'],
+  update: ['cwd', 'help', 'h', 'project', 'check', 'user']
 });
 
 function coerceBoolean(rawKey, value) {
@@ -175,18 +178,26 @@ async function main(argv = process.argv.slice(2)) {
   const cwd = path.resolve(flags.cwd || process.cwd());
 
   if (command === 'install') {
-    const result = await installProject({
+    if (flags.user && (flags.project || flags['force-config'])) throw new Error('--user cannot be combined with --project or --force-config');
+    const result = flags.user ? await installUserDefinitions({ target: flags.target || 'both', check: flags.check === true }) : await installProject({
       projectRoot: path.resolve(cwd, flags.project || '.'),
       target: flags.target || 'both',
-      forceConfig: flags['force-config'] === true
+      forceConfig: flags['force-config'] === true,
+      check: flags.check === true
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-    return 0;
+    return result.status === 'conflict' ? 1 : 0;
   }
 
   // Refresh runs before config loading on purpose: it must work from any
   // directory, including one with no .aorch config of its own.
   if (command === 'update') {
+    if (flags.user) {
+      if (flags.project) throw new Error('--user cannot be combined with --project');
+      const result = await installUserDefinitions({ check: flags.check === true });
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      return result.status === 'conflict' ? 1 : 0;
+    }
     const explicit = typeof flags.project === 'string' ? [path.resolve(cwd, flags.project)] : undefined;
     const result = await updateInstalls({ projects: explicit, check: flags.check === true });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -231,9 +242,9 @@ async function main(argv = process.argv.slice(2)) {
     });
     const output = flags['dry-run'] === true
       ? { route: cleanRoute(result.route), capabilities: result.capabilities, commandSpec: result.commandSpec, runDir: result.runDir }
-      : { route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, runDir: result.runDir, verification: result.verification, attempts: result.attempts };
+      : { status: result.status ?? 'complete', inputRequest: result.inputRequest, route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, runDir: result.runDir, verification: result.verification, attempts: result.attempts };
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
-    return 0;
+    return result.status === 'awaiting-input' ? 2 : 0;
   }
 
   if (command === 'classify') {
@@ -313,9 +324,13 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === 'dispatch') {
     const timeoutMs = numericFlag(flags, 'timeout-ms');
-    const plan = await readJson(requireFlag(flags, 'plan'), cwd);
+    let plan = await readJson(requireFlag(flags, 'plan'), cwd);
+    if (flags.answers && !flags.resume) throw new Error('--answers requires --resume');
+    const previous = flags.resume ? await readJson(requireFlag(flags, 'resume'), cwd) : null;
+    const input = flags.answers ? await readJson(requireFlag(flags, 'answers'), cwd) : null;
+    if (previous) plan = continuationPlan(plan, previous, input);
     const observationsPath = resolveObservationPath(config, flags, cwd);
-    const result = await dispatchPlan({
+    const execute = async () => dispatchPlan({
       plan,
       config,
       observations: await readObservations(observationsPath),
@@ -325,9 +340,14 @@ async function main(argv = process.argv.slice(2)) {
       forbiddenProviders: Object.keys(await readLimits(resolveStateRoot(config, cwd))),
       ...(timeoutMs === undefined ? {} : { timeoutMs })
     });
+    const result = previous && !flags['dry-run'] ? await resumeOnce({ stateRoot: resolveStateRoot(config, cwd), previous, input, execute }) : await execute();
+    if (typeof flags.output === 'string' && !flags['dry-run']) {
+      await writeJsonAtomic(path.resolve(cwd, flags.output), result);
+      if (flags.resume) await writeJsonAtomic(path.resolve(cwd, `${flags.output}.plan.json`), plan);
+    }
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     // A stopped plan must not read as success to a caller checking exit codes.
-    return result.ok ? 0 : 1;
+    return result.ok ? 0 : result.status === 'awaiting-input' ? 2 : 1;
   }
 
   if (command === 'limits') {
@@ -367,7 +387,12 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   if (command === 'inventory') {
-    process.stdout.write(`${JSON.stringify(getInventory(config), null, 2)}\n`);
+    const runtime = flags.runtime ? await readJson(requireFlag(flags, 'runtime'), cwd) : [];
+    if (!Array.isArray(runtime) || runtime.some((id) => typeof id !== 'string')) throw new Error('--runtime must contain an array of current-session capability IDs');
+    if (flags.type && !['agent', 'skill', 'plugin', 'hook'].includes(flags.type)) throw new Error('--type must be agent, skill, plugin or hook');
+    const inventory = getInventory(config, { runtime });
+    inventory.capabilities = inventory.capabilities.filter((entry) => (!flags.type || entry.type === flags.type) && (!flags.match || entry.id.includes(requireFlag(flags, 'match'))));
+    process.stdout.write(`${JSON.stringify(inventory, null, 2)}\n`);
     return 0;
   }
 

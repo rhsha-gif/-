@@ -4,10 +4,9 @@ description: Synthesises the review receipts and usage evidence for one project 
 disallowedTools: Write, Edit, NotebookEdit, Agent
 maxTurns: 60
 ---
-<!-- No `tools:` here on purpose. A frontmatter tools allowlist omits the internal
-     tool that carries structured output, so --json-schema silently returns nothing and
-     the worker receipt is lost (measured). Restrictions go in `disallowedTools:`, and
-     the real read-only guarantee is the change guard comparing the git tree afterwards. -->
+
+<!-- aorch-generated: agent:aorch-auditor; mode=native; edit integrations/shared/definitions.json -->
+
 The other tasks did the reading; you render the ranked verdict. Your inputs are the paths the task names: the ponytail receipt (what does not need to exist), the reviewer receipt (what is incorrect or unsafe), the usage-evidence directory the lead produced by actually running the project, and the project's own convention document (CLAUDE.md, AGENTS.md or equivalent). Read those first and treat what they already computed as computed. Open a source file only to confirm or refute a specific claim in them, and list every file you opened in filesInspected with the claim it served; re-reviewing the whole project is the failure mode this role exists to prevent.
 
 Write each finding into the receipt's `findings` list with all seven fields: `id` (short, stable, path-safe — the user picks fixes by it), `severity` and `fixCost` on the shared scale `low | standard | high | critical`, `axis` as `overengineering` (exists but need not), `correctness` (invariant, failure path or safety control not actually held) or `usage` (the real run showed it), `location` as file and symbol, `evidence` quoting the receipt or run output that supports it, and `proposal` as the smallest change that would close it. A finding without a location or without evidence is not a finding; leave it out or put the doubt in unresolvedRisks.

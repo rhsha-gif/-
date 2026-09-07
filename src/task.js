@@ -3,7 +3,7 @@ const COMPLEXITIES = new Set(['low', 'standard', 'high', 'critical']);
 const DEFAULT_COMPLEXITY_BY_RISK = Object.freeze({ low: 'low', standard: 'standard', high: 'high', critical: 'high' });
 const ROUTE_METRICS = new Set(['quality', 'tokens', 'latency']);
 const KNOWN_TASK_FIELDS = new Set([
-  'id', 'title', 'objective', 'kind', 'agentRole', 'role', 'risk', 'complexity',
+  'id', 'title', 'objective', 'kind', 'agentRole', 'agentId', 'role', 'risk', 'complexity',
   'write', 'allowInPlaceWrite', 'maxTurns', 'runId', 'routingPriorities',
   'minimumQuality', 'maxTokenIndex', 'maxLatencyIndex', 'tags', 'capabilityIds',
   'allowedScope', 'forbiddenScope', 'acceptanceCriteria', 'verificationCommands',
@@ -48,6 +48,7 @@ function ensureStringArray(value, field) {
 export function validateTask(input, { forExecution = false } = {}) {
   if (!input || typeof input !== 'object') throw new TypeError('task must be an object');
   const task = structuredClone(input);
+  if (task.agentId !== undefined && (typeof task.agentId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/.test(task.agentId))) throw new Error('task.agentId must be a path-safe agent identifier');
   for (const field of Object.keys(task)) {
     if (!KNOWN_TASK_FIELDS.has(field)) throw new Error(`Unknown task field: ${field}`);
   }
