@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { forceRoute, selectRoute } from './router.js';
@@ -40,6 +41,13 @@ function grokWorkTimeoutMs(timeoutMs) {
     Math.max(GROK_FINALIZE_MIN_MS, Math.floor(timeoutMs * 0.2))
   );
   return Math.max(1, timeoutMs - finalizeReserve);
+}
+
+async function withProviderLaunchCwd({ isolated, cwd }, operation) {
+  if (!isolated) return operation(cwd);
+  const launchCwd = await mkdtemp(path.join(tmpdir(), 'aorch-codex-launch-'));
+  try { return await operation(launchCwd); }
+  finally { await rmdir(launchCwd); }
 }
 
 // The one safety invariant the judgment layer keeps: writes must not run in the
@@ -294,6 +302,7 @@ export async function executeTask({
       outputPath,
       ...(rolePreset.agentInstructions ? { agentInstructions: rolePreset.agentInstructions } : {}),
       ...(rolePreset.mcpServers ? { mcpServers: rolePreset.mcpServers } : {}),
+      ...(rolePreset.codexFeatures ? { codexFeatures: rolePreset.codexFeatures } : {}),
       executable: provider.executable ?? 'codex'
     });
   } else if (provider.adapter === 'antigravity') {
@@ -344,9 +353,16 @@ export async function executeTask({
     await writeFile(promptPath, grokPrompt, { encoding: 'utf8', mode: 0o600 });
     await writeFile(finalizePromptPath, GROK_FINALIZE_PROMPT, { encoding: 'utf8', mode: 0o600 });
   }
+  const isolateCodexLaunch = provider.adapter === 'codex'
+    && rolePreset.codexFeatures?.shell_tool === false;
   const runWorker = async (spec, budgetMs, phase = 'Worker') => {
     let execution;
-    try { execution = await runCommandImpl(spec, { cwd, timeoutMs: budgetMs }); }
+    try {
+      execution = await withProviderLaunchCwd(
+        { isolated: isolateCodexLaunch, cwd },
+        (launchCwd) => runCommandImpl(spec, { cwd: launchCwd, timeoutMs: budgetMs })
+      );
+    }
     catch (error) {
       error.route = route;
       error.runDir = runDir;

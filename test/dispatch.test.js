@@ -231,7 +231,7 @@ test('a Claude preset is resolved for existence and its turn budget, before anyt
   const researcher = await resolveRoleAgent({ config, agentRole: 'researcher', adapter: 'claude', cwd: root });
   assert.equal('mcpConfig' in researcher, false);
   const codexPapers = await resolveRoleAgent({ config, agentRole: 'paper-researcher', adapter: 'codex', cwd: root });
-  assert.deepEqual(codexPapers.mcpServers, { 'paper-search': { command: 'uvx', args: ['paper-search-mcp'] } });
+  assert.deepEqual(codexPapers.mcpServers, { 'paper-search': { command: 'uvx', args: ['paper-search-mcp'], enabled_tools: papers.mcpTools.map(tool => tool.replace(/^mcp__paper-search__/, '')) } });
   const codexResearcher = await resolveRoleAgent({ config, agentRole: 'researcher', adapter: 'codex', cwd: root });
   assert.equal('mcpServers' in codexResearcher, false);
 

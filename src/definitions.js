@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertScopedFile, scopedPath, readOptional } from './definition-sync.js';
 import { targetList } from './install-registry.js';
+import { NO_SHELL_FEATURES, noShellSettings } from './codex-restrictions.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DEFINITION_PROVIDERS = Object.freeze(['anthropic', 'openai', 'antigravity', 'grok']);
@@ -10,7 +11,7 @@ const PROVIDERS = DEFINITION_PROVIDERS;
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/;
 const SETTINGS = {
   anthropic: new Set(['name', 'model', 'effort', 'maxTurns', 'disallowedTools', 'tools', 'permissionMode', 'skills', 'mcpServers', 'hooks', 'memory', 'isolation', 'ship_triggers']),
-  openai: new Set(['name', 'model', 'model_reasoning_effort', 'sandbox_mode']),
+  openai: new Set(['name', 'model', 'model_reasoning_effort', 'sandbox_mode', 'features', 'ship_triggers']),
   antigravity: new Set(['name', 'model', 'tools', 'mainAgent', 'subagent']),
   grok: new Set(['name', 'model', 'tools', 'disallowedTools'])
 };
@@ -60,6 +61,14 @@ export async function loadDefinitions({ cwd = process.cwd(), packageRoot = PACKA
           const settings = { ...config };
           delete settings.instructions;
           for (const field of Object.keys(settings)) if (!SETTINGS[provider].has(field)) throw new Error(`Unsupported ${provider} agent setting: ${field}`);
+          if (provider === 'openai' && settings.features !== undefined) {
+            if (!settings.features || Array.isArray(settings.features) || typeof settings.features !== 'object'
+              || Object.entries(settings.features).some(([key, value]) => !Object.hasOwn(NO_SHELL_FEATURES, key) || typeof value !== 'boolean')) throw new Error(`Invalid Codex features: ${key}`);
+            if (noShellSettings(settings) && settings.sandbox_mode !== 'read-only') throw new Error(`No-shell Codex agent requires read-only sandbox: ${key}`);
+            if (noShellSettings(settings) && sourceScope !== 'project') throw new Error(`No-shell Codex agent requires a project-scoped definition: ${key}`);
+          }
+          if (provider === 'openai' && settings.ship_triggers !== undefined
+            && (!Array.isArray(settings.ship_triggers) || settings.ship_triggers.some(value => typeof value !== 'string' || !value.trim()))) throw new Error(`Invalid ship_triggers: ${key}`);
           const name = settings.name ?? (type === 'agent' && provider === 'openai' ? entry.id.replaceAll('-', '_') : entry.id);
           if (!ID.test(name)) throw new Error(`Invalid provider name: ${name}`);
           const instructionsPath = config.instructions ? await sourcePath(scope, manifestPath, config.instructions) : canonicalPath;
@@ -160,8 +169,17 @@ export async function renderDefinitions({ definitions, target = 'both', packageR
         const body = native ? binding.instructions : bridgeText(definition);
         const settings = native ? binding.settings : provider === 'openai' ? { sandbox_mode: 'read-only' } : { tools: [], disallowedTools: 'Write, Edit, NotebookEdit, Bash, PowerShell, Agent' };
         if (provider === 'openai') {
-          const fields = Object.entries({ name: binding.name, description: definition.description, ...settings }).map(([key, value]) => `${key} = ${tomlString(value)}`).join('\n');
-          files.push({ path: `.codex/agents/${definition.id}.toml`, content: `# ${origin}\n${fields}\ndeveloper_instructions = ${tomlInstructions(body)}\n`, ...metadata });
+          const { features, ship_triggers, ...nativeSettings } = settings;
+          const fields = Object.entries({ name: binding.name, description: definition.description, ...nativeSettings }).map(([key, value]) => `${key} = ${tomlString(value)}`).join('\n');
+          const effectiveFeatures = noShellSettings(settings) ? { ...features, ...NO_SHELL_FEATURES } : features;
+          const featureFields = Object.entries(effectiveFeatures ?? {}).map(([key, value]) => `features.${key} = ${value}`).join('\n');
+          // Native child config layers inherit ambient MCP servers. Restricted
+          // roles therefore expose a routing guard; only aorch exec can start
+          // them with --ignore-user-config and the scoped read-only server.
+          const nativeBody = noShellSettings(settings)
+            ? `This role requires isolated aorch execution. Do not perform the task or call inherited MCP tools in this native child session. Return blocked and ask the lead to dispatch agentId: ${definition.id} with allowedProviders: [openai] through aorch. The dispatcher loads the canonical instructions and starts Codex with --ignore-user-config, disabled shell/delegation, and scoped read-only file tools.`
+            : body;
+          files.push({ path: `.codex/agents/${definition.id}.toml`, content: `# ${origin}\n${fields}\n${featureFields ? featureFields + '\n' : ''}developer_instructions = ${tomlInstructions(nativeBody)}\n`, ...metadata });
         } else {
           files.push({ path: providerPath(provider, definition, installScope), content: markdownAgent({ definition, binding: { ...binding, settings }, body, origin }), ...metadata });
         }

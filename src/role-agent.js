@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { NO_SHELL_FEATURES, readonlyFilesServer, noShellSettings } from './codex-restrictions.js';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 
@@ -196,7 +197,7 @@ function markdownBody(text) {
 
 // Claude selects the preset by name (`--agent`), which also applies its tool
 // restrictions. Codex has no such flag, so its preset reaches the worker as
-// prompt text and only `--sandbox` constrains tools.
+// prompt text; sandbox and explicit feature restrictions are forwarded too.
 export async function resolveRoleAgent({ config, agentRole, agentId, adapter, cwd = process.cwd() }) {
   if (!agentRole && !agentId) return {};
 
@@ -283,16 +284,25 @@ export async function resolveRoleAgent({ config, agentRole, agentId, adapter, cw
   if (toml === null) {
     throw new Error(`Codex agent preset ${name}.toml not found for agentRole ${agentRole}`);
   }
-  const agentInstructions = extractCodexInstructions(toml);
+  let agentInstructions = extractCodexInstructions(toml);
   if (agentInstructions === '') {
     throw new Error(`Codex agent preset ${name}.toml has no developer_instructions`);
   }
   const sandboxMode = /^sandbox_mode\s*=\s*"([^"]+)"\s*$/m.exec(toml)?.[1];
+  const noShell = noShellSettings(binding?.settings) || /^features\.shell_tool\s*=\s*false\s*$/m.test(toml);
+  if (noShell && sandboxMode !== 'read-only') throw new Error('No-shell Codex preset requires read-only sandbox');
+  if (noShell) {
+    if (!binding?.instructions) throw new Error('No-shell Codex agent requires canonical agentId instructions');
+    agentInstructions = `${binding.instructions}\n\nThe file MCP root is the actual project; the process working directory is an empty isolation directory. Before analysis, read the project's AGENTS.md through aorch_files if present and preserve its safety and evidence requirements. Do not use inherited or unrelated MCP servers. Return missing required evidence to the lead.`;
+  }
+  const restrictions = noShell ? { codexFeatures: { ...NO_SHELL_FEATURES }, mcpServers: { aorch_files: readonlyFilesServer(cwd) } } : {};
+  if (noShell) return { agentInstructions, sandboxMode, ...restrictions };
   // Codex has no --mcp-config; the same checked-in file is read here and
   // reaches `codex exec` as -c mcp_servers.<name>.* overrides (measured
   // 2026-08-30: the worker listed the tools as mcp__paper_search__*).
   const mcp = roleMcp(agentRole);
-  if (!mcp.mcpConfig) return { agentInstructions, ...(sandboxMode ? { sandboxMode } : {}) };
+  if (!mcp.mcpConfig) return { agentInstructions, ...(sandboxMode ? { sandboxMode } : {}), ...restrictions };
   const { mcpServers } = JSON.parse(await readFile(mcp.mcpConfig, 'utf8'));
-  return { agentInstructions, mcpServers, ...(sandboxMode ? { sandboxMode } : {}) };
+  mcpServers['paper-search'].enabled_tools = mcp.mcpTools.map(tool => tool.replace(/^mcp__paper-search__/, ''));
+  return { agentInstructions, ...(sandboxMode ? { sandboxMode } : {}), ...restrictions, mcpServers: { ...mcpServers, ...restrictions.mcpServers } };
 }
