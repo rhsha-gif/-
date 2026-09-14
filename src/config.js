@@ -86,7 +86,7 @@ const AGENT_ROLE_KEYS = [
   'worker', 'reviewer', 'fixer', 'researcher', 'analyst', 'license-reviewer', 'ponytail',
   'writer', 'editor', 'qa-analyst', 'invest-analyst', 'refactorer', 'paper-researcher', 'auditor'
 ];
-const preset = (name) => Object.freeze({ claude: name, codex: name });
+const preset = (name) => Object.freeze({ claude: name, codex: name, antigravity: name, grok: name });
 const DEFAULT_ROLE_AGENTS = Object.freeze({
   worker: preset('aorch-worker'),
   reviewer: preset('aorch-reviewer'),
@@ -293,7 +293,7 @@ export function validateConfig(input) {
   assertUnique(input.capabilities ?? [], 'capability');
 
   const normalizedProviders = input.providers.map((provider) => {
-    if (!['claude', 'codex', 'generic'].includes(provider.adapter)) {
+    if (!['claude', 'codex', 'antigravity', 'grok', 'generic'].includes(provider.adapter)) {
       throw new Error(`Unsupported adapter for provider ${provider.id}: ${provider.adapter}`);
     }
     if (provider.adapter === 'generic' && (!provider.executable || !Array.isArray(provider.args))) {
@@ -325,6 +325,16 @@ export function validateConfig(input) {
   for (const model of normalizedModels) {
     if (!providerIds.has(model.provider)) throw new Error(`Model ${model.id} references unknown provider ${model.provider}`);
     if (typeof model.model !== 'string' || model.model.trim() === '') throw new Error(`Model ${model.id} requires model`);
+    if (model.modelFamily !== undefined && (typeof model.modelFamily !== 'string' || !/^[a-z][a-z0-9-]*$/.test(model.modelFamily))) throw new Error(`Model ${model.id} has invalid modelFamily`);
+    if (model.automatic !== undefined && typeof model.automatic !== 'boolean') throw new Error(`Model ${model.id}.automatic must be boolean`);
+    if (model.validatedTaskKinds !== undefined) assertNonEmptyStrings(model.validatedTaskKinds, `model ${model.id}.validatedTaskKinds`);
+    for (const field of ['validatedComplexities', 'validatedRisks']) {
+      if (model[field] !== undefined) {
+        assertNonEmptyStrings(model[field], `model ${model.id}.${field}`);
+        if (model[field].some((value) => !['low', 'standard', 'high', 'critical'].includes(value))) throw new Error(`Model ${model.id}.${field} contains an unsupported level`);
+      }
+    }
+    if (model.validatedTaskTags !== undefined) assertNonEmptyStrings(model.validatedTaskTags, `model ${model.id}.validatedTaskTags`);
     assertNonEmptyStrings(model.roles, `model ${model.id}.roles`);
     assertNonEmptyStrings(model.taskKinds, `model ${model.id}.taskKinds`);
     assertArray(model.efforts, `model ${model.id}.efforts`);
@@ -408,6 +418,12 @@ export function validateConfig(input) {
 
   const paths = { stateDir: '.aorch', ...(input.paths ?? {}) };
   validateStateDir(paths.stateDir);
+  if (input.learning !== undefined) {
+    if (!input.learning || typeof input.learning !== 'object' || Array.isArray(input.learning)
+      || typeof input.learning.enabled !== 'boolean') throw new TypeError('learning.enabled must be boolean');
+    if (input.learning.minimumSamples !== undefined && (!Number.isInteger(input.learning.minimumSamples) || input.learning.minimumSamples < 5)) throw new TypeError('learning.minimumSamples must be at least 5');
+    if (input.learning.policyMode !== undefined && input.learning.policyMode !== 'weekly') throw new TypeError('learning.policyMode must be weekly');
+  }
 
   return structuredClone({
     ...input,

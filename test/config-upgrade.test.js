@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { mergeFourCliConfig } from '../src/config-upgrade.js';
+const defaults = JSON.parse(await readFile(new URL('../config/aorch.config.json', import.meta.url), 'utf8'));
+test('explicit four-CLI config upgrade adds defaults without replacing user choices', () => {
+  const current = structuredClone(defaults);
+  current.providers = current.providers.filter((entry) => ['openai', 'anthropic'].includes(entry.id));
+  current.models = current.models.filter((entry) => !['antigravity', 'grok'].includes(entry.provider) && entry.id !== 'codex-astra');
+  current.providers[0].enabled = false;
+  current.models[0].quality.default = 0.123;
+  current.routing.qualityTolerance = 0.07;
+  delete current.roleAgents.auditor;
+  const merged = mergeFourCliConfig(current, defaults);
+  assert.equal(merged.providers[0].enabled, false);
+  assert.equal(merged.models[0].quality.default, 0.123);
+  assert.equal(merged.routing.qualityTolerance, 0.07);
+  assert.equal(merged.providers.length, 4);
+  assert.deepEqual(merged.roleAgents.auditor, defaults.roleAgents.auditor);
+  assert.equal(merged.models.find((entry) => entry.id === 'grok-general').automatic, true);
+  assert.deepEqual(merged.models.find((entry) => entry.id === 'grok-general').validatedTaskTags, ['local-evidence']);
+  assert.deepEqual(mergeFourCliConfig(merged, defaults), merged);
+  assert.equal(current.providers.length, 2);
+});

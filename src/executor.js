@@ -98,9 +98,13 @@ export function runCommand(spec, {
   const startedAt = new Date();
 
   return new Promise((resolve, reject) => {
+    const childEnv = { ...process.env, ...(spec.env ?? {}) };
+    for (const name of spec.unsetEnv ?? []) {
+      for (const key of Object.keys(childEnv)) if (key.toUpperCase() === name.toUpperCase()) delete childEnv[key];
+    }
     const child = spawn(spec.command, spec.args, {
       cwd,
-      env: { ...process.env, ...(spec.env ?? {}) },
+      env: childEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
       // cmd.exe does not understand Node's backslash-escaped quotes; callers

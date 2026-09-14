@@ -1,5 +1,7 @@
 import { estimateRouteQuality } from './performance-store.js';
 import { providerBindingKey } from './capabilities.js';
+import { familyAllowed, modelFamily } from './model-family.js';
+import { policyObservations } from './evaluation.js';
 
 const ROUTE_METRICS = ['quality', 'tokens', 'latency'];
 const TASK_COMPLEXITIES = ['low', 'standard', 'high', 'critical'];
@@ -59,18 +61,44 @@ function providerAllowedForTask(provider, task, policy) {
   return true;
 }
 
+function nativeBindingIsReadOnly(settings, adapter) {
+  if (!settings) return false;
+  if (settings.sandbox_mode === 'read-only' || settings.permissionMode === 'plan' || settings.mode === 'plan' || settings.sandbox === 'read-only') return true;
+  const tools = settings.tools;
+  if (!Array.isArray(tools)) return false;
+  if (adapter === 'antigravity') return !tools.some((name) => ['run_command','write_to_file','replace_file_content','multi_replace_file_content','notebook_edit','notebook_execution'].includes(name));
+  if (adapter === 'grok') return !tools.includes('run_terminal_cmd') && (!tools.includes('search_replace') || settings.disallowedTools?.includes('search_replace'));
+  return false;
+}
+
 function agentSupportsProfile(profile, task, catalog) {
-  const agent = task.agentId && catalog.capabilities?.find((entry) => entry.type === 'agent' && entry.id === task.agentId);
-  const settings = agent?.bindings?.[providerBindingKey(providerMetadata(catalog, profile.provider))]?.settings;
-  // Native preset models are interactive defaults. As for agentRole, aorch
-  // owns the headless model/effort; an explicit task profile pin is binding.
-  return !(task.write === true && settings?.sandbox_mode === 'read-only');
+  const provider = providerMetadata(catalog, profile.provider);
+  if (task.agentRole === 'paper-researcher' && ['antigravity', 'grok'].includes(provider.adapter)) return false;
+  let agent = task.agentId && catalog.capabilities?.find((entry) => entry.type === 'agent' && entry.id === task.agentId);
+  if (task.agentRole && !task.agentId) {
+    const name = catalog.roleAgents?.[task.agentRole]?.[provider.adapter] ?? `aorch-${task.agentRole}`;
+    agent = catalog.capabilities?.find((entry) => entry.type === 'agent'
+      && (entry.id === name || entry.bindings?.[providerBindingKey(provider)]?.name === name));
+    if (agent && !providerSupportsCapabilities(provider, [agent.id], catalog.capabilities, 'agent')) return false;
+  }
+  return !(task.write === true && nativeBindingIsReadOnly(agent?.bindings?.[providerBindingKey(provider)]?.settings, provider.adapter));
+}
+
+function profileApprovedForTask(profile, task) {
+  if (task.allowedProfileIds?.includes(profile.id)) return true;
+  return profile.automatic !== false
+    && (!profile.validatedTaskKinds || profile.validatedTaskKinds.includes(task.kind))
+    && (!profile.validatedComplexities || profile.validatedComplexities.includes(effectiveTaskComplexity(task)))
+    && (!profile.validatedRisks || profile.validatedRisks.includes(task.risk ?? 'standard'))
+    && (!profile.validatedTaskTags || profile.validatedTaskTags.every(tag => task.tags?.includes(tag)));
 }
 
 function supportsTask(profile, task, catalog) {
   const provider = providerMetadata(catalog, profile.provider);
   return profile.enabled !== false
     && provider.enabled !== false
+    && familyAllowed(profile, provider, task)
+    && profileApprovedForTask(profile, task)
     && providerAllowedForTask(provider, task, catalog.controlPlane ?? {})
     && agentSupportsProfile(profile, task, catalog)
     && (profile.roles?.includes(task.role) ?? true)
@@ -100,6 +128,7 @@ function expandCandidates(task, catalog, complexity) {
           provider: profile.provider,
           profileId: profile.id,
           model: profile.model,
+          modelFamily: modelFamily(profile, provider),
           effort: effort.name,
           quotaGate: effort.quotaGate ?? null,
           maturity: profile.maturity ?? 'stable',
@@ -246,6 +275,10 @@ export function forceRoute({ catalog, profileId, effort, task = {} }) {
   }
   const provider = providerMetadata(catalog, profile.provider);
   if (provider.enabled === false
+    || !providerAllowedForTask(provider, task, catalog.controlPlane ?? {})
+    || !profileApprovedForTask(profile, task)
+    || (task.risk === 'critical' && profile.maturity === 'challenger')
+    || !familyAllowed(profile, provider, task)
     || !agentSupportsProfile(profile, task, catalog)
     || (task.allowedProviders?.length && !task.allowedProviders.includes(profile.provider))
     || (task.forbiddenProviders ?? []).includes(profile.provider)
@@ -262,6 +295,7 @@ export function forceRoute({ catalog, profileId, effort, task = {} }) {
     provider: profile.provider,
     profileId: profile.id,
     model: profile.model,
+    modelFamily: modelFamily(profile, provider),
     effort: effortSpec.name,
     maturity: profile.maturity ?? 'stable',
     adapterMaturity: provider.adapterMaturity ?? 'stable',
@@ -280,6 +314,11 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
   }
   const policy = catalog?.routing ?? {};
   const complexity = effectiveTaskComplexity(task);
+  // Weekly mode uses only a validated policy snapshot. Raw run logs are
+  // collected continuously, but cannot silently tune high-risk or pinned work.
+  const routingObservations = catalog.learning?.enabled === true
+    ? (catalog.weeklyPolicy ? policyObservations(catalog.weeklyPolicy, { ...task, complexity }, { minimumSamples: catalog.learning.minimumSamples ?? 5 }) : [])
+    : observations;
 
   let candidates = expandCandidates(task, catalog, complexity).map((route) => ({
     ...route,
@@ -287,7 +326,7 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
       route,
       task: { ...task, complexity },
       priorQuality: route.priorQuality,
-      observations,
+      observations: routingObservations,
       now,
       halfLifeDays: policy.observationHalfLifeDays ?? 30,
       priorWeight: policy.priorWeight ?? 3,

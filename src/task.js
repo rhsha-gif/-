@@ -8,7 +8,7 @@ const KNOWN_TASK_FIELDS = new Set([
   'minimumQuality', 'maxTokenIndex', 'maxLatencyIndex', 'tags', 'capabilityIds',
   'allowedScope', 'forbiddenScope', 'acceptanceCriteria', 'verificationCommands',
   'allowedProviders', 'forbiddenProviders', 'forbiddenProfileIds', 'allowedProfileIds',
-  'weight'
+  'weight', 'forbiddenModelFamilies', 'independentOfTaskIds'
 ]);
 
 function requireString(task, field) {
@@ -77,6 +77,8 @@ export function validateTask(input, { forExecution = false } = {}) {
   task.forbiddenProviders = ensureStringArray(task.forbiddenProviders, 'forbiddenProviders');
   task.forbiddenProfileIds = ensureStringArray(task.forbiddenProfileIds, 'forbiddenProfileIds');
   task.allowedProfileIds = ensureStringArray(task.allowedProfileIds, 'allowedProfileIds');
+  if (task.forbiddenModelFamilies !== undefined) task.forbiddenModelFamilies = ensureStringArray(task.forbiddenModelFamilies, 'forbiddenModelFamilies');
+  if (task.independentOfTaskIds !== undefined) task.independentOfTaskIds = ensureStringArray(task.independentOfTaskIds, 'independentOfTaskIds');
   if (task.write !== undefined && typeof task.write !== 'boolean') {
     throw new TypeError('task.write must be boolean');
   }

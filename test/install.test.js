@@ -22,6 +22,75 @@ test('user updates preserve installed targets and reject overlapping project own
   assert.ok((await stat(path.join(projectRoot, '.aorch/hooks/gate.mjs'))).isFile());
 });
 
+test('installs each native CLI target, all four, and unions narrower reinstalls without losing targets', async () => {
+  const expected = {
+    claude: '.claude/agents/aorch-worker.md',
+    codex: '.codex/agents/aorch-worker.toml',
+    antigravity: '.agents/agents/aorch-worker/agent.md',
+    grok: '.grok/agents/aorch-worker.md'
+  };
+  for (const [target, relative] of Object.entries(expected)) {
+    const root = await mkdtemp(path.join(os.tmpdir(), `aorch-${target}-`));
+    const result = await installProject({ projectRoot: root, target });
+    assert.equal(result.target, target);
+    assert.ok((await stat(path.join(root, relative))).isFile());
+  }
+
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-all-targets-'));
+  await installProject({ projectRoot: root, target: 'antigravity' });
+  const union = await installProject({ projectRoot: root, target: 'grok' });
+  assert.deepEqual(union.target, ['antigravity', 'grok']);
+  const mixedStamp = JSON.parse(await readFile(path.join(root, '.aorch/install-stamp.json'), 'utf8'));
+  assert.equal((await installProject({ projectRoot: root, target: 'grok' })).status, 'current');
+  assert.deepEqual(JSON.parse(await readFile(path.join(root, '.aorch/install-stamp.json'), 'utf8')), mixedStamp);
+  const all = await installProject({ projectRoot: root, target: 'all' });
+  assert.equal(all.target, 'all');
+  for (const relative of Object.values(expected)) assert.ok((await stat(path.join(root, relative))).isFile());
+  const agyWorker = await readFile(path.join(root, expected.antigravity), 'utf8');
+  assert.match(agyWorker, /^mainAgent: true$/m);
+  assert.match(agyWorker, /^subagent: false$/m);
+  for (const nestedTool of ['invoke_subagent', 'define_subagent', 'send_message', 'manage_subagents']) {
+    assert.equal(agyWorker.includes(nestedTool), false);
+  }
+  const grokReviewer = await readFile(path.join(root, '.grok/agents/aorch-reviewer.md'), 'utf8');
+  assert.match(grokReviewer, /^disallowedTools:\n  - "search_replace"\n  - "Agent"$/m);
+  assert.equal((await installProject({ projectRoot: root, target: 'grok' })).status, 'current');
+});
+
+test('user definition sync uses each CLI native user directory', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'aorch-four-user-'));
+  await installUserDefinitions({ homeDir, target: 'all' });
+  for (const relative of [
+    '.claude/agents/aorch-worker.md', '.codex/agents/aorch-worker.toml',
+    '.gemini/config/agents/aorch-worker/agent.md', '.grok/agents/aorch-worker.md',
+    '.gemini/antigravity-cli/skills/adaptive-orchestrate.md',
+    '.gemini/config/skills/adaptive-orchestrate/SKILL.md',
+    '.gemini/config/skills/adaptive-orchestrate/references/book.md',
+    '.grok/skills/adaptive-orchestrate/SKILL.md'
+  ]) assert.ok((await stat(path.join(homeDir, relative))).isFile(), relative);
+  assert.equal((await installUserDefinitions({ homeDir, target: 'grok' })).status, 'current');
+});
+
+test('user Antigravity sync owns both CLI and app skill layouts and fails closed on edits', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'aorch-antigravity-user-'));
+  const cliSkill = '.gemini/antigravity-cli/skills/adaptive-orchestrate.md';
+  const appSkill = '.gemini/config/skills/adaptive-orchestrate/SKILL.md';
+  const first = await installUserDefinitions({ homeDir, target: 'antigravity' });
+  assert.equal(first.status, 'updated');
+  assert.ok((await stat(path.join(homeDir, cliSkill))).isFile());
+  assert.ok((await stat(path.join(homeDir, appSkill))).isFile());
+  assert.ok(first.ledger.files[cliSkill]);
+  assert.ok(first.ledger.files[appSkill]);
+  assert.equal((await installUserDefinitions({ homeDir, target: 'antigravity' })).status, 'current');
+
+  const cliBefore = await readFile(path.join(homeDir, cliSkill), 'utf8');
+  await writeFile(path.join(homeDir, appSkill), 'user edit\n');
+  const conflict = await installUserDefinitions({ homeDir, target: 'antigravity' });
+  assert.equal(conflict.status, 'conflict');
+  assert.deepEqual(conflict.conflicts.map((entry) => entry.path), [appSkill]);
+  assert.equal(await readFile(path.join(homeDir, cliSkill), 'utf8'), cliBefore);
+});
+
 test('detaching the model gate preserves unrelated empty hook groups and security hooks', async () => {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'aorch-hook-preserve-'));
   await mkdir(path.join(projectRoot, '.claude'));

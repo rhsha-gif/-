@@ -4,6 +4,16 @@ import { buildTaskPrompt } from '../src/providers/base.js';
 import { buildClaudeCommand } from '../src/providers/claude-cli.js';
 import { buildCodexCommand } from '../src/providers/codex-cli.js';
 import { buildGenericCommand } from '../src/providers/generic-cli.js';
+import {
+  buildAntigravityCommand,
+  parseAntigravityOutput
+} from '../src/providers/antigravity-cli.js';
+import {
+  buildGrokCommand,
+  buildGrokFinalizeCommand,
+  parseGrokOutput,
+  parseGrokWorkOutput
+} from '../src/providers/grok-cli.js';
 
 const task = {
   internalNote: 'hidden verifier sentinel',
@@ -84,6 +94,124 @@ test('generic provider supports config-only command templates', () => {
   assert.equal(spec.command, 'newcli');
   assert.deepEqual(spec.args, ['run', '--model', 'new-model', '--effort', 'high', '-']);
   assert.equal(spec.stdin, 'work');
+});
+
+test('Antigravity uses stdin NDJSON, structured output, sandboxing, and scoped modes', () => {
+  const schemaPath = 'C:\\작업 공간\\결과 schema.json';
+  const cwd = 'C:\\작업 공간';
+  const prompt = 'Inspect C:\\작업 공간 & do not interpolate this prompt';
+  const readOnly = buildAntigravityCommand({
+    prompt,
+    route: { model: 'gemini-3.8-flash-high', effort: 'high' },
+    schemaPath,
+    cwd,
+    agent: 'aorch-reviewer'
+  });
+  assert.equal(readOnly.command, 'agy');
+  assert.equal(readOnly.args.includes(prompt), false);
+  const message = JSON.parse(readOnly.stdin.trim());
+  assert.equal(message.event, 'user');
+  assert.match(message.message.content, /do not call run_command/i);
+  assert.match(message.message.content, /parent wrapper runs them/i);
+  assert.match(message.message.content, /Inspect C:\\작업 공간/);
+  assert.equal(readOnly.args[readOnly.args.indexOf('--input-format') + 1], 'stream-json');
+  assert.equal(readOnly.args[readOnly.args.indexOf('--output-format') + 1], 'stream-json');
+  assert.equal(readOnly.args[readOnly.args.indexOf('--json-schema') + 1], schemaPath);
+  assert.equal(readOnly.args[readOnly.args.indexOf('--add-dir') + 1], cwd);
+  assert.equal(readOnly.args[readOnly.args.indexOf('--mode') + 1], 'plan');
+  assert.equal(readOnly.args[readOnly.args.indexOf('--agent') + 1], 'aorch-reviewer');
+  assert.equal(readOnly.args.includes('--sandbox'), true);
+  assert.equal(readOnly.args.includes('--disable-slash-commands'), false);
+  assert.equal(readOnly.args.includes('--dangerously-skip-permissions'), false);
+  assert.deepEqual(readOnly.unsetEnv, ['GEMINI_API_KEY', 'GOOGLE_API_KEY']);
+
+  const writer = buildAntigravityCommand({
+    prompt, route: { model: 'gemini-3.8-flash-high', effort: 'medium' }, schemaPath, cwd, write: true
+  });
+  assert.equal(writer.args[writer.args.indexOf('--mode') + 1], 'accept-edits');
+});
+
+test('Grok keeps prompt paths intact, denies nested agents, and never blanket-approves', () => {
+  const promptPath = 'C:\\작업 공간\\프롬프트 파일.md';
+  const cwd = 'C:\\작업 공간';
+  const readOnly = buildGrokCommand({
+    route: { model: 'grok-4.6', effort: 'low' }, promptPath, cwd, agent: 'aorch-reviewer'
+  });
+  assert.equal(readOnly.command, 'grok');
+  assert.equal(readOnly.args[readOnly.args.indexOf('--prompt-file') + 1], promptPath);
+  assert.equal(readOnly.args[readOnly.args.indexOf('--cwd') + 1], cwd);
+  assert.equal(readOnly.args.includes('--json-schema'), false);
+  assert.equal(readOnly.args[readOnly.args.indexOf('--sandbox') + 1], 'read-only');
+  assert.equal(readOnly.args[readOnly.args.indexOf('--permission-mode') + 1], 'dontAsk');
+  assert.equal(readOnly.args.includes('--no-subagents'), true);
+  assert.equal(readOnly.args[readOnly.args.indexOf('--disallowed-tools') + 1], 'Agent');
+  assert.equal(readOnly.args.includes('--always-approve'), false);
+  assert.deepEqual(readOnly.unsetEnv, ['XAI_API_KEY']);
+  const tools = readOnly.args[readOnly.args.indexOf('--tools') + 1].split(',');
+  assert.deepEqual(tools, ['read_file', 'grep', 'list_dir']);
+  assert.equal(tools.includes('task'), false);
+  assert.equal(tools.includes('search_tool'), false);
+  assert.equal(tools.includes('use_tool'), false);
+  assert.equal(readOnly.args[readOnly.args.indexOf('--agent') + 1], 'aorch-reviewer');
+  assert.ok(readOnly.args.includes('Read(C:/작업 공간/**)'));
+  assert.ok(readOnly.args.includes('Grep(C:/작업 공간/**)'));
+
+  const writer = buildGrokCommand({
+    route: { model: 'grok-4.6', effort: 'high' }, promptPath, cwd, write: true
+  });
+  assert.equal(writer.args[writer.args.indexOf('--sandbox') + 1], 'workspace');
+  assert.match(writer.args[writer.args.indexOf('--tools') + 1], /search_replace/);
+  assert.ok(writer.args.includes('Edit(C:/작업 공간/**)'));
+  assert.ok(writer.args.includes('Write(C:/작업 공간/**)'));
+
+  const jsonSchema = { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] };
+  const finalize = buildGrokFinalizeCommand({
+    route: { model: 'grok-4.6', effort: 'low' },
+    sessionId: '00000000-0000-0000-0000-000000000000', promptPath, cwd, jsonSchema,
+    agent: 'aorch-reviewer'
+  });
+  assert.deepEqual(JSON.parse(finalize.args[finalize.args.indexOf('--json-schema') + 1]), jsonSchema);
+  assert.equal(finalize.args[finalize.args.indexOf('--resume') + 1], '00000000-0000-0000-0000-000000000000');
+});
+
+test('new provider parsers require structured envelopes and keep only measured token counts', () => {
+  const receipt = { status: 'complete' };
+  const agy = parseAntigravityOutput([
+    JSON.stringify({ event: 'init', init: {} }),
+    JSON.stringify({ event: 'result', result: {
+      status: 'SUCCESS', structured_output: receipt,
+      usage: { input_tokens: 10, output_tokens: 2, thinking_tokens: 1, total_tokens: 12, account: 'hidden' }
+    } })
+  ].join('\n'));
+  assert.deepEqual(agy, {
+    receipt,
+    usage: { inputTokens: 10, outputTokens: 2, reasoningTokens: 1, totalTokens: 12 }
+  });
+
+  const grok = parseGrokOutput(JSON.stringify({
+    text: JSON.stringify(receipt), structuredOutput: receipt,
+    usage: { input_tokens: 7, output_tokens: 3, total_tokens: 10, total_cost_usd: 99 }
+  }));
+  assert.deepEqual(grok, { receipt, usage: { inputTokens: 7, outputTokens: 3, totalTokens: 10 } });
+  assert.deepEqual(parseGrokWorkOutput(JSON.stringify({
+    text: 'worked', sessionId: '00000000-0000-0000-0000-000000000000', num_turns: 2,
+    usage: { input_tokens: 5, output_tokens: 1, account: 'omit' }
+  })), {
+    sessionId: '00000000-0000-0000-0000-000000000000', turns: 2,
+    usage: { inputTokens: 5, outputTokens: 1 }
+  });
+  assert.throws(() => parseAntigravityOutput('{bad json'), /protocol error/i);
+  assert.throws(
+    () => parseAntigravityOutput(JSON.stringify({ event: 'result', result: {
+      status: 'SUCCESS', response: '', denied_actions: [{ action: 'read_file', display_name: 'ViewFile' }]
+    } })),
+    (error) => error.failureKind === 'action-required' && error.actionRequired === 'permission'
+      && error.deniedActionCount === 1 && !error.message.includes('read_file')
+  );
+  assert.throws(
+    () => parseGrokOutput(JSON.stringify({ text: '{}', usage: { input_tokens: 4, account: 'omit' } })),
+    (error) => /structuredOutput/.test(error.message) && error.usage.inputTokens === 4
+  );
 });
 
 test('provider executables can be replaced without changing adapter code', () => {
@@ -245,4 +373,12 @@ test('codex workers get web search through the flag exec actually accepts', () =
   assert.equal(spec.args[at + 1], 'web_search');
   // --search exists only on the interactive command; exec exits 2 on it.
   assert.equal(spec.args.includes('--search'), false);
+});
+
+test('Grok finalization preserves the originating sandbox while exposing only a read tool', async () => {
+  const {buildGrokFinalizeCommand} = await import('../src/providers/grok-cli.js');
+  const spec=buildGrokFinalizeCommand({route:{model:'grok-4.6',effort:'medium'},write:true,sessionId:'11111111-1111-1111-1111-111111111111',promptPath:'C:/work/final.md',cwd:'C:/work',jsonSchema:{type:'object'}});
+  assert.equal(spec.args[spec.args.indexOf('--sandbox')+1], 'workspace');
+  assert.equal(spec.args[spec.args.indexOf('--tools')+1], 'read_file');
+  assert.ok(!spec.args.includes('--always-approve'));
 });

@@ -179,8 +179,9 @@ test('writing kind: drafting lands deep, editing lands mid, low has no route', a
 // not on "cheapest above a quality floor". The mechanism is the observation
 // ledger — classify passed observations: [] before, so a tier that kept failing
 // verification would keep being chosen forever.
-test('recorded verification failures pull a downshifted kind back up the ladder', async () => {
+test('legacy immediate learning retains verification-based escalation when weekly learning is disabled', async () => {
   const catalog = await loadPackagedCatalog();
+  catalog.learning.enabled = false;
   const objective = 'Extract the atomic write helper into a shared module';
 
   const cold = routeObjective(catalog, objective);

@@ -2,7 +2,11 @@ const DEFAULT_LIMITS = Object.freeze({ skills: 3, plugins: 2, hooks: 3 });
 const TYPE_TO_BUCKET = Object.freeze({ skill: 'skills', plugin: 'plugins', hook: 'hooks' });
 
 export function providerBindingKey(provider) {
-  return provider?.adapter === 'claude' ? 'anthropic' : provider?.adapter === 'codex' ? 'openai' : provider?.id ?? provider;
+  const adapter = provider?.adapter;
+  if (adapter === 'claude') return 'anthropic';
+  if (adapter === 'codex') return 'openai';
+  if (adapter === 'antigravity' || adapter === 'grok') return adapter;
+  return provider?.id ?? provider;
 }
 
 function isCompatible(capability, provider) {

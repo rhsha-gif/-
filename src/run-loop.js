@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { executeTask } from './task-runner.js';
 import { runVerificationCommands } from './verify.js';
 import { appendObservation } from './observations.js';
@@ -7,9 +8,11 @@ import { detectRateLimit, setLimit, DEFAULT_LIMIT_MINUTES } from './limits.js';
 import { writeJsonAtomic } from './fs-util.js';
 import { captureGitSnapshot, evaluateChangeGuard } from './change-guard.js';
 import { normalizeReceiptInputRequest } from './receipts.js';
+import { modelFamily } from './model-family.js';
+import { forceRoute } from './router.js';
 
 function routeSummary(route) {
-  return { provider: route.provider, profileId: route.profileId, model: route.model, effort: route.effort };
+  return { provider: route.provider, profileId: route.profileId, model: route.model, effort: route.effort, modelFamily: modelFamily(route) };
 }
 
 function nextLadderStep(config, provider, triedRoutes, task = {}) {
@@ -20,7 +23,15 @@ function nextLadderStep(config, provider, triedRoutes, task = {}) {
   }
   return ladder.find((step) => !triedRoutes.has(`${step.profileId}:${step.effort}`)
     && (!task.allowedProfileIds?.length || task.allowedProfileIds.includes(step.profileId))
-    && !(task.forbiddenProfileIds ?? []).includes(step.profileId));
+    && !(task.forbiddenProfileIds ?? []).includes(step.profileId)
+    && (() => {
+      try {
+        forceRoute({ catalog: config, profileId: step.profileId, effort: step.effort, task });
+        return true;
+      } catch {
+        return false;
+      }
+    })());
 }
 
 async function failChangeGuard({ attempt, route, runDir, changeGuard, attempts, cause }) {
@@ -102,6 +113,7 @@ export async function executeWithVerification({
   timeoutMs,
   dryRun = false,
   observationsPath,
+  learningHomeDir,
   stateRoot = path.resolve(cwd, config.paths?.stateDir ?? '.aorch'),
   executeTaskImpl = executeTask,
   runVerificationImpl = runVerificationCommands,
@@ -131,6 +143,38 @@ export async function executeWithVerification({
   // guard rejects a correct result. The guard validates net change across the
   // whole run against the pre-run tree.
   const beforeSnapshot = await captureGitSnapshotImpl({ cwd });
+  const projectId = createHash('sha256').update(path.resolve(beforeSnapshot.root ?? cwd)).digest('hex').slice(0, 24);
+  let registeredEvidence = false;
+  const learningWarnings = [];
+  const withLearningWarnings = (value) => learningWarnings.length ? { ...value, learningWarnings: [...learningWarnings] } : value;
+  const recordEvidence = async ({ execution, attempt, status, failureKind, artifact = 'unscored', evaluation }) => {
+    if (config.learning?.enabled !== true || !execution?.route) return;
+    try {
+    const { recordRunEvidence, registerWorkRoot } = await import('./run-evidence.js');
+    if (!registeredEvidence) {
+      await registerWorkRoot(cwd, { stateRoot, homeDir: learningHomeDir });
+      registeredEvidence = true;
+    }
+    const usage = execution.result?.usage ?? {};
+    await recordRunEvidence({ root: cwd, stateRoot, homeDir: learningHomeDir, attest: true, evidence: {
+      schemaVersion: 1, projectId, taskId: task.id, runId, attempt, recordedAt: new Date().toISOString(),
+      route: { provider: execution.route.provider,
+        adapter: config.providers?.find((entry) => entry.id === execution.route.provider)?.adapter ?? execution.route.provider,
+        model: execution.route.model, effort: execution.route.effort, profileId: execution.route.profileId },
+      task: { kind: task.kind, role: task.role, risk: task.risk, complexity: task.complexity ?? task.risk,
+        explicitModelPin: Boolean(task.allowedProfileIds?.length) },
+      execution: { status, completed: status === 'complete', ...(status === 'failed' ? { failureKind: failureKind ?? 'protocol' } : {}),
+        ...(Number.isFinite(execution.result?.durationMs) ? { durationMs: execution.result.durationMs,
+          ...(attempt > 1 ? { reworkDurationMs: execution.result.durationMs } : {}) } : {}),
+        ...Object.fromEntries(['inputTokens', 'outputTokens', 'totalTokens', 'reasoningTokens', 'cacheReadTokens', 'cacheCreationTokens'].filter((key) => Number.isFinite(usage[key])).map((key) => [key, usage[key]])) },
+      artifact: { status: artifact }, ...(evaluation ? { evaluation } : {})
+    } });
+    } catch (error) {
+      const warning = `Run evidence was not recorded (${error.code ?? error.name ?? 'error'}); this attempt is not eligible for learning.`;
+      learningWarnings.push(warning);
+      process.stderr.write(`aorch: ${warning}\n`);
+    }
+  };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     let execution;
@@ -151,6 +195,7 @@ export async function executeWithVerification({
           ignoredPaths: [stateRoot]
         });
         if (!changeGuard.passed) {
+          await recordEvidence({ execution: error, attempt, status: 'failed', failureKind: error.failureKind ?? 'execution', artifact: 'fail' });
           await failChangeGuard({
             attempt,
             route: error.route,
@@ -161,10 +206,11 @@ export async function executeWithVerification({
           });
         }
       }
+      await recordEvidence({ execution: error, attempt, status: 'failed', failureKind: error.failureKind ?? 'execution' });
       // A rate-limited provider is a cost event, not a task failure: record
       // the limit, forbid the provider, and reselect a route across the
       // remaining providers. Anything else propagates untouched.
-      if (!error?.route?.provider || !detectRateLimit(error.result)) throw error;
+      if (!error?.route?.provider || !(error.failureKind === 'rate-limit' || detectRateLimit(error.result))) throw error;
       const provider = error.route.provider;
       await setLimitImpl(stateRoot, provider, {
         minutes: DEFAULT_LIMIT_MINUTES,
@@ -196,6 +242,7 @@ export async function executeWithVerification({
     const evidencePath = path.join(execution.runDir, 'verification.json');
 
     if (!changeGuard.passed) {
+      await recordEvidence({ execution, attempt, status: 'complete', artifact: 'fail' });
       await failChangeGuard({
         attempt,
         route: execution.route,
@@ -207,15 +254,18 @@ export async function executeWithVerification({
 
     try { execution.receipt = normalizeReceiptInputRequest(execution.receipt); }
     catch (error) {
+      await recordEvidence({ execution, attempt, status: 'failed', failureKind: 'protocol' });
       await failReceiptVerdict({ attempt, route: execution.route, runDir: execution.runDir, changeGuard, attempts, receipt: execution.receipt, verdict: error.message });
     }
     if (execution.receipt.inputRequest) {
+      await recordEvidence({ execution, attempt, status: 'awaiting-input' });
       attempts.push({ attempt, route: routeSummary(execution.route), passed: null, changeGuardPassed: true, awaitingInput: true });
       await writeJsonAtomic(evidencePath, { attempt, route: routeSummary(execution.route), passed: null, results: [], changeGuard, inputRequest: execution.receipt.inputRequest });
-      return { ...execution, status: 'awaiting-input', inputRequest: execution.receipt.inputRequest, verification: null, attempts };
+      return withLearningWarnings({ ...execution, status: 'awaiting-input', inputRequest: execution.receipt.inputRequest, verification: null, attempts });
     }
     const verdict = receiptVerdict(execution.receipt);
     if (verdict) {
+      await recordEvidence({ execution, attempt, status: ['complete', 'partial', 'blocked'].includes(execution.receipt.status) ? execution.receipt.status : 'failed' });
       await failReceiptVerdict({
         attempt,
         route: execution.route,
@@ -228,6 +278,7 @@ export async function executeWithVerification({
     }
 
     if (commands.length === 0) {
+      await recordEvidence({ execution, attempt, status: 'complete' });
       const singleAttempt = {
         attempt,
         route: routeSummary(execution.route),
@@ -241,14 +292,16 @@ export async function executeWithVerification({
         results: [],
         changeGuard
       });
-      return { ...execution, verification: null, attempts: [singleAttempt] };
+      return withLearningWarnings({ ...execution, verification: null, attempts: [singleAttempt] });
     }
 
-    const verification = await runVerificationImpl({
-      commands,
-      cwd,
-      timeoutMs: config.verification?.commandTimeoutMs
-    });
+    let verification;
+    try {
+      verification = await runVerificationImpl({ commands, cwd, timeoutMs: config.verification?.commandTimeoutMs });
+    } catch (error) {
+      await recordEvidence({ execution, attempt, status: 'complete', evaluation: { source: 'independent-gate', status: 'error' } });
+      throw error;
+    }
     if (verification.passed) {
       const afterVerificationSnapshot = await captureGitSnapshotImpl({ cwd });
       const verificationChangeGuard = evaluateChangeGuardImpl({
@@ -261,6 +314,7 @@ export async function executeWithVerification({
       // Verification can generate build artefacts, so only repository control
       // state is an integrity boundary after commands complete.
       if (verificationChangeGuard.headChanged || verificationChangeGuard.controlPathsChanged.length > 0) {
+        await recordEvidence({ execution, attempt, status: 'complete', artifact: 'fail', evaluation: { source: 'independent-gate', status: 'error' } });
         await failChangeGuard({
           attempt,
           route: execution.route,
@@ -289,6 +343,9 @@ export async function executeWithVerification({
     // earned a false 0.2 judging a book that genuinely failed QA). Without an
     // applicable guard there is no such proof, so behavior stays unchanged.
     const provenUninvolved = changeGuard.applicable && !task.write;
+    await recordEvidence({ execution, attempt, status: 'complete', artifact: verification.passed ? 'pass' : 'fail',
+      ...(!provenUninvolved && task.write === true && task.role !== 'reviewer' ? { evaluation: { source: 'independent-gate', status: verification.passed ? 'pass' : 'fail',
+        synthetic: task.tags?.includes('protocol-fixture') === true } } : {}) });
     if (observationsPath && !provenUninvolved) {
       await appendObservationImpl(observationsPath, {
         provider: execution.route.provider,
@@ -298,11 +355,13 @@ export async function executeWithVerification({
         role: task.role,
         profileId: execution.route.profileId,
         quality: verification.passed ? 1 : 0.2,
-        metadata: { source: 'verify-gate', taskId: currentTask.id, attempt }
+        metadata: { source: 'verify-gate', projectId, runId, taskId: task.id, attempt, risk: task.risk,
+          complexity: task.complexity ?? task.risk, explicitModelPin: Boolean(task.allowedProfileIds?.length),
+          synthetic: task.tags?.includes('protocol-fixture') === true }
       });
     }
 
-    if (verification.passed) return { ...execution, verification, attempts };
+    if (verification.passed) return withLearningWarnings({ ...execution, verification, attempts });
 
     const failed = verification.results[verification.results.length - 1];
     if (provenUninvolved) {

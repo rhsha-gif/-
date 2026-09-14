@@ -4,6 +4,7 @@ import { normalizeReceiptInputRequest } from './receipts.js';
 import { mkdir, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { writeJsonAtomic } from './fs-util.js';
+import { modelFamily } from './model-family.js';
 
 export function planFingerprint(plan) {
   const canonical = (value) => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
@@ -63,6 +64,18 @@ export function continuationPlan(plan, previous, input) {
     throw new Error('Provide exactly one non-empty answer for each requested question');
   }
   const tasks = validated.tasks.slice(results.length - 1).map(({ role: _role, ...task }) => task);
+  const completed = new Map(results.slice(0, -1).map((entry) => [entry.taskId, entry]));
+  for (const task of tasks) {
+    const remaining = [];
+    for (const id of task.independentOfTaskIds ?? []) {
+      if (!completed.has(id)) { remaining.push(id); continue; }
+      const entry = completed.get(id);
+      const families = [entry.route, ...(entry.attempts ?? []).map((attempt) => attempt.route)].map((route) => modelFamily(route)).filter(Boolean);
+      if (!families.length) throw new Error(`Cannot resume independence reference without model family: ${id}`);
+      task.forbiddenModelFamilies = [...new Set([...(task.forbiddenModelFamilies ?? []), ...families])];
+    }
+    if (task.independentOfTaskIds) task.independentOfTaskIds = remaining;
+  }
   const context = {
     completedTasks: results.slice(0, -1).map(({ taskId, receipt: evidence, receiptPath, verification }) => ({ taskId, receiptPath, evidence, verification })),
     currentTask: { receipt, receiptPath: waiting.receiptPath, runDir: waiting.runDir, ...(failed ? { failure: waiting.error, attempts: waiting.attempts } : {}) },

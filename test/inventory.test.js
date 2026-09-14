@@ -97,6 +97,34 @@ test('discovers installed skills from both CLIs and merges provider support', as
   assert.equal(skill.type, 'skill');
 });
 
+test('discovers native skills from all four CLIs and keeps per-binding sync state', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'aorch-inventory-four-'));
+  const body = '---\nname: test-first\ndescription: Verify behavior.\n---\n';
+  for (const relative of [
+    '.claude/skills/test-first/SKILL.md', '.agents/skills/test-first/SKILL.md',
+    '.agents/skills/test-first.md', '.grok/skills/test-first/SKILL.md'
+  ]) await put(root, relative, body);
+  const skill = (await discoverCapabilities({ cwd: root, includeUser: false }))
+    .find((entry) => entry.id === 'test-first');
+  assert.deepEqual(skill.providers.sort(), ['anthropic', 'antigravity', 'grok', 'openai']);
+
+  const managed = await mkdtemp(path.join(os.tmpdir(), 'aorch-inventory-managed-four-'));
+  await put(managed, '.agents/aorch/review.md', 'Review evidence.');
+  await put(managed, '.agents/aorch/definitions.json', JSON.stringify({ version: 1, agents: [{
+    id: 'review', description: 'Review evidence', instructions: 'review.md',
+    providers: { anthropic: {}, openai: {}, antigravity: {}, grok: {} }
+  }] }));
+  const definitions = await loadDefinitions({ cwd: managed, includeShared: false });
+  await syncGeneratedFiles({ root: managed, files: await renderDefinitions({ definitions, target: 'antigravity' }) });
+  const review = (await discoverCapabilities({ cwd: managed, includeUser: false }))
+    .find((entry) => entry.id === 'review');
+  assert.equal(review.bindings.antigravity.syncStatus, 'current');
+  assert.equal(review.bindings.antigravity.installed, true);
+  assert.equal(review.bindings.grok.syncStatus, 'not-installed');
+  assert.equal(review.bindings.grok.installed, false);
+  assert.equal(review.syncStatus, 'current');
+});
+
 test('discovery cannot override an explicitly disabled capability', () => {
   const merged = mergeCapabilities(
     [{ id: 'browser-qa', type: 'plugin', providers: ['*'], enabled: false }],

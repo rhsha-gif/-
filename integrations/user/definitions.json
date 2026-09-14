@@ -11,6 +11,34 @@
         },
         "openai": {
           "sandbox_mode": "workspace-write"
+        },
+        "antigravity": {
+          "name": "plan",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "write_to_file",
+            "replace_file_content",
+            "multi_replace_file_content",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "plan",
+          "disallowedTools": [
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write",
+            "search_replace"
+          ]
         }
       }
     },
@@ -24,6 +52,31 @@
         },
         "openai": {
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "metis",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "metis",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write"
+          ]
         }
       }
     },
@@ -37,6 +90,31 @@
         },
         "openai": {
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "momus",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "momus",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write"
+          ]
         }
       }
     },
@@ -50,6 +128,31 @@
         },
         "openai": {
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "explorer",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "explorer",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write"
+          ]
         }
       }
     },
@@ -63,6 +166,35 @@
         },
         "openai": {
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "librarian",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "read_url_content",
+            "search_web",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "librarian",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write",
+            "web_search",
+            "web_fetch"
+          ]
         }
       }
     }
@@ -74,7 +206,9 @@
       "source": "skills/dependency-audit",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -83,7 +217,9 @@
       "source": "skills/execute-plan",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -92,7 +228,9 @@
       "source": "skills/interview",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -109,7 +247,9 @@
       "source": "skills/invest-resolve",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -118,7 +258,9 @@
       "source": "skills/plan",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -127,7 +269,9 @@
       "source": "skills/project-health-check",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -136,7 +280,9 @@
       "source": "skills/resume-work",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -153,7 +299,9 @@
       "source": "skills/app-stabilization-pass",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -162,7 +310,9 @@
       "source": "skills/karpathy-guidelines",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -171,7 +321,9 @@
       "source": "skills/local-dev-runbook",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -180,7 +332,9 @@
       "source": "skills/package-recent-workflows",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -189,7 +343,9 @@
       "source": "skills/paper-lookup",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -198,7 +354,9 @@
       "source": "skills/playwright",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -207,7 +365,9 @@
       "source": "skills/project-handoff-refresh",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -216,7 +376,9 @@
       "source": "skills/real-app-screenshot-tour",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -225,7 +387,9 @@
       "source": "skills/vercel-deploy",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -234,7 +398,9 @@
       "source": "skills/book-illustration-director",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -243,7 +409,9 @@
       "source": "skills/book-pdf-production",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -252,7 +420,9 @@
       "source": "skills/book-production-coordinator",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -261,7 +431,9 @@
       "source": "skills/book-production-qa",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -270,7 +442,9 @@
       "source": "skills/book-project-architect",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -279,7 +453,9 @@
       "source": "skills/manuscript-writing-review",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -288,7 +464,9 @@
       "source": "skills/page-manuscript-writer",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     }
   ]

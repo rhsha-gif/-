@@ -119,6 +119,9 @@ export function validateTaskPlan(input) {
     if (seenIds.has(task.id)) {
       throw new Error(`plan.tasks[${index}]: duplicate task id ${task.id}`);
     }
+    for (const dependency of task.independentOfTaskIds ?? []) {
+      if (!seenIds.has(dependency)) throw new Error(`Task ${task.id} independence reference must name an earlier task: ${dependency}`);
+    }
     seenIds.add(task.id);
 
     return { ...task, agentRole: entry.agentRole };

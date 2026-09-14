@@ -7,6 +7,14 @@ import * as executor from '../src/executor.js';
 
 const { runCommand, terminateWithEscalation } = executor;
 
+test('subscription command removes requested environment keys without exposing values', async () => {
+  const result = await runCommand({ command: process.execPath,
+    args: ['-e', 'process.stdout.write(String(Object.keys(process.env).some(k => k.toUpperCase() === "AORCH_TEST_BILLING_HINT")))'],
+    env: { AORCH_TEST_BILLING_HINT: '1' }, unsetEnv: ['aorch_test_billing_hint'] });
+  assert.equal(result.stdout, 'false');
+  assert.equal(result.exitCode, 0);
+});
+
 test('runs an argv-safe command and captures evidence', async () => {
   const result = await runCommand({
     command: process.execPath,

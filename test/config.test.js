@@ -293,10 +293,10 @@ function fullBlock(overrides = {}) {
 
 test('roleAgents defaults to the shipped presets so older configs keep loading', () => {
   const config = validateConfig(minimalConfig());
-  assert.deepEqual(config.roleAgents.worker, { claude: 'aorch-worker', codex: 'aorch-worker' });
+  assert.deepEqual(config.roleAgents.worker, { claude: 'aorch-worker', codex: 'aorch-worker', antigravity: 'aorch-worker', grok: 'aorch-worker' });
   assert.deepEqual(Object.keys(config.roleAgents), ALL_ROLES);
   assert.deepEqual(config.roleAgents['license-reviewer'],
-    { claude: 'aorch-license-reviewer', codex: 'aorch-license-reviewer' });
+    { claude: 'aorch-license-reviewer', codex: 'aorch-license-reviewer', antigravity: 'aorch-license-reviewer', grok: 'aorch-license-reviewer' });
 });
 
 test('a declared roleAgents block is checked strictly rather than partially merged', () => {

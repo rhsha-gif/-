@@ -2,14 +2,19 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertScopedFile, scopedPath, readOptional } from './definition-sync.js';
+import { targetList } from './install-registry.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PROVIDERS = ['anthropic', 'openai'];
+export const DEFINITION_PROVIDERS = Object.freeze(['anthropic', 'openai', 'antigravity', 'grok']);
+const PROVIDERS = DEFINITION_PROVIDERS;
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/;
 const SETTINGS = {
   anthropic: new Set(['name', 'model', 'effort', 'maxTurns', 'disallowedTools', 'tools', 'permissionMode', 'skills', 'mcpServers', 'hooks', 'memory', 'isolation', 'ship_triggers']),
-  openai: new Set(['name', 'model', 'model_reasoning_effort', 'sandbox_mode'])
+  openai: new Set(['name', 'model', 'model_reasoning_effort', 'sandbox_mode']),
+  antigravity: new Set(['name', 'model', 'tools', 'mainAgent', 'subagent']),
+  grok: new Set(['name', 'model', 'tools', 'disallowedTools'])
 };
+const TARGET_PROVIDER = Object.freeze({ claude: 'anthropic', codex: 'openai', antigravity: 'antigravity', grok: 'grok' });
 
 export function stripFrontmatter(text) { return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim(); }
 
@@ -77,6 +82,39 @@ function bridgeText(definition) {
 
 function tomlString(value) { return JSON.stringify(value); }
 function tomlInstructions(text) { return `"""\n${text.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}\n"""`; }
+function yamlValue(value) {
+  if (Array.isArray(value)) return value.map((item) => `  - ${JSON.stringify(item)}`).join('\n');
+  return typeof value === 'string' && !/[\n:#{}\[\]"']/.test(value) ? value : JSON.stringify(value);
+}
+function markdownAgent({ definition, binding, body, origin }) {
+  const fields = Object.entries({ name: binding.name, description: definition.description, ...binding.settings })
+    .map(([key, value]) => Array.isArray(value) ? `${key}:\n${yamlValue(value)}` : `${key}: ${yamlValue(value)}`).join('\n');
+  return `---\n${fields}\n---\n\n<!-- ${origin} -->\n\n${body}\n`;
+}
+function providerPath(provider, definition, installScope) {
+  if (definition.type === 'agent') {
+    if (provider === 'anthropic') return `.claude/agents/${definition.id}.md`;
+    if (provider === 'openai') return `.codex/agents/${definition.id}.toml`;
+    if (provider === 'antigravity') return installScope === 'user'
+      ? `.gemini/config/agents/${definition.id}/agent.md`
+      : `.agents/agents/${definition.id}/agent.md`;
+    return `.grok/agents/${definition.id}.md`;
+  }
+  if (provider === 'anthropic') return `.claude/skills/${definition.id}`;
+  if (provider === 'openai') return `.agents/skills/${definition.id}`;
+  if (provider === 'antigravity') return installScope === 'user'
+    ? `.gemini/antigravity-cli/skills/${definition.id}.md`
+    : `.agents/skills/${definition.id}.md`;
+  return `.grok/skills/${definition.id}`;
+}
+
+function antigravitySkillText(text, definition) {
+  const assets = `.aorch-assets/${definition.id}`;
+  return text
+    .replaceAll('$skill_dir/scripts/', `$skill_dir/${assets}/scripts/`)
+    .replace(/(^|[\s`("'=])(references|scripts|assets|agents)\//gm, `$1${assets}/$2/`)
+    .replace(/\.\.\/([a-zA-Z0-9_-]+)\/SKILL\.md/g, '$1.md');
+}
 
 function projectSkillLinks(text, definition, relative, destination) {
   if (definition.sourceScope !== 'project') return text;
@@ -107,12 +145,13 @@ async function skillFiles(root, dir = root) {
 
 // One common body, native settings at the boundary. Bridge files expose names
 // without falsely advertising support for a provider-specific capability.
-export async function renderDefinitions({ definitions, target = 'both', packageRoot = PACKAGE_ROOT, resolveRoot = true }) {
-  if (!['both', 'claude', 'codex'].includes(target)) throw new Error(`Unknown target: ${target}`);
+export async function renderDefinitions({ definitions, target = 'both', packageRoot = PACKAGE_ROOT, resolveRoot = true, installScope = 'project' }) {
+  const selectedProviders = new Set(targetList(target).map((item) => TARGET_PROVIDER[item]));
+  if (!['project', 'user'].includes(installScope)) throw new Error(`Unknown install scope: ${installScope}`);
   const files = [];
   for (const definition of definitions) {
     for (const provider of PROVIDERS) {
-      if (target !== 'both' && target !== (provider === 'openai' ? 'codex' : 'claude')) continue;
+      if (!selectedProviders.has(provider)) continue;
       const binding = definition.bindings[provider];
       const native = binding.mode === 'native';
       const origin = `aorch-generated: ${definition.type}:${definition.id}; mode=${binding.mode}; edit ${definition.sourceScope === 'project' ? '.agents/aorch/definitions.json' : `integrations/${definition.sourceScope}/definitions.json`}`;
@@ -120,29 +159,34 @@ export async function renderDefinitions({ definitions, target = 'both', packageR
       if (definition.type === 'agent') {
         const body = native ? binding.instructions : bridgeText(definition);
         const settings = native ? binding.settings : provider === 'openai' ? { sandbox_mode: 'read-only' } : { tools: [], disallowedTools: 'Write, Edit, NotebookEdit, Bash, PowerShell, Agent' };
-        if (provider === 'anthropic') {
-          const fields = Object.entries({ name: binding.name, description: definition.description, ...settings })
-            .map(([key, value]) => `${key}: ${typeof value === 'string' && !/[\n:#{}\[\]"']/.test(value) ? value : JSON.stringify(value)}`).join('\n');
-          files.push({ path: `.claude/agents/${definition.id}.md`, content: `---\n${fields}\n---\n\n<!-- ${origin} -->\n\n${body}\n`, ...metadata });
-        } else {
+        if (provider === 'openai') {
           const fields = Object.entries({ name: binding.name, description: definition.description, ...settings }).map(([key, value]) => `${key} = ${tomlString(value)}`).join('\n');
           files.push({ path: `.codex/agents/${definition.id}.toml`, content: `# ${origin}\n${fields}\ndeveloper_instructions = ${tomlInstructions(body)}\n`, ...metadata });
+        } else {
+          files.push({ path: providerPath(provider, definition, installScope), content: markdownAgent({ definition, binding: { ...binding, settings }, body, origin }), ...metadata });
         }
       } else {
-        const prefix = `${provider === 'anthropic' ? '.claude' : '.agents'}/skills/${definition.id}`;
+        const prefix = providerPath(provider, definition, installScope);
         const assets = native ? await skillFiles(definition.sourcePath) : [{ relative: 'SKILL.md', content: Buffer.from(`---\nname: ${definition.id}\ndescription: ${JSON.stringify(definition.description)}\n---\n\n${bridgeText(definition)}`) }];
         if (!assets.some((file) => file.relative === 'SKILL.md')) throw new Error(`Missing SKILL.md: ${definition.sourcePath}`);
         for (const asset of assets) {
-          let content = asset.content;
-          if (native && asset.relative.endsWith('.md')) content = Buffer.from(projectSkillLinks(content.toString('utf8'), definition, asset.relative, `${prefix}/${asset.relative}`));
-          if (resolveRoot && /\.(?:md|mjs|js|json|toml)$/.test(asset.relative)) content = Buffer.from(content.toString('utf8').replaceAll('{{AORCH_ROOT}}', packageRoot.replaceAll('\\', '/')));
-          if (asset.relative === 'SKILL.md') {
-            let text = content.toString('utf8');
-            const fields = Object.entries(binding.settings).filter(([key]) => key !== 'name');
-            if (native && fields.length) text = text.replace(/^---\r?\n/, `---\n${fields.map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join('\n')}\n`);
-            content = Buffer.from(`${text.trimEnd()}\n\n<!-- ${origin} -->\n`);
+          const destinations = provider === 'antigravity' ? [
+            { path: asset.relative === 'SKILL.md' ? prefix : `${path.posix.dirname(prefix)}/.aorch-assets/${definition.id}/${asset.relative}`, flat: true },
+            ...(installScope === 'user' ? [{ path: `.gemini/config/skills/${definition.id}/${asset.relative}`, flat: false }] : [])
+          ] : [{ path: `${prefix}/${asset.relative}`, flat: false }];
+          for (const destination of destinations) {
+            let content = asset.content;
+            if (native && asset.relative.endsWith('.md')) content = Buffer.from(projectSkillLinks(content.toString('utf8'), definition, asset.relative, destination.path));
+            if (destination.flat && asset.relative === 'SKILL.md') content = Buffer.from(antigravitySkillText(content.toString('utf8'), definition));
+            if (resolveRoot && /\.(?:md|mjs|js|json|toml)$/.test(asset.relative)) content = Buffer.from(content.toString('utf8').replaceAll('{{AORCH_ROOT}}', packageRoot.replaceAll('\\', '/')));
+            if (asset.relative === 'SKILL.md') {
+              let text = content.toString('utf8');
+              const fields = Object.entries(binding.settings).filter(([key]) => key !== 'name');
+              if (native && fields.length) text = text.replace(/^---\r?\n/, `---\n${fields.map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join('\n')}\n`);
+              content = Buffer.from(`${text.trimEnd()}\n\n<!-- ${origin} -->\n`);
+            }
+            files.push({ path: destination.path, content, ...metadata });
           }
-          files.push({ path: `${prefix}/${asset.relative}`, content, ...metadata });
         }
       }
     }

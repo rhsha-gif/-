@@ -1,7 +1,7 @@
 import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { computePayloadHash, mergeTargets, readStamp, recordInstall, writeStamp } from './install-registry.js';
+import { computePayloadHash, mergeTargets, readStamp, recordInstall, serializeTargets, targetList, writeStamp } from './install-registry.js';
 import os from 'node:os';
 import { readdir } from 'node:fs/promises';
 import { loadDefinitions, renderDefinitions } from './definitions.js';
@@ -75,24 +75,26 @@ export async function installUserDefinitions({ homeDir = os.homedir(), target, c
   const ledgerPath = '.aorch/generated-user-files.json';
   const raw = await readOptional(path.join(homeDir, ledgerPath));
   if (raw) {
-    const providers = new Set(Object.values(JSON.parse(raw).files ?? {}).map((entry) => entry.provider));
-    const previousTarget = providers.has('anthropic') && providers.has('openai') ? 'both' : providers.has('anthropic') ? 'claude' : providers.has('openai') ? 'codex' : undefined;
+    const providerTargets = { anthropic: 'claude', openai: 'codex', antigravity: 'antigravity', grok: 'grok' };
+    const previous = [...new Set(Object.values(JSON.parse(raw).files ?? {}).map((entry) => providerTargets[entry.provider]).filter(Boolean))];
+    const previousTarget = previous.length ? serializeTargets(previous) : undefined;
     target = target ? mergeTargets(previousTarget, target) : previousTarget;
   }
   const definitions = (await loadDefinitions({ cwd: homeDir, includeUser: true })).filter((entry) => entry.sourceScope !== 'project');
-  return syncGeneratedFiles({ root: homeDir, files: await renderDefinitions({ definitions, target: target ?? 'both' }), ledgerPath, check });
+  return syncGeneratedFiles({ root: homeDir, files: await renderDefinitions({ definitions, target: target ?? 'both', installScope: 'user' }), ledgerPath, check });
 }
 
 export async function installProject({ projectRoot = process.cwd(), target = 'both', forceConfig = false, check = false } = {}) {
-  if (!['both', 'claude', 'codex'].includes(target)) throw new Error(`Unknown installation target: ${target}`);
+  target = serializeTargets(targetList(target));
   projectRoot = path.resolve(projectRoot);
   if (projectRoot === path.resolve(os.homedir()) || await exists(path.join(projectRoot, '.aorch/generated-user-files.json'))) {
     throw new Error('Project installation cannot share the user definition root; use --user or a separate project directory');
   }
   // A narrow re-install keeps the other integration current too.
   target = mergeTargets((await readStamp(projectRoot))?.target, target);
-  const wantsClaude = target === 'both' || target === 'claude';
-  const wantsCodex = target === 'both' || target === 'codex';
+  const selectedTargets = new Set(targetList(target));
+  const wantsClaude = selectedTargets.has('claude');
+  const wantsCodex = selectedTargets.has('codex');
 
   // Parse every JSON file this install will merge into BEFORE mutating
   // anything, so a malformed existing file cannot abort a half-written
@@ -125,7 +127,9 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
   }
   const payloadHash = await computePayloadHash();
   const stamp = await readStamp(projectRoot);
-  if (stamp?.payloadHash !== payloadHash || stamp?.target !== target || stamp?.packageRoot !== PACKAGE_ROOT.replaceAll('\\', '/')) await writeStamp(projectRoot, { target, payloadHash });
+  if (stamp?.payloadHash !== payloadHash || JSON.stringify(stamp?.target) !== JSON.stringify(target) || stamp?.packageRoot !== PACKAGE_ROOT.replaceAll('\\', '/')) {
+    await writeStamp(projectRoot, { target, payloadHash });
+  }
   const registry = sync.status !== 'current' ? await recordInstall(projectRoot, target) : {};
   return { projectRoot, target, status: sync.status, installed: files.map((entry) => entry.path), changed: sync.changed, payloadHash,
     ...(sync.backup ? { backup: sync.backup } : {}), ...(registry.warning ? { warnings: [registry.warning] } : {}) };

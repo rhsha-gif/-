@@ -29,7 +29,8 @@ function metadata(text, fallback) {
 function discovered(entry, provider) {
   return { installed: true, enabled: true, configuredEnabled: null, available: null, availabilityEvidence: 'disk; current host session not observed',
     discovered: true, syncStatus: 'unmanaged', ...entry, providers: [provider],
-    bindings: { [provider]: { name: entry.name ?? entry.id, path: entry.path, mode: entry.mode ?? 'native', enabled: entry.enabled ?? true, sourceScope: entry.sourceScope, syncStatus: entry.syncStatus ?? 'unmanaged' } } };
+    bindings: { [provider]: { name: entry.name ?? entry.id, path: entry.path, mode: entry.mode ?? 'native', enabled: entry.enabled ?? true,
+      installed: true, available: null, sourceScope: entry.sourceScope, syncStatus: entry.syncStatus ?? 'unmanaged' } } };
 }
 async function scanSkills(dir, provider, meta = {}) {
   const found = [];
@@ -47,14 +48,37 @@ async function scanSkills(dir, provider, meta = {}) {
   }
   return found;
 }
+async function scanFlatSkills(dir, provider, meta = {}) {
+  const found = [];
+  for (const entry of await entries(dir)) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+    const file = path.join(dir, entry.name);
+    const raw = await readFile(file);
+    const localId = entry.name.slice(0, -3);
+    const info = metadata(raw.toString('utf8'), localId);
+    const name = ID.test(info.name) ? info.name : localId;
+    const id = meta.namespace ? `${meta.namespace}:${name}` : name;
+    if (!ID.test(id)) continue;
+    const bridge = /aorch-generated:.*mode=bridge/.test(raw.toString('utf8'));
+    found.push(discovered({ id, type: 'skill', description: info.description, sourceHash: contentHash(raw), path: file, ...meta,
+      ...(bridge ? { mode: 'bridge', enabled: false } : {}) }, provider));
+  }
+  return found;
+}
 async function scanAgents(dir, provider, meta) {
   const found = [];
   for (const entry of await entries(dir)) {
+    let file;
+    if (provider === 'antigravity' && entry.isDirectory()) file = path.join(dir, entry.name, 'agent.md');
+    else if (entry.isFile()) file = path.join(dir, entry.name);
+    else continue;
+    if (!(await readOptional(file))) continue;
     const unsupported = provider === 'openai' && meta.namespace && entry.name.endsWith('.md');
-    if (!entry.isFile() || (!entry.name.endsWith(provider === 'anthropic' ? '.md' : '.toml') && !unsupported)) continue;
-    const file = path.join(dir, entry.name);
+    const extension = provider === 'openai' ? '.toml' : '.md';
+    if (provider !== 'antigravity' && (!entry.name.endsWith(extension) && !unsupported)) continue;
+    if (provider === 'antigravity' && entry.isFile() && !entry.name.endsWith('.md')) continue;
     const text = await readFile(file, 'utf8');
-    const localId = entry.name.replace(/\.(md|toml)$/, '');
+    const localId = entry.isDirectory() ? entry.name : entry.name.replace(/\.(md|toml)$/, '');
     const info = metadata(text, localId);
     const id = meta.namespace ? `${meta.namespace}:${localId}` : localId;
     if (!ID.test(id)) continue;
@@ -157,19 +181,33 @@ function combine(entries) {
 export async function discoverCapabilities({ cwd = process.cwd(), includeUser = true, homeDir = os.homedir(), packageRoot } = {}) {
   const found = [];
   for (const [root, sourceScope] of [[cwd, 'project'], ...(includeUser ? [[homeDir, 'user']] : [])]) {
-    for (const provider of ['anthropic', 'openai']) {
+    for (const provider of ['anthropic', 'openai', 'antigravity', 'grok']) {
       const meta = { sourceScope };
-      const settings = await pluginSettings(root, provider);
-      found.push(...await scanSkills(path.join(root, provider === 'anthropic' ? '.claude/skills' : '.agents/skills'), provider, meta));
+      if (provider === 'anthropic') found.push(...await scanSkills(path.join(root, '.claude/skills'), provider, meta));
+      if (provider === 'openai') found.push(...await scanSkills(path.join(root, '.agents/skills'), provider, meta));
       if (provider === 'openai') found.push(...await scanSkills(path.join(root, '.codex/skills'), provider, meta));
-      found.push(...await scanAgents(path.join(root, provider === 'anthropic' ? '.claude/agents' : '.codex/agents'), provider, meta));
-      found.push(...await scanPlugins(path.join(root, provider === 'anthropic' ? '.claude/plugins' : '.codex/plugins'), provider, meta, settings));
-      found.push(...await scanHooks(root, provider, meta));
+      if (provider === 'antigravity') {
+        const skills = sourceScope === 'user' ? '.gemini/antigravity-cli/skills' : '.agents/skills';
+        const agents = sourceScope === 'user' ? '.gemini/config/agents' : '.agents/agents';
+        found.push(...await scanFlatSkills(path.join(root, skills), provider, meta));
+        found.push(...await scanAgents(path.join(root, agents), provider, meta));
+      }
+      if (provider === 'grok') {
+        found.push(...await scanSkills(path.join(root, '.grok/skills'), provider, meta));
+        found.push(...await scanAgents(path.join(root, '.grok/agents'), provider, meta));
+      }
+      if (provider === 'anthropic' || provider === 'openai') {
+        const settings = await pluginSettings(root, provider);
+        found.push(...await scanAgents(path.join(root, provider === 'anthropic' ? '.claude/agents' : '.codex/agents'), provider, meta));
+        found.push(...await scanPlugins(path.join(root, provider === 'anthropic' ? '.claude/plugins' : '.codex/plugins'), provider, meta, settings));
+        found.push(...await scanHooks(root, provider, meta));
+      }
     }
   }
   const combined = combine(found);
   const definitions = await loadDefinitions({ cwd, includeUser, ...(packageRoot ? { packageRoot } : {}) });
-  const rendered = await renderDefinitions({ definitions, ...(packageRoot ? { packageRoot } : {}) });
+  const renderedProject = await renderDefinitions({ definitions, target: 'all', ...(packageRoot ? { packageRoot } : {}) });
+  const renderedUser = await renderDefinitions({ definitions, target: 'all', installScope: 'user', ...(packageRoot ? { packageRoot } : {}) });
   for (const definition of definitions) {
     let current = combined.find((entry) => entry.id === definition.id && entry.type === definition.type);
     if (!current && definition.sourceScope === 'shared') continue;
@@ -184,13 +222,14 @@ export async function discoverCapabilities({ cwd = process.cwd(), includeUser = 
     current.sourceScope = definition.sourceScope;
     current.description = definition.description;
     current.compatibility = definition.compatibility;
-    for (const provider of ['anthropic', 'openai']) {
+    for (const provider of ['anthropic', 'openai', 'antigravity', 'grok']) {
       const definitionRoot = definition.sourceScope === 'user' || (definition.sourceScope === 'shared' && originalScope === 'user') ? homeDir : cwd;
+      const rendered = definitionRoot === homeDir ? renderedUser : renderedProject;
       const ledgerRaw = await readOptional(path.join(definitionRoot, definitionRoot === homeDir ? '.aorch/generated-user-files.json' : '.aorch/generated-files.json'));
       let ledger;
       if (ledgerRaw) { try { ledger = JSON.parse(ledgerRaw); } catch { /* unknown sync state */ } }
       const files = rendered.filter((file) => file.definitionId === `${definition.type}:${definition.id}` && file.provider === provider);
-      const entry = files.find((file) => definition.type === 'agent' || file.path.endsWith('/SKILL.md'));
+      const entry = files.find((file) => definition.type === 'agent' || file.provider === 'antigravity' || file.path.endsWith('/SKILL.md'));
       const disk = entry ? await readOptional(path.join(definitionRoot, entry.path)) : null;
       const actual = disk ? contentHash(disk) : null;
       const expected = entry ? contentHash(entry.content) : null;
@@ -206,13 +245,17 @@ export async function discoverCapabilities({ cwd = process.cwd(), includeUser = 
           }
         }
       }
-      current.bindings[provider] = { name: definition.bindings[provider].name, path: entry ? path.join(definitionRoot, definition.type === 'skill' ? path.dirname(entry.path) : entry.path) : null,
-        mode: definition.bindings[provider].mode, enabled: actual !== null, syncStatus, installed: actual !== null, settings: definition.bindings[provider].settings };
+      const bindingPath = entry ? path.join(definitionRoot,
+        definition.type === 'skill' && provider !== 'antigravity' ? path.dirname(entry.path) : entry.path) : null;
+      current.bindings[provider] = { name: definition.bindings[provider].name, path: bindingPath,
+        mode: definition.bindings[provider].mode, enabled: actual !== null && definition.bindings[provider].mode === 'native', available: null,
+        syncStatus, installed: actual !== null, settings: definition.bindings[provider].settings };
     }
     current.installed = Object.values(current.bindings).some((binding) => binding.installed);
-    current.enabled = current.installed;
+    current.enabled = Object.values(current.bindings).some((binding) => binding.enabled);
     current.syncStatus = Object.values(current.bindings).some((binding) => binding.syncStatus === 'conflict') ? 'conflict'
-      : Object.values(current.bindings).every((binding) => binding.syncStatus === 'current') ? 'current' : 'stale';
+      : Object.values(current.bindings).some((binding) => binding.installed && binding.syncStatus !== 'current') ? 'stale'
+        : current.installed ? 'current' : 'not-installed';
   }
   return combined;
 }

@@ -22,8 +22,34 @@ const PAYLOAD_ROOTS = Object.freeze([
   'integrations/shared',
   'integrations/claude',
   'integrations/codex',
+  'integrations/antigravity',
+  'integrations/grok',
   'schemas'
 ]);
+
+export const INSTALL_TARGETS = Object.freeze(['claude', 'codex', 'antigravity', 'grok']);
+
+export function targetList(target) {
+  const values = Array.isArray(target) ? target : [target];
+  const result = [];
+  for (const value of values) {
+    const expanded = value === 'both' ? ['claude', 'codex'] : value === 'all' ? INSTALL_TARGETS : [value];
+    for (const item of expanded) {
+      if (!INSTALL_TARGETS.includes(item)) throw new Error(`Unknown installation target: ${item}`);
+      if (!result.includes(item)) result.push(item);
+    }
+  }
+  if (!result.length) throw new Error('At least one installation target is required');
+  return INSTALL_TARGETS.filter((item) => result.includes(item));
+}
+
+export function serializeTargets(targets) {
+  const values = targetList(targets);
+  if (values.length === 1) return values[0];
+  if (values.length === 2 && values[0] === 'claude' && values[1] === 'codex') return 'both';
+  if (values.length === INSTALL_TARGETS.length) return 'all';
+  return values;
+}
 
 async function exists(filePath) {
   try { await access(filePath); return true; } catch { return false; }
@@ -108,15 +134,16 @@ export async function writeStamp(projectRoot, { target, payloadHash, version, in
 export async function detectTarget(projectRoot) {
   const hasClaude = await exists(path.join(projectRoot, '.claude/skills/adaptive-orchestrate'));
   const hasCodex = await exists(path.join(projectRoot, '.agents/skills/adaptive-orchestrate'));
-  if (hasClaude && hasCodex) return 'both';
-  if (hasClaude) return 'claude';
-  if (hasCodex) return 'codex';
-  return null;
+  const hasAntigravity = await exists(path.join(projectRoot, '.agents/skills/adaptive-orchestrate.md'));
+  const hasGrok = await exists(path.join(projectRoot, '.grok/skills/adaptive-orchestrate'));
+  const found = [hasClaude && 'claude', hasCodex && 'codex', hasAntigravity && 'antigravity', hasGrok && 'grok'].filter(Boolean);
+  return found.length ? serializeTargets(found) : null;
 }
 
 export function mergeTargets(previous, next) {
-  if (!previous || previous === next) return next;
-  return 'both';
+  if (!previous) return serializeTargets(next);
+  if (!next) return serializeTargets(previous);
+  return serializeTargets([...targetList(previous), ...targetList(next)]);
 }
 
 // 'unmanaged' means no install to refresh — auto-update must never install

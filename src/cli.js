@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.js';
+import { upgradeConfigFile } from './config-upgrade.js';
 import { readObservations, appendObservation } from './observations.js';
 import { selectRoute } from './router.js';
 import { executeWithVerification } from './run-loop.js';
@@ -37,7 +38,10 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  branch    Branch lifecycle: status | apply --action <start|finish|cleanup|sync>\n` +
   `  inventory Print agents, skills, plugins and hooks with source and sync state (--type, --match, --runtime)\n` +
   `  quota     Report each provider's remaining subscription quota via its usageProbe\n` +
-  `  install   Generate Claude/Codex integrations ([--project <path> | --user] [--target both|claude|codex] [--check])\n` +
+  `  diagnose  Inspect CLI paths, versions, models and supported features\n` +
+  `  configure Add four-CLI defaults without replacing user tuning ([--check])\n` +
+  `  evaluate  Report weekly evidence ([--apply] [--restore <version>] [--home-dir <path>])\n` +
+  `  install   Generate integrations ([--project <path> | --user] [--target both|claude|codex|antigravity|grok|all] [--check])\n` +
   `  update    Refresh installed integrations ([--project <path> | --user] [--check])\n` +
   `  dispatch --plan <path> [--resume <dispatch.json> --answers <answers.json>] [--output <path>]\n\n` +
   `Common options:\n` +
@@ -45,7 +49,7 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  --cwd <path>          Project working directory\n` +
   `  --observations <path> Reviewed outcomes JSONL\n`;
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h', 'approved', 'confirm-unmerged', 'check', 'print-schema', 'user']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h', 'approved', 'confirm-unmerged', 'check', 'print-schema', 'user', 'apply']);
 
 const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
 const COMMAND_FLAGS = Object.freeze({
@@ -58,6 +62,9 @@ const COMMAND_FLAGS = Object.freeze({
   limits: [...COMMON_FLAGS, 'minutes', 'note'],
   inventory: [...COMMON_FLAGS, 'runtime', 'type', 'match'],
   quota: [...COMMON_FLAGS],
+  diagnose: [...COMMON_FLAGS],
+  configure: [...COMMON_FLAGS, 'check'],
+  evaluate: [...COMMON_FLAGS, 'apply', 'restore', 'home-dir'],
   branch: [...COMMON_FLAGS, 'action', 'approved', 'confirm-unmerged', 'name', 'observations', 'task'],
   install: ['cwd', 'help', 'h', 'target', 'project', 'force-config', 'check', 'user'],
   update: ['cwd', 'help', 'h', 'project', 'check', 'user']
@@ -158,6 +165,7 @@ function cleanRoute(route) {
     provider: route.provider,
     profileId: route.profileId,
     model: route.model,
+    modelFamily: route.modelFamily,
     effort: route.effort,
     predictedQuality: route.quality,
     tokenIndex: route.tokenIndex,
@@ -205,6 +213,30 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   const config = await loadConfig({ cwd, configPath: flags.config });
+  if (command === 'configure') {
+    if (config._configPath === path.join(PACKAGE_ROOT, 'config', 'aorch.config.json')) throw new Error('configure requires an existing project config; run install first');
+    const result = await upgradeConfigFile({ configPath: config._configPath, check: flags.check === true });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return 0;
+  }
+  if (command === 'diagnose') {
+    const { diagnoseProviders } = await import('./provider-diagnostics.js');
+    process.stdout.write(`${JSON.stringify(await diagnoseProviders({ providers: config.providers, cwd }), null, 2)}\n`);
+    return 0;
+  }
+  if (command === 'evaluate') {
+    const { evaluateWeekly, restoreWeeklyPolicy } = await import('./evaluation.js');
+    if (flags.restore && flags.apply) throw new Error('--restore cannot be combined with --apply');
+    const result = flags.restore
+      ? await restoreWeeklyPolicy({ homeDir: flags['home-dir'], version: requireFlag(flags, 'restore') })
+      : await evaluateWeekly({ roots: [cwd], homeDir: flags['home-dir'], apply: flags.apply === true, config });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return 0;
+  }
+  if (config.learning?.enabled === true && ['route', 'exec', 'dispatch', 'classify'].includes(command)) {
+    const { readWeeklyPolicy } = await import('./evaluation.js');
+    config.weeklyPolicy = await readWeeklyPolicy({});
+  }
   config.capabilities = mergeCapabilities(
     config.capabilities,
     await discoverCapabilities({ cwd, includeUser: flags['project-only'] !== true })
@@ -242,7 +274,7 @@ async function main(argv = process.argv.slice(2)) {
     });
     const output = flags['dry-run'] === true
       ? { route: cleanRoute(result.route), capabilities: result.capabilities, commandSpec: result.commandSpec, runDir: result.runDir }
-      : { status: result.status ?? 'complete', inputRequest: result.inputRequest, route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, runDir: result.runDir, verification: result.verification, attempts: result.attempts };
+      : { status: result.status ?? 'complete', inputRequest: result.inputRequest, route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, runDir: result.runDir, verification: result.verification, attempts: result.attempts, usage: result.result?.usage, durationMs: result.result?.durationMs, learningWarnings: result.learningWarnings };
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return result.status === 'awaiting-input' ? 2 : 0;
   }

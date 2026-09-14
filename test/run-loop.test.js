@@ -21,6 +21,10 @@ function baseTask(overrides = {}) {
 
 function baseConfig(overrides = {}) {
   return {
+    providers: [{ id: 'anthropic', enabled: true }],
+    models: ['claude-opus-deep', 'claude-fable-apex'].map((id) => ({
+      id, provider: 'anthropic', model: id, efforts: [{ name: 'high' }]
+    })),
     escalation: {
       maxAttempts: 3,
       ladders: {
@@ -355,6 +359,23 @@ test('a verify failure escalates on the provider ladder with the failure evidenc
   assert.equal(result.verification.passed, true);
   assert.equal(result.attempts.length, 2);
   assert.deepEqual(records.map((entry) => entry.input.quality), [0.2, 1]);
+});
+
+test('escalation skips a ladder profile that fails current automatic eligibility', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const config = baseConfig();
+  config.models[0].automatic = false;
+  const result = await executeLoop({
+    task: baseTask(), config, cwd: dir,
+    executeTaskImpl: stubExecutor(dir, calls),
+    runVerificationImpl: stubVerifier([false, true]),
+    appendObservationImpl: stubRecorder([])
+  });
+  assert.equal(result.verification.passed, true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].forcedRoute.profileId, 'claude-fable-apex');
+  assert.match(calls[1].task.objective, /assertion blew up/);
 });
 
 test('a read-only task fails fast on verify failure: no ladder, no observation', async (t) => {

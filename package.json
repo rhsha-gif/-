@@ -1,7 +1,7 @@
 {
   "name": "adaptive-orchestrator",
   "version": "0.5.0",
-  "description": "Adaptive task decomposition and capability routing for Claude Code and Codex CLI",
+  "description": "Adaptive task decomposition and capability routing for Codex, Claude Code, Antigravity and Grok CLIs",
   "type": "module",
   "bin": {
     "aorch": "./src/cli.js"

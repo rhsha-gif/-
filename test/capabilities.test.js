@@ -17,6 +17,16 @@ test('selects exact requested capabilities compatible with the provider', () => 
   assert.deepEqual(selected.hooks.map((x) => x.id), ['quality-gate']);
 });
 
+test('maps Antigravity and Grok adapters to their native binding keys', () => {
+  const portable = [{ id: 'portable', type: 'skill', providers: ['antigravity', 'grok'], enabled: true,
+    bindings: {
+      antigravity: { path: '/agy', mode: 'native', syncStatus: 'current' },
+      grok: { path: '/grok', mode: 'native', syncStatus: 'current' }
+    } }];
+  assert.equal(selectCapabilities({ requestedIds: ['portable'], inventory: portable, provider: { id: 'agy-fast', adapter: 'antigravity' } }).skills[0].path, '/agy');
+  assert.equal(selectCapabilities({ requestedIds: ['portable'], inventory: portable, provider: { id: 'grok-fast', adapter: 'grok' } }).skills[0].path, '/grok');
+});
+
 test('rejects a provider-incompatible plugin', () => {
   assert.throws(() => selectCapabilities({
     requestedIds: ['browser'], inventory, provider: 'openai'

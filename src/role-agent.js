@@ -16,6 +16,14 @@ const PRESET_LOCATIONS = Object.freeze({
   codex: [
     (cwd, name) => path.join(cwd, '.codex', 'agents', `${name}.toml`),
     (_cwd, name) => path.join(PACKAGE_ROOT, 'integrations', 'codex', 'agents', `${name}.toml`)
+  ],
+  antigravity: [
+    (cwd, name) => path.join(cwd, '.agents', 'agents', name, 'agent.md'),
+    (_cwd, name) => path.join(PACKAGE_ROOT, 'integrations', 'antigravity', 'agents', name, 'agent.md')
+  ],
+  grok: [
+    (cwd, name) => path.join(cwd, '.grok', 'agents', `${name}.md`),
+    (_cwd, name) => path.join(PACKAGE_ROOT, 'integrations', 'grok', 'agents', `${name}.md`)
   ]
 });
 
@@ -56,7 +64,7 @@ export function roleMcp(agentRole) {
 
 export function roleAgentName({ config, agentRole, agentId, adapter }) {
   if (agentId) {
-    const provider = adapter === 'claude' ? 'anthropic' : adapter === 'codex' ? 'openai' : adapter;
+    const provider = providerForAdapter(adapter);
     const entries = (config.capabilities ?? []).filter((entry) => entry.type === 'agent' && entry.id === agentId);
     const entry = entries[0];
     if (entries.length !== 1 || entry.enabled === false || !(entry.executionProviders ?? entry.providers ?? []).includes(provider)
@@ -77,6 +85,10 @@ export function roleAgentName({ config, agentRole, agentId, adapter }) {
     throw new Error(`No ${adapter} agent configured for agentRole ${agentRole}`);
   }
   return name;
+}
+
+function providerForAdapter(adapter) {
+  return adapter === 'claude' ? 'anthropic' : adapter === 'codex' ? 'openai' : adapter;
 }
 
 // Pulls `developer_instructions = """..."""` out of a Codex preset. A real TOML
@@ -100,15 +112,86 @@ export function parseFrontmatterNumber(text, key) {
   return match ? Number(match[1]) : undefined;
 }
 
+export function parseFrontmatterList(text, key) {
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!frontmatter) return undefined;
+  const match = new RegExp(`^${key}:[ \\t]*(.*)$`, 'm').exec(frontmatter[1]);
+  if (!match) return undefined;
+  const inline = match[1].trim();
+  if (inline) {
+    if (inline.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(inline.replaceAll("'", '"'));
+        return Array.isArray(parsed) ? parsed.map(String) : undefined;
+      } catch {
+        if (!inline.endsWith(']')) return undefined;
+        return inline.slice(1, -1).split(',')
+          .map((entry) => entry.trim().replace(/^['"]|['"]$/gu, ''))
+          .filter(Boolean);
+      }
+    }
+    return inline.split(',').map((entry) => entry.trim()).filter(Boolean);
+  }
+  const tail = frontmatter[1].slice(match.index + match[0].length);
+  const items = [];
+  for (const line of tail.split(/\r?\n/u)) {
+    if (/^\s*$/u.test(line)) continue;
+    const item = /^\s+-\s+(.+?)\s*$/u.exec(line);
+    if (!item) break;
+    items.push(item[1].replace(/^['"]|['"]$/gu, ''));
+  }
+  return items;
+}
+
+function nativeSandboxMode(adapter, preset, binding) {
+  const configured = binding?.settings?.sandbox_mode;
+  if (configured === 'read-only') return configured;
+  if (adapter === 'grok') {
+    const denied = parseFrontmatterList(preset, 'disallowedTools');
+    return denied?.includes('search_replace') ? 'read-only' : undefined;
+  }
+  const tools = parseFrontmatterList(preset, 'tools');
+  if (!tools) return undefined;
+  const writeTools = ['write_to_file', 'replace_file_content', 'multi_replace_file_content'];
+  return writeTools.some((tool) => tools.includes(tool)) ? undefined : 'read-only';
+}
+
+function assertNativeProfile(adapter, preset, name) {
+  if (adapter === 'grok') {
+    const denied = parseFrontmatterList(preset, 'disallowedTools');
+    if (!denied?.includes('Agent')) {
+      throw new Error(`Grok agent preset ${name} must disallow Agent; run \`aorch update\``);
+    }
+    return;
+  }
+  const tools = parseFrontmatterList(preset, 'tools');
+  if (!tools?.includes('finish')) {
+    throw new Error(`Antigravity agent preset ${name} must include finish; run \`aorch update\``);
+  }
+  const forbidden = ['code_search', 'run_command', 'invoke_subagent', 'define_subagent', 'send_message', 'manage_subagents', 'browser_subagent'];
+  const unsafe = forbidden.find((tool) => tools.includes(tool));
+  if (unsafe) {
+    throw new Error(`Antigravity agent preset ${name} contains unsupported tool ${unsafe}; run \`aorch update\``);
+  }
+}
+
 async function readFirstExisting(candidates) {
+  return (await readFirstExistingEntry(candidates))?.text ?? null;
+}
+
+async function readFirstExistingEntry(candidates) {
   for (const candidate of candidates) {
     try {
-      return await readFile(candidate, 'utf8');
+      return { path: candidate, text: await readFile(candidate, 'utf8') };
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
   }
   return null;
+}
+
+function markdownBody(text) {
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/u, '').trim();
 }
 
 // Claude selects the preset by name (`--agent`), which also applies its tool
@@ -125,7 +208,7 @@ export async function resolveRoleAgent({ config, agentRole, agentId, adapter, cw
   }
 
   const name = roleAgentName({ config, agentRole, agentId, adapter });
-  const provider = adapter === 'claude' ? 'anthropic' : 'openai';
+  const provider = providerForAdapter(adapter);
   const custom = agentId ? config.capabilities.find((entry) => entry.type === 'agent' && entry.id === agentId) : null;
   const binding = custom?.bindings?.[provider];
   if (custom && ['conflict', 'stale', 'not-installed'].includes(binding?.syncStatus)) throw new Error(`Agent ${agentId} definitions are ${binding.syncStatus}; run aorch update before execution`);
@@ -144,6 +227,55 @@ export async function resolveRoleAgent({ config, agentRole, agentId, adapter, cw
     }
     const maxTurns = parseFrontmatterNumber(preset, 'maxTurns');
     return { agent: name, ...(maxTurns === undefined ? {} : { maxTurns }), ...roleMcp(agentRole) };
+  }
+
+  if (adapter === 'antigravity' || adapter === 'grok') {
+    if (roleMcp(agentRole).mcpConfig) {
+      throw new Error(`Adapter ${adapter} cannot apply the Claude-only MCP required by agentRole ${agentRole}`);
+    }
+    const projectLocation = adapter === 'antigravity'
+      ? path.join(cwd, '.agents', 'agents', name, 'agent.md')
+      : path.join(cwd, '.grok', 'agents', `${name}.md`);
+    const packageLocation = adapter === 'antigravity'
+      ? path.join(PACKAGE_ROOT, 'integrations', 'antigravity', 'agents', name, 'agent.md')
+      : path.join(PACKAGE_ROOT, 'integrations', 'grok', 'agents', `${name}.md`);
+    const userLocation = adapter === 'antigravity'
+      ? path.join(os.homedir(), '.gemini', 'config', 'agents', name, 'agent.md')
+      : path.join(os.homedir(), '.grok', 'agents', `${name}.md`);
+    const locations = custom
+      ? [binding?.path ?? projectLocation]
+      : [projectLocation, userLocation];
+    const installed = await readFirstExistingEntry(locations);
+    if (installed !== null) {
+      assertNativeProfile(adapter, installed.text, name);
+      const sandboxMode = nativeSandboxMode(adapter, installed.text, binding);
+      return { agent: name, ...(sandboxMode ? { sandboxMode } : {}) };
+    }
+
+    // Grok accepts a definition file path via --agent, so its shipped native
+    // preset can be used directly without pretending it was installed by name.
+    if (!custom && adapter === 'grok') {
+      const packaged = await readFirstExistingEntry([packageLocation]);
+      if (packaged !== null) {
+        assertNativeProfile(adapter, packaged.text, name);
+        const sandboxMode = nativeSandboxMode(adapter, packaged.text, binding);
+        return { agent: packaged.path, ...(sandboxMode ? { sandboxMode } : {}) };
+      }
+    }
+
+    // Common roles have a provider-neutral canonical body. It is safe to use
+    // as prompt instructions when a native install is missing only if the role
+    // carries no provider-specific capability. In particular, never pretend
+    // the Claude-only paper-search MCP exists on another CLI.
+    if (!custom && adapter === 'grok' && agentRole === 'worker') {
+      const portable = await readFirstExisting([
+        path.join(PACKAGE_ROOT, 'integrations', 'shared', 'agents', `${name}.md`)
+      ]);
+      if (portable !== null) return { agentInstructions: markdownBody(portable) };
+    }
+    throw new Error(
+      `${adapter} agent preset ${name} not found for agentRole ${agentRole}; run \`aorch install\``
+    );
   }
 
   const locations = custom ? [binding?.path ?? path.join(cwd, '.codex/agents', `${agentId}.toml`)] : [...PRESET_LOCATIONS.codex.map((resolve) => resolve(cwd, name)), path.join(os.homedir(), '.codex/agents', `${name}.toml`)];

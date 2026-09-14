@@ -6,9 +6,10 @@ import { planFingerprint } from './continuation.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { writeJsonAtomic } from './fs-util.js';
+import { modelFamily } from './model-family.js';
 
 function routeSummary(route) {
-  return route ? { provider: route.provider, profileId: route.profileId, model: route.model, effort: route.effort } : undefined;
+  return route ? { provider: route.provider, profileId: route.profileId, model: route.model, effort: route.effort, modelFamily: modelFamily(route) } : undefined;
 }
 
 export async function dispatchPlan({ plan, config, observations = [], cwd = process.cwd(), dryRun = false, timeoutMs,
@@ -32,6 +33,13 @@ export async function dispatchPlan({ plan, config, observations = [], cwd = proc
     const task = { ...declared, forbiddenProviders: [...new Set([...(declared.forbiddenProviders ?? []), ...forbiddenProviders])] };
     let route, agent;
     try {
+      for (const dependency of task.independentOfTaskIds ?? []) {
+        const previous = results.find((entry) => entry.taskId === dependency);
+        const families = [previous?.route ?? previous, ...(previous?.attempts ?? []).map((attempt) => attempt.route)]
+          .map((entry) => modelFamily(entry)).filter(Boolean);
+        if (!families.length) throw new Error(`No known model family for independence reference ${dependency}`);
+        task.forbiddenModelFamilies = [...new Set([...(task.forbiddenModelFamilies ?? []), ...families])];
+      }
       route = selectRouteImpl({ task, catalog: config, observations, quota: null });
       const adapter = config.providers?.find((entry) => entry.id === route.provider)?.adapter;
       if (!adapter) throw new Error(`Unknown provider in route: ${route.provider}`);

@@ -14,6 +14,31 @@
         "openai": {
           "name": "aorch_analyst",
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "aorch-analyst",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-analyst",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write"
+          ]
         }
       }
     },
@@ -30,6 +55,31 @@
         "openai": {
           "name": "aorch_auditor",
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "aorch-auditor",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-auditor",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write"
+          ]
         }
       }
     },
@@ -46,6 +96,34 @@
         "openai": {
           "name": "aorch_editor",
           "sandbox_mode": "workspace-write"
+        },
+        "antigravity": {
+          "name": "aorch-editor",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "write_to_file",
+            "replace_file_content",
+            "multi_replace_file_content",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-editor",
+          "disallowedTools": [
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write",
+            "search_replace"
+          ]
         }
       }
     },
@@ -62,6 +140,34 @@
         "openai": {
           "name": "aorch_fixer",
           "sandbox_mode": "workspace-write"
+        },
+        "antigravity": {
+          "name": "aorch-fixer",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "write_to_file",
+            "replace_file_content",
+            "multi_replace_file_content",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-fixer",
+          "disallowedTools": [
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write",
+            "search_replace"
+          ]
         }
       }
     },
@@ -78,6 +184,31 @@
         "openai": {
           "name": "aorch_invest_analyst",
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "aorch-invest-analyst",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-invest-analyst",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write"
+          ]
         }
       }
     },
@@ -94,6 +225,31 @@
         "openai": {
           "name": "aorch_license_reviewer",
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "aorch-license-reviewer",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-license-reviewer",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write"
+          ]
         }
       }
     },
@@ -110,6 +266,35 @@
         "openai": {
           "name": "aorch_paper_researcher",
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "aorch-paper-researcher",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "read_url_content",
+            "search_web",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-paper-researcher",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write",
+            "web_search",
+            "web_fetch"
+          ]
         }
       }
     },
@@ -126,6 +311,31 @@
         "openai": {
           "name": "aorch_ponytail",
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "aorch-ponytail",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-ponytail",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write"
+          ]
         }
       }
     },
@@ -142,6 +352,31 @@
         "openai": {
           "name": "aorch_qa_analyst",
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "aorch-qa-analyst",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-qa-analyst",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write"
+          ]
         }
       }
     },
@@ -158,6 +393,34 @@
         "openai": {
           "name": "aorch_refactorer",
           "sandbox_mode": "workspace-write"
+        },
+        "antigravity": {
+          "name": "aorch-refactorer",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "write_to_file",
+            "replace_file_content",
+            "multi_replace_file_content",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-refactorer",
+          "disallowedTools": [
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write",
+            "search_replace"
+          ]
         }
       }
     },
@@ -174,6 +437,35 @@
         "openai": {
           "name": "aorch_researcher",
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "aorch-researcher",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "read_url_content",
+            "search_web",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-researcher",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write",
+            "web_search",
+            "web_fetch"
+          ]
         }
       }
     },
@@ -190,6 +482,31 @@
         "openai": {
           "name": "aorch_reviewer",
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "aorch-reviewer",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-reviewer",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write"
+          ]
         }
       }
     },
@@ -210,6 +527,31 @@
           "model": "gpt-5.6-terra",
           "model_reasoning_effort": "low",
           "sandbox_mode": "read-only"
+        },
+        "antigravity": {
+          "name": "aorch-scout",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-scout",
+          "disallowedTools": [
+            "search_replace",
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write"
+          ]
         }
       }
     },
@@ -226,6 +568,34 @@
         "openai": {
           "name": "aorch_worker",
           "sandbox_mode": "workspace-write"
+        },
+        "antigravity": {
+          "name": "aorch-worker",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "write_to_file",
+            "replace_file_content",
+            "multi_replace_file_content",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-worker",
+          "disallowedTools": [
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write",
+            "search_replace"
+          ]
         }
       }
     },
@@ -242,6 +612,34 @@
         "openai": {
           "name": "aorch_writer",
           "sandbox_mode": "workspace-write"
+        },
+        "antigravity": {
+          "name": "aorch-writer",
+          "tools": [
+            "view_file",
+            "list_dir",
+            "grep_search",
+            "manage_task",
+            "write_to_file",
+            "replace_file_content",
+            "multi_replace_file_content",
+            "finish"
+          ],
+          "mainAgent": true,
+          "subagent": false
+        },
+        "grok": {
+          "name": "aorch-writer",
+          "disallowedTools": [
+            "Agent"
+          ],
+          "tools": [
+            "grep",
+            "read_file",
+            "list_dir",
+            "todo_write",
+            "search_replace"
+          ]
         }
       }
     }
@@ -253,7 +651,9 @@
       "source": "skills/adaptive-orchestrate",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -262,7 +662,9 @@
       "source": "skills/aorch-downshift",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -271,7 +673,9 @@
       "source": "skills/aorch-manager-map",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     },
     {
@@ -280,7 +684,9 @@
       "source": "skills/aorch-model-upgrade",
       "providers": [
         "anthropic",
-        "openai"
+        "openai",
+        "antigravity",
+        "grok"
       ]
     }
   ]
