@@ -1,8 +1,30 @@
 # Adaptive Orchestrator
 
-> Claude Code와 Codex를 위한 공통 작업 판단·라우팅 런타임입니다. 품질과 안전 조건을 유지하며 필요한 작업만 분해·위임합니다. 공통 원본, 동기화, 제공자 호환성과 입력 후 재개는 [정의와 동기화](docs/definition-sync.md), 근거와 축소 결정은 [결정 기록](docs/harness-decisions-20260908.md)을 참고하세요.
+> Codex·Claude Code·Antigravity·Grok을 위한 공통 작업 판단·라우팅 런타임입니다. 품질과 안전 조건을 유지하며 필요한 작업만 분해·위임합니다. 공통 원본, 동기화, 제공자 호환성과 입력 후 재개는 [정의와 동기화](docs/definition-sync.md), 근거와 축소 결정은 [결정 기록](docs/harness-decisions-20260908.md)을 참고하세요.
 
-Adaptive Orchestrator는 Claude Code 또는 Codex CLI 아래에서 동작하는 소형 라우팅 런타임입니다. 분해 **문장을 지어내는 것은 호스트 모델(리드)의 네이티브 능력**이지만, 그 결과의 **형식은 aorch가 스키마로 강제하고 검증하며 실행까지 책임집니다**. 분해기를 따로 짓지 않고 리드의 분해에 올라타되, "성실히 따라주기"에 의존하지는 않는다는 뜻입니다. aorch는 계획의 각 작업에 대해 다음 조합을 판단하고 강제합니다.
+## 네 CLI와 주간 평가
+
+Claude Code·Codex·Antigravity CLI(`agy`)·Grok의 실행과 공통 정의를 지원합니다. 기존 `--target both`는 Claude·Codex를 뜻하며, 네 대상은 `--target all`로 선택합니다. 설치 경로와 모델 목록은 `aorch diagnose`로 확인합니다. 설치됨·설정상 활성화됨·실제로 호출 가능함은 서로 다른 상태입니다.
+
+```powershell
+aorch install --target all
+aorch install --user --target all
+aorch configure --check
+aorch configure
+aorch diagnose
+aorch evaluate
+aorch evaluate --apply
+aorch evaluate --restore <version>
+```
+
+`configure`는 기존 프로젝트 설정에 없는 제공자·프로필만 추가하고 원래 설정을 백업합니다. 사용자 모델 선택·품질 기준·비활성화는 보존합니다. 새로운 모델은 대표 검증 전에는 명시적으로 지정한 평가 작업에만 사용합니다. Antigravity·Grok은 확인된 구독 모델과 기존 로그인을 사용하며, 별도 API 키 과금으로 전환하지 않습니다.
+
+큰 작업은 상위 모델이 설계와 종합을 맡고, 독립적으로 검증 가능한 구현·자료 수집을 낮은 모델에 배분합니다. 계획의 `independentOfTaskIds` 또는 작업의 `forbiddenModelFamilies`로 모델 계열의 독립성을 지정합니다. Antigravity로 호출한 Claude와 Claude Code의 Claude는 같은 계열입니다.
+
+주간 평가는 실행 기록을 로컬에서 모아 검증된 일반 작업의 모델 배분에 반영합니다. 고위험·명시 모델 지정·검증 없는 자기 보고는 자동 조정에서 제외합니다. 최소 5건은 한 주가 아닌 누적 검증 관측 기준입니다. 정책은 버전별로 보관하며, 평가에 변화가 없으면 새 버전을 만들지 않습니다. 자세한 계약은 [주간 평가](docs/weekly-evaluation.md)를 참고하세요.
+
+
+Adaptive Orchestrator는 네 CLI 아래에서 동작하는 소형 라우팅 런타임입니다. 분해 **문장을 지어내는 것은 호스트 모델(리드)의 네이티브 능력**이지만, 그 결과의 **형식은 aorch가 스키마로 강제하고 검증하며 실행까지 책임집니다**. 분해기를 따로 짓지 않고 리드의 분해에 올라타되, "성실히 따라주기"에 의존하지는 않는다는 뜻입니다. aorch는 계획의 각 작업에 대해 다음 조합을 판단하고 강제합니다.
 
 ```text
 provider
@@ -79,7 +101,7 @@ TRIP, LazyCodex, autoresearch, SyMerge 등 참고 자료를 선별해 이 소스
 
 worker receipt는 완료 증명이 아니라 주장입니다. `aorch exec`는 각 worker 실행 전후의 Git 상태를 비교해 `receipt.filesChanged`와 실제 변경이 일치하는지, 변경이 `allowedScope` 안이고 `forbiddenScope` 밖인지, read-only 작업이 파일을 건드리지 않았는지, `HEAD`가 바뀌지 않았는지 확인합니다. orchestrator가 receipt와 evidence를 쓰는 configured state root는 비교에서 제외합니다. 위반은 더 강한 모델로 복구할 수 없으므로 escalation 없이 즉시 `verification.json` 증거와 함께 사람에게 반환합니다.
 
-task가 `verificationCommands`를 선언하면 **`aorch exec`가 change guard 통과 후 그 명령을 직접 실행**하고, 실패하면 같은 provider의 escalation 사다리(Claude: opus→fable, Codex: sol/high→sol/xhigh)를 실패 증거와 함께 상향합니다. 총 attempt는 3회이며, 소진되면 증거와 함께 사람에게 반환합니다. verify 결과는 quality 1.0/0.2 관측으로 자동 기록되어, 다운시프트된 모델이 반복 실패하면 라우팅이 스스로 상위 모델로 복귀합니다. Git 밖의 read-only 작업은 호환성을 유지하되 change guard가 `not-git-repository`로 기록됩니다.
+task가 `verificationCommands`를 선언하면 **`aorch exec`가 change guard 통과 후 그 명령을 직접 실행**하고, 실패하면 같은 provider의 escalation 사다리(Claude: opus→fable, Codex: sol/high→sol/xhigh)를 실패 증거와 함께 상향합니다. 총 attempt는 3회이며, 소진되면 증거와 함께 사람에게 반환합니다. verify 결과는 실행 증거로 기록됩니다. 주간 학습에서는 부모 실행기의 확인 기록과 대조한 일반 작업 표본이 5건 이상일 때 배분을 조정합니다. 고위험 작업과 사용자 모델 지정은 자동 학습에서 제외하며, 실행 중 검증 실패에 대한 기존 상향 절차는 유지합니다. Git 밖의 read-only 작업은 호환성을 유지하되 change guard가 `not-git-repository`로 기록됩니다.
 
 ### provider limits와 크로스 fallback
 
@@ -338,7 +360,7 @@ w_i=2^{-a_i/h}
 aorch record --input examples/review-observation.json
 ```
 
-worker의 자기평가가 아니라 독립 reviewer 결과를 기록해야 합니다. 예외는 하나입니다: **verify 게이트의 pass/fail은 객관적 신호이므로 quality 1.0/0.2, `metadata.source: 'verify-gate'`로 자동 기록됩니다.** 이것이 다운시프트의 자연 복원 안전망입니다 — 값싼 모델이 반복 실패하면 conservative 추정치가 바닥선 아래로 내려가 라우팅이 스스로 상위 모델로 복귀합니다. 관측치는 provider·model·effort·taskKind 4차원으로 매칭합니다(솔로 볼륨에서 셀이 실제로 차도록 축소). 새 모델은 challenger로 시작할 수 있으며, 검증되지 않은 challenger를 critical 작업의 단독 executor로 쓰지 않습니다.
+worker의 자기평가가 아니라 독립 reviewer 결과를 기록해야 합니다. 예외는 하나입니다: **verify 게이트의 pass/fail은 객관적 신호이므로 quality 1.0/0.2, `metadata.source: 'verify-gate'`로 자동 기록됩니다.** 주간 모드에서는 부모 실행기의 확인 기록이 있는 일반 작업만 5건 이상 모였을 때 정책에 반영합니다. 고위험 작업의 기준 변경은 제안만 하며 사용자 모델 지정은 유지합니다. 과거 원장이나 작업자 자기평가는 그 자체로 학습 근거가 되지 않습니다. 관측치는 provider·model·effort·taskKind 4차원으로 매칭합니다(솔로 볼륨에서 셀이 실제로 차도록 축소). 새 모델은 challenger로 시작할 수 있으며, 검증되지 않은 challenger를 critical 작업의 단독 executor로 쓰지 않습니다.
 
 ## 새 model과 provider
 
