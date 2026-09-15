@@ -24,7 +24,7 @@ def test_crop_naming_padding_and_content_from_fixture_rectangle(h):
         assert abs(w - (0.25 + 0.03) * W) <= 2 and abs(hgt - (0.25 + 0.03) * H) <= 2
         assert im.getpixel((w // 2, hgt // 2)) == (0, 0, 0)
         assert im.getpixel((2, 2)) == (255, 255, 255), "padding ring stays white"
-    body = (h.out_dir(slug) / "problems" / "001-chnone-1.md").read_text(encoding="utf-8")
+    body = (h.out_dir(slug) / "problems" / "001-fx.md").read_text(encoding="utf-8")
     assert "![](../img/p001-1.png)\n*사각형*" in body
 
 
@@ -37,7 +37,7 @@ def test_degenerate_bbox_yields_no_file_but_warning_callout_and_index_row(h):
     assert code == 0, out
     assert (h.out_dir(slug) / "img" / "p001-1.png").is_file()
     assert not (h.out_dir(slug) / "img" / "p001-2.png").exists()
-    body = (h.out_dir(slug) / "problems" / "001-chnone-1.md").read_text(encoding="utf-8")
+    body = (h.out_dir(slug) / "problems" / "001-fx.md").read_text(encoding="utf-8")
     assert "> [!warning] 그림 추출 실패 (bbox 0.100, 0.100, 0.110, 0.500)\n> 얇은\n> 설명 문단" in body
     index = (h.out_dir(slug) / "index.md").read_text(encoding="utf-8")
     assert "- p001 그림 2 (문제 1): bbox 0.100, 0.100, 0.110, 0.500" in index.split("## 그림 미추출")[1]

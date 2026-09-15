@@ -38,9 +38,15 @@ def test_three_failed_attempts_skip_the_page_and_force_recovers(h):
     assert code == 2 and "--force" in out
     h.write_page(slug, h.page(2, [h.item("problem", number="2")]))
     code, out = h.check(slug, 2, force=True)
+    assert code == 2 and "--reason" in out, "force without a human reason is refused"
+    code, out = h.check(slug, 2, force=True, reason="user re-read the scan and asked for a retry")
     assert code == 0, out
     rec = h.state(slug)["pages"]["2"]
     assert rec["status"] == "ok" and rec["attempts"] == 0 and rec["reason"] is None
+    assert rec["force_reason"] == "user re-read the scan and asked for a retry"
+    events = [e["event"] for e in rec["history"]]
+    assert events == ["failed", "failed", "failed", "force"], "first-failure errors survive the later ok"
+    assert rec["history"][0]["attempt"] == 1 and "gap" in rec["history"][0]["errors"][0]
 
 
 def test_prompt_shows_last_errors_for_failed_page(h):

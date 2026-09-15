@@ -39,7 +39,7 @@ from typing import Any, Iterable
 # Constants
 # ---------------------------------------------------------------------------
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 SCRIPT_PATH = Path(__file__).resolve()
 SCRIPT_DIR = SCRIPT_PATH.parent
 SCHEMA_PATH = SCRIPT_DIR / "schema" / "page.schema.json"
@@ -58,7 +58,19 @@ CROP_PADDING = 0.015
 PREV_TAIL_CHARS = 300
 INDEX_BANNER = "> 자동 생성 파일 — 직접 편집하지 말고 볼트로 옮긴 뒤 편집한다."
 NUMBER_RE = re.compile(r"^[0-9]+([.\-][0-9]+)*(\([a-z]\)|[a-z])?$")
-PROOF_KO_TOKENS = ("증명", "보여라", "보이시오")
+PROOF_KO_TOKENS = ("증명", "보여라", "보이시오", "보이라", "보이세요")
+PROOF_EN_RE = re.compile(r"\b(prove|show that|show)\b", re.I)
+# Printed point labels: "(10점)", "(10 점)", "[15 pts]", "(20 points)", "(10 pt)", "5점", "10 pts".
+POINTS_RE = re.compile(
+    r"[\(\[（]\s*(\d+(?:\.\d+)?)\s*(?:점|pts?|points?)\s*[\)\]）]|(?<![\d.])(\d+(?:\.\d+)?)\s*(?:점|pts)(?![A-Za-z가-힣])",
+    re.I,
+)
+# A printed number at the start of a statement whose ``number`` was left null.
+LEADING_NUMBER_RE = re.compile(r"^\s*(?:\(\s*([0-9]{1,3}|[IVXLivxl]{1,7}|[①-⑳])\s*\)|([0-9]{1,3}|[IVXLivxl]{1,7}|[①-⑳])\s*[.)])\s+")
+ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50}
+SIMILARITY_THRESHOLD = 0.5
+REVIEW_CONFIDENCE = 0.9
+HANDWRITING_RE = re.compile(r"손글씨|필기|handwrit", re.I)
 
 
 class CLIError(Exception):
@@ -143,6 +155,69 @@ def read_json_tolerant(path: Path) -> Any:
     return json.loads(text, strict=False)
 
 
+def roman_to_int(text: str) -> int | None:
+    """``iv`` -> 4; None when the string is not a roman numeral (I..L range)."""
+    s = text.lower()
+    if not s or any(ch not in ROMAN_VALUES for ch in s):
+        return None
+    total = 0
+    for i, ch in enumerate(s):
+        v = ROMAN_VALUES[ch]
+        if i + 1 < len(s) and v < ROMAN_VALUES[s[i + 1]]:
+            total -= v
+        else:
+            total += v
+    return total if total > 0 else None
+
+
+def normalize_number(raw: Any) -> Any:
+    """Map printed number variants onto the schema pattern.
+
+    ``(3)``/``3)``/``3.`` -> ``3``, ``III``/``iii`` -> ``3``, ``①`` -> ``1``,
+    ``문제 3``/``Q3``/``Problem 3`` -> ``3``. Strings already matching the
+    pattern and non-strings are returned unchanged (schema validation reports them).
+    """
+    if not isinstance(raw, str):
+        return raw
+    s = raw.strip()
+    if NUMBER_RE.match(s):
+        return s
+    s = re.sub(r"^(?:문제|problem|prob\.?|q)\s*", "", s, flags=re.I)
+    s = re.sub(r"^[\(\[（]\s*|\s*[\)\]）]$", "", s)
+    s = re.sub(r"\s*[.)]$", "", s)
+    s = re.sub(r"\s+", "", s)
+    if len(s) == 1 and "①" <= s <= "⑳":
+        return str(ord(s) - 0x245F)
+    m = re.fullmatch(r"([IVXLivxl]+)([.\-][0-9]+)*(\([a-z]\)|[a-z])?", s)
+    if m:
+        n = roman_to_int(m.group(1))
+        if n is not None:
+            return str(n) + s[len(m.group(1)):]
+    return s if s else raw
+
+
+def normalize_page_numbers(data: Any) -> list[str]:
+    """Normalize every item ``number`` in place; returns notes for each change."""
+    notes: list[str] = []
+    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+        return notes
+    for idx, it in enumerate(data["items"]):
+        if not isinstance(it, dict):
+            continue
+        raw = it.get("number")
+        new = normalize_number(raw)
+        if new != raw:
+            it["number"] = new
+            notes.append(f"item[{idx}]: number {raw!r} normalized to {new!r}")
+    return notes
+
+
+def read_page_data(path: Path) -> tuple[Any, list[str]]:
+    """Read a page JSON and normalize printed number variants; returns (data, notes)."""
+    data = read_json_tolerant(path)
+    return data, normalize_page_numbers(data)
+
+
 def dump_json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
@@ -174,14 +249,15 @@ def new_page_record() -> dict:
         "errors": [],
         "warnings": [],
         "reason": None,
+        "force_reason": None,
+        "history": [],
         "json_sha256": None,
         "last_problem_after": None,
         "last_solution_after": None,
         "chapter_after": None,
+        "group_after": 0,
+        "solution_group_after": 0,
         "last_item": None,
-        "problem_keys": [],
-        "solution_keys": [],
-        "heading_seen": False,
     }
 
 
@@ -515,17 +591,6 @@ def check_latex(text: str) -> tuple[list[str], list[str]]:
 # ---------------------------------------------------------------------------
 
 
-def normalize_chapter(chapter: str | None) -> str | None:
-    """`§3.2` -> `3.2`, `Chapter 4` -> `4`, `연습문제 2.1` -> `2.1`, else lowercase text."""
-    if chapter is None:
-        return None
-    s = re.sub(r"\s+", "", str(chapter).lower())
-    if re.search(r"[0-9]", s):
-        m = re.search(r"[0-9]+(\.[0-9]+)*", s)
-        return m.group(0) if m else s
-    return s
-
-
 def leading_int(number: str) -> int:
     m = re.match(r"[0-9]+", number)
     return int(m.group(0)) if m else 0
@@ -566,26 +631,40 @@ def run_page_checks(state: dict, n: int, data: dict) -> tuple[list[str], list[st
     last = dict(prev_rec["last_problem_after"]) if prev_rec and prev_rec["last_problem_after"] else None
     last_sol = dict(prev_rec["last_solution_after"]) if prev_rec and prev_rec["last_solution_after"] else None
     cur_chapter = prev_rec["chapter_after"] if prev_rec else None
-    seen_problems: dict[tuple, int] = {}
-    seen_solutions: dict[tuple, int] = {}
-    for p in page_numbers(state):
-        if p >= n:
-            break
-        rec = page_rec(state, p)
-        if rec["status"] != "ok":
-            continue
-        for key in rec["problem_keys"]:
-            seen_problems.setdefault(tuple(key), p)
-        for key in rec["solution_keys"]:
-            seen_solutions.setdefault(tuple(key), p)
+    # Sheet groups: an exam sheet / exercise set whose numbering starts over. They carry no
+    # name (problem-bank output); they only scope gap checks, solution matching and points.
+    group = int(prev_rec.get("group_after", 0)) if prev_rec else 0
+    sgroup = int(prev_rec.get("solution_group_after", 0)) if prev_rec else 0
+    if prev is not None and page_kind(state, n) != page_kind(state, prev):
+        group += 1  # a range-kind boundary (problems <-> solutions block) is a sheet boundary
+        sgroup += 1
+        last = None
+        last_sol = None
     allow_gap = "allow-gap" in data.get("page_notes", "")
-    problem_keys: list[list] = []
-    solution_keys: list[list] = []
-    heading_seen = False
+    heading_on_page = False
 
     for idx, it in enumerate(items):
         where = f"{tag}/item[{idx}]"
         kind = it["kind"]
+
+        # 0. printed number left out / chapter invented
+        if kind in ("problem", "solution") and it["number"] is None:
+            m = LEADING_NUMBER_RE.match(it["statement_md"])
+            if m:
+                token = m.group(1) or m.group(2)
+                errors.append(
+                    f"{where}: number is null but the statement starts with the printed number {token!r}; "
+                    f"put it in `number` (roman numerals, circled and parenthesized numbers are normalized by the tool)"
+                )
+        if kind != "heading" and it["chapter"] is not None and it["chapter"] != cur_chapter:
+            errors.append(
+                f"{where}: chapter {it['chapter']!r} was not introduced by a heading item (current: {cur_chapter!r}); "
+                "transcribe the printed title as a `heading` item or leave chapter null. Never invent section names to pass checks"
+            )
+        if kind == "problem":
+            first_line = md_first_line(it["statement_md"])
+            if "$$" in first_line:
+                errors.append(f"{where}: statement_md first line contains `$$`; the first line becomes the note title, move display math to the second line")
 
         # 2. LaTeX on every *_md
         for field, text in _md_fields(it):
@@ -611,24 +690,23 @@ def run_page_checks(state: dict, n: int, data: dict) -> tuple[list[str], list[st
         if kind == "solution" and not it["solution_md"].strip() and not any(p["solution_md"].strip() for p in parts):
             errors.append(f"{where}: solution has no solution text anywhere")
 
-        # 3. numbering continuity
+        # 3. numbering continuity within the current sheet group
         if kind == "heading":
             last = None
             last_sol = None
-            heading_seen = True
+            group += 1
+            sgroup += 1
+            heading_on_page = True
             if it["chapter"] is not None:
                 cur_chapter = it["chapter"]
             elif it["statement_md"].strip():
                 cur_chapter = it["statement_md"].strip()
             continue
-        if it["chapter"] is not None:
-            cur_chapter = it["chapter"]
-        scope = normalize_chapter(cur_chapter)
         number = it["number"]
         if kind == "problem" and number:
             nn = leading_int(number)
-            if last is None or scope != last["scope"]:
-                pass  # restart accepted
+            if last is None:
+                pass  # first problem of the group
             elif it["continues_from_previous"]:
                 if nn != last["n"]:
                     errors.append(f"{where}: continues_from_previous but number {number} != previous {last['number']}")
@@ -637,35 +715,29 @@ def run_page_checks(state: dict, n: int, data: dict) -> tuple[list[str], list[st
             elif nn == last["n"] + 1:
                 pass
             elif nn <= last["n"]:
-                errors.append(
-                    f"{where}: number {number} goes backwards after {last['number']} (page {last['page']}); "
-                    "if a new section starts here add a heading item"
-                )
+                # Numbering starts over: a new sheet. No name is required (problem-bank output).
+                group += 1
+                if not heading_on_page:
+                    warnings.append(
+                        f"{where}: number {number} restarts after {last['number']} (page {last['page']}); treated as a new sheet. "
+                        "If a printed title marks the new sheet, transcribe it as a heading item"
+                    )
             elif not allow_gap:
                 errors.append(
                     f"{where}: gap: number {number} after {last['number']} (page {last['page']}); "
                     "add `allow-gap` to page_notes if the print really skips numbers"
                 )
-            key = (scope, number)
-            if key in seen_problems and not it["continues_from_previous"]:
-                errors.append(f"{where}: duplicate problem {number} in chapter scope {scope!r}; already on page {seen_problems[key]}")
-            problem_keys.append([scope, number])
-            last = {"scope": scope, "n": nn, "number": number, "page": n}
+            last = {"n": nn, "number": number, "page": n, "group": group}
         elif kind == "solution" and number:
             nn = leading_int(number)
-            if last_sol is not None and scope == last_sol["scope"]:
-                if it["continues_from_previous"]:
-                    if nn != last_sol["n"]:
-                        errors.append(f"{where}: continues_from_previous but solution number {number} != previous {last_sol['number']}")
-                elif nn == last_sol["n"] and number != last_sol["number"]:
+            if last_sol is not None and not it["continues_from_previous"]:
+                if nn == last_sol["n"] and number != last_sol["number"]:
                     pass
                 elif nn <= last_sol["n"]:
-                    errors.append(f"{where}: solution number {number} does not increase after {last_sol['number']} (page {last_sol['page']})")
-            key = (scope, number)
-            if key in seen_solutions and not it["continues_from_previous"]:
-                errors.append(f"{where}: duplicate solution {number} in chapter scope {scope!r}; already on page {seen_solutions[key]}")
-            solution_keys.append([scope, number])
-            last_sol = {"scope": scope, "n": nn, "number": number, "page": n}
+                    sgroup += 1  # solutions of the next sheet start
+            elif last_sol is not None and nn != last_sol["n"]:
+                errors.append(f"{where}: continues_from_previous but solution number {number} != previous {last_sol['number']}")
+            last_sol = {"n": nn, "number": number, "page": n, "group": sgroup}
 
     # 4. cross-page continuation
     strict = prev is not None and prev == n - 1
@@ -701,16 +773,19 @@ def run_page_checks(state: dict, n: int, data: dict) -> tuple[list[str], list[st
         "last_problem_after": last,
         "last_solution_after": last_sol,
         "chapter_after": cur_chapter,
+        "group_after": group,
+        "solution_group_after": sgroup,
         "last_item": last_item,
-        "problem_keys": problem_keys,
-        "solution_keys": solution_keys,
-        "heading_seen": heading_seen,
     }
     return errors, warnings, snapshot
 
 
-def check_page(state: dict, n: int, *, force: bool = False, count_attempt: bool = True) -> tuple[bool, list[str], list[str]]:
-    """Validate ``pages/NNN.json`` and update the page record. Returns (ok, errors, warnings)."""
+def check_page(state: dict, n: int, *, force: bool = False, reason: str | None = None, count_attempt: bool = True) -> tuple[bool, list[str], list[str]]:
+    """Validate ``pages/NNN.json`` and update the page record. Returns (ok, errors, warnings).
+
+    A skipped page is only re-checked with ``force`` plus a human-given ``reason``
+    (recorded in the page history), so an agent cannot silently undo a skip.
+    """
     slug = state["slug"]
     rec = page_rec(state, n)
     jp = page_json(slug, n)
@@ -718,7 +793,12 @@ def check_page(state: dict, n: int, *, force: bool = False, count_attempt: bool 
         raise CLIError(1, f"no JSON for page {n}: {jp}")
     if rec["status"] == "skipped":
         if not force:
-            raise CLIError(2, f"page {n} is skipped ({rec['reason']}); use --force to re-check it")
+            raise CLIError(2, f"page {n} is skipped ({rec['reason']}); re-checking needs --force --reason \"<who asked and why>\"")
+        reason_text = (reason or "").strip()
+        if not reason_text:
+            raise CLIError(2, f"page {n} is skipped; --force needs --reason \"<who asked and why>\" (a human decision, recorded in history)")
+        rec.setdefault("history", []).append({"event": "force", "reason": reason_text, "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+        rec["force_reason"] = reason_text
         rec["attempts"] = 0
         rec["reason"] = None
     raw = jp.read_bytes()
@@ -726,13 +806,15 @@ def check_page(state: dict, n: int, *, force: bool = False, count_attempt: bool 
     warnings: list[str] = []
     snapshot: dict | None = None
     try:
-        data = read_json_tolerant(jp)
+        data, notes = read_page_data(jp)
     except (ValueError, UnicodeDecodeError) as exc:
         errors.append(f"P{n:03d}: JSON parse error: {exc}")
     else:
+        warnings.extend(f"P{n:03d}/{note}" for note in notes)
         errors = [f"P{n:03d}/{e}" for e in validate_schema(data, load_schema())]
         if not errors:
-            errors, warnings, snapshot = run_page_checks(state, n, data)
+            errors, warns, snapshot = run_page_checks(state, n, data)
+            warnings.extend(warns)
     rec["json_sha256"] = sha256_bytes(raw)
     rec["warnings"] = warnings
     if errors:
@@ -740,6 +822,9 @@ def check_page(state: dict, n: int, *, force: bool = False, count_attempt: bool 
         rec["errors"] = errors
         if count_attempt:
             rec["attempts"] += 1
+            rec.setdefault("history", []).append(
+                {"event": "failed", "attempt": rec["attempts"], "errors": errors[:5], "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+            )
             if rec["attempts"] >= MAX_ATTEMPTS:
                 rec["status"] = "skipped"
                 rec["reason"] = f"max-retries: {errors[0]}"
@@ -855,21 +940,24 @@ def _label_index(label: Any) -> int:
     return int(m.group(1)) if m else 0
 
 
-def _new_record(kind: str, it: dict, label: Any, idx: int, chapter: str | None) -> dict:
+def _new_record(kind: str, it: dict, label: Any, idx: int, chapter: str | None, group: Any) -> dict:
     return {
         "kind": kind,
         "raw_chapter": it["chapter"],
         "chapter": chapter,
+        "group": group,
         "number": it["number"],
         "statement_md": it["statement_md"],
         "solution_md": it["solution_md"],
         "parts": [dict(p) for p in it["parts"]],
+        "points": it.get("points"),
         "figures": [],
         "pages": [label],
         "confidence": it["confidence"],
         "start": (label, idx),
         "continues_to_next": bool(it["continues_to_next"]),
         "solution": None,
+        "from_solution": False,
     }
 
 
@@ -893,14 +981,17 @@ def _append_to_open(open_rec: dict, it: dict, label: Any) -> None:
     open_rec["continues_to_next"] = bool(it["continues_to_next"])
 
 
-def stitch_stream(pages: list[tuple[Any, int | None, dict]]) -> tuple[list[dict], list[dict], dict]:
+def stitch_stream(pages: list[tuple[Any, int | None, dict]], kinds: dict | None = None, stream: str = "") -> tuple[list[dict], list[dict], dict]:
     """Stitch items of one page stream.
 
     ``pages`` is a list of (label, png_page, data) in page order; ``label`` is
     an int for the main run and ``"<other>:pNNN"`` for merged runs, ``png_page``
-    the page number whose PNG can be cropped (None for merged runs).  Returns
-    (records, orphans, page_entries) where page_entries maps label -> list of
-    ("heading"|"other"|"record"|"cont", payload) for the whole-PDF file.
+    the page number whose PNG can be cropped (None for merged runs).  ``kinds``
+    maps label -> range kind (a new problems block after solutions starts a new
+    sheet group).  Returns (records, orphans, page_entries) where page_entries
+    maps label -> list of ("heading"|"other"|"record"|"cont", payload) for the
+    whole-PDF file.  Every record carries ``group`` = (stream, kind, n): sheet
+    groups restart with a heading item, a numbering restart or a new block.
     """
     records: list[dict] = []
     orphans: list[dict] = []
@@ -908,6 +999,9 @@ def stitch_stream(pages: list[tuple[Any, int | None, dict]]) -> tuple[list[dict]
     open_rec: dict | None = None
     cur_chapter: str | None = None
     prev_index: int | None = None
+    prev_kind: str | None = None
+    groups = {"problem": 0, "solution": 0}
+    last_n: dict[str, Any] = {"problem": None, "solution": None}
     for label, png_page, data in pages:
         entries: list = []
         page_entries[label] = entries
@@ -919,6 +1013,13 @@ def stitch_stream(pages: list[tuple[Any, int | None, dict]]) -> tuple[list[dict]
         if prev_index is not None and this_index != prev_index + 1:
             open_rec = None
         prev_index = this_index
+        this_kind = (kinds or {}).get(str(label))
+        if this_kind is not None and prev_kind is not None and this_kind != prev_kind:
+            for k in groups:
+                groups[k] += 1
+                last_n[k] = None
+        if this_kind is not None:
+            prev_kind = this_kind
         for idx, it in enumerate(data["items"]):
             kind = it["kind"]
             figs = []
@@ -943,6 +1044,9 @@ def stitch_stream(pages: list[tuple[Any, int | None, dict]]) -> tuple[list[dict]
                     cur_chapter = it["statement_md"].strip()
                 entries.append(("heading", {"chapter": cur_chapter, "text": it["statement_md"].strip()}))
                 open_rec = None
+                for k in groups:
+                    groups[k] += 1
+                    last_n[k] = None
                 continue
             if it["chapter"] is not None:
                 cur_chapter = it["chapter"]
@@ -969,7 +1073,14 @@ def stitch_stream(pages: list[tuple[Any, int | None, dict]]) -> tuple[list[dict]
                 entries.append(("other", it["statement_md"].strip() or it["solution_md"].strip()))
                 open_rec = None
                 continue
-            rec = _new_record(kind, it, label, idx, cur_chapter)
+            if it["number"]:
+                nn = leading_int(it["number"])
+                prev_n = last_n[kind]
+                if prev_n is not None and nn <= prev_n and not (nn == prev_n and it["number"] != last_n[kind + "_str"]):
+                    groups[kind] += 1  # numbering starts over: next sheet
+                last_n[kind] = nn
+                last_n[kind + "_str"] = it["number"]
+            rec = _new_record(kind, it, label, idx, cur_chapter, (stream, kind, groups[kind]))
             rec["figures"].extend(figs)
             records.append(rec)
             entries.append(("record", rec))
@@ -983,27 +1094,161 @@ def stitch_stream(pages: list[tuple[Any, int | None, dict]]) -> tuple[list[dict]
 # ---------------------------------------------------------------------------
 
 
+def statement_text(rec: dict) -> str:
+    """Problem statement plus part statements (what a restated solution would repeat)."""
+    parts = " ".join(p.get("statement_md", "") for p in rec.get("parts", []))
+    return (rec.get("statement_md", "") + " " + parts).strip()
+
+
+def text_tokens(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9가-힣]+", text.lower()))
+
+
+def similarity(a: str, b: str) -> float:
+    """Token Jaccard similarity in [0, 1]; 0 when either side has no tokens."""
+    ta, tb = text_tokens(a), text_tokens(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def _rec_order(rec: dict) -> tuple:
+    label, idx = rec["start"]
+    return (0 if isinstance(label, int) else 1, str(rec["group"][0]), _label_index(label), idx)
+
+
+def _pair_groups(problems: list[dict], solutions: list[dict]) -> dict[tuple, tuple]:
+    """Map each solution group to the problem group at the same position in the preceding problems block.
+
+    Groups are ordered by first appearance. Walking them in page order, a run of
+    problem groups is followed by a run of solution groups; the k-th solution
+    group of the run pairs with the k-th problem group of the run before it.
+    Merged-run solutions (other stream) are never paired positionally.
+    """
+    firsts: dict[tuple, tuple] = {}
+    for rec in problems + solutions:
+        key = rec["group"]
+        order = _rec_order(rec)
+        if key not in firsts or order < firsts[key]:
+            firsts[key] = order
+    ordered = sorted(firsts, key=lambda g: firsts[g])
+    pairing: dict[tuple, tuple] = {}
+    pending: list[tuple] = []
+    k = 0
+    after_solutions = False
+    for g in ordered:
+        if g[0] != "":
+            continue
+        if g[1] == "problem":
+            if after_solutions:
+                pending, k, after_solutions = [], 0, False
+            pending.append(g)
+        else:
+            after_solutions = True
+            if k < len(pending):
+                pairing[g] = pending[k]
+            k += 1
+    return pairing
+
+
 def match_solutions(problems: list[dict], solutions: list[dict]) -> list[dict]:
-    """Attach solutions to problems by (scope, number); return unmatched solutions."""
-    by_key: dict[tuple, list[dict]] = {}
+    """Attach solutions to problems; return the unmatched solutions.
+
+    A solution that restates its problem is matched by text similarity among
+    problems with the same number (the positional sheet group wins ties). A
+    bare solution matches by number inside its positional sheet group only, or,
+    for merged runs, when the number is unique across all problems. Anything
+    else stays unmatched (restated ones become problem notes in ``assemble``).
+    """
     by_number: dict[str, list[dict]] = {}
     for p in problems:
-        by_key.setdefault((normalize_chapter(p["chapter"]), p["number"]), []).append(p)
         if p["number"]:
             by_number.setdefault(p["number"], []).append(p)
+    pairing = _pair_groups(problems, solutions)
     unmatched: list[dict] = []
     for s in solutions:
         target = None
-        key = (normalize_chapter(s["chapter"]), s["number"])
-        if s["number"] and key in by_key:
-            target = by_key[key][0]
-        elif s["number"] and s["raw_chapter"] is None and len(by_number.get(s["number"], [])) == 1:
-            target = by_number[s["number"]][0]
+        cands = by_number.get(s["number"] or "", [])
+        positional = pairing.get(s["group"])
+        restated = statement_text(s)
+        if restated and cands:
+            scored = [(similarity(restated, statement_text(p)), 0 if p["group"] == positional else 1, i, p) for i, p in enumerate(cands)]
+            scored.sort(key=lambda t: (-t[0], t[1], t[2]))
+            if scored[0][0] >= SIMILARITY_THRESHOLD:
+                target = scored[0][3]
+        elif not restated and cands:
+            if positional is not None:
+                same = [p for p in cands if p["group"] == positional]
+                if len(same) == 1:
+                    target = same[0]
+            elif s["group"][0] != "" and len(cands) == 1:
+                target = cands[0]
         if target is not None and target["solution"] is None:
             target["solution"] = s
         else:
             unmatched.append(s)
     return unmatched
+
+
+def restated_as_problem(s: dict) -> dict:
+    """A problem record built from a solution item that restates the problem."""
+    rec = dict(s)
+    rec["kind"] = "problem"
+    rec["parts"] = [dict(p) for p in s["parts"]]
+    rec["figures"] = list(s["figures"])
+    rec["solution"] = None
+    rec["from_solution"] = True
+    return rec
+
+
+# ---------------------------------------------------------------------------
+# Assemble: points and importance
+# ---------------------------------------------------------------------------
+
+
+def parse_points(text: str) -> float | None:
+    """Points printed in a label such as ``(10점)`` or ``15 pts``; None when absent."""
+    m = POINTS_RE.search(text or "")
+    if not m:
+        return None
+    value = float(m.group(1) or m.group(2))
+    return int(value) if value.is_integer() else value
+
+
+def strip_points_label(text: str) -> str:
+    """Remove printed point labels (they live in frontmatter ``points``)."""
+    out = POINTS_RE.sub("", text or "")
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r" +([.,;:)\]])", r"\1", out)
+    return out.strip()
+
+
+def resolve_points(rec: dict) -> float | None:
+    """Explicit ``points`` first, then a label on the first line, then the sum of part labels."""
+    if rec.get("points") is not None:
+        return rec["points"]
+    p = parse_points(md_first_line(rec["statement_md"]))
+    if p is not None:
+        return p
+    part_points = [pp.get("points") if pp.get("points") is not None else parse_points(md_first_line(pp["statement_md"])) for pp in rec["parts"]]
+    known = [x for x in part_points if x is not None]
+    if known and len(known) == len(part_points):
+        total = sum(known)
+        return int(total) if float(total).is_integer() else total
+    return None
+
+
+def assign_importance(problems: list[dict]) -> None:
+    """``importance`` = share of the sheet's total points x number of scored problems (1.0 = average)."""
+    by_group: dict[tuple, list[dict]] = {}
+    for rec in problems:
+        rec["points"] = resolve_points(rec)
+        by_group.setdefault(rec["group"], []).append(rec)
+    for recs in by_group.values():
+        scored = [r for r in recs if r["points"] is not None]
+        total = sum(float(r["points"]) for r in scored)
+        for r in recs:
+            r["importance"] = round(float(r["points"]) / total * len(scored), 2) if r["points"] is not None and total > 0 else None
 
 
 def crop_figure(png_path: Path, bbox: list[float], target: Path) -> None:
@@ -1047,11 +1292,12 @@ def md_rest(text: str) -> str:
     return ""
 
 
-def is_proof(statement: str) -> bool:
-    first = md_first_line(statement)
-    if re.match(r"(prove|show)\b", first, re.I):
+def is_proof(statement: str, parts: list[dict] | None = None) -> bool:
+    """Proof problem: the statement (any line) or a part asks to prove/show."""
+    text = statement + " " + " ".join(p.get("statement_md", "") for p in parts or [])
+    if PROOF_EN_RE.search(text):
         return True
-    return any(tok in first for tok in PROOF_KO_TOKENS)
+    return any(tok in text for tok in PROOF_KO_TOKENS)
 
 
 def blockquote(text: str, prefix: str | None = None) -> list[str]:
@@ -1087,8 +1333,12 @@ def _render_figures(figs: list[dict], img_prefix: str, quoted: bool) -> list[str
     return lines
 
 
-def render_record_body(rec: dict, img_prefix: str) -> str:
-    """Markdown body of a stitched problem (or solution) record."""
+def render_record_body(rec: dict, img_prefix: str, title_number: Any = None) -> str:
+    """Markdown body of a stitched problem (or solution) record.
+
+    ``title_number`` (the bank number) replaces the printed number in the
+    heading of problem notes; the whole-PDF file keeps printed numbers.
+    """
     lines: list[str] = []
     number = rec["number"] or "?"
     if rec["kind"] == "solution":
@@ -1104,7 +1354,8 @@ def render_record_body(rec: dict, img_prefix: str) -> str:
                 lines.append("")
         lines.extend(_render_figures(rec["figures"], img_prefix, quoted=False))
         return "\n".join(lines).rstrip() + "\n"
-    lines.append(f"### {number}. {md_first_line(rec['statement_md'])}".rstrip())
+    heading_number = number if title_number is None else title_number
+    lines.append(f"### {heading_number}. {strip_points_label(md_first_line(rec['statement_md']))}".rstrip())
     lines.append("")
     rest = md_rest(rec["statement_md"])
     if rest:
@@ -1112,13 +1363,13 @@ def render_record_body(rec: dict, img_prefix: str) -> str:
         lines.append("")
     for part in rec["parts"]:
         if part["statement_md"].strip():
-            lines.append(f"**{part['label']}** {part['statement_md'].strip()}")
+            lines.append(f"**{part['label']}** {strip_points_label(part['statement_md'].strip())}")
             lines.append("")
     lines.extend(_render_figures(rec["figures"], img_prefix, quoted=False))
     sol = rec["solution"]
     own_solution = rec["solution_md"].strip() or any(p["solution_md"].strip() for p in rec["parts"])
     if sol is not None or own_solution:
-        tag = "**pf)**" if is_proof(rec["statement_md"]) else "**Sol)**"
+        tag = "**pf)**" if is_proof(rec["statement_md"], rec["parts"]) else "**Sol)**"
         lines.append("> [!solution]- 해설")
         src = sol if sol is not None else rec
         main = src["solution_md"].strip()
@@ -1157,23 +1408,25 @@ def solution_pages(rec: dict) -> list:
     return list(rec["pages"]) if has_solution(rec) else []
 
 
-def render_problem_file(rec: dict, slug: str, source: str) -> str:
+def render_problem_file(rec: dict, slug: str, source: str, bank_number: int) -> str:
     pages = ", ".join(yaml_scalar(p) for p in rec["pages"])
     sol_pages = ", ".join(yaml_scalar(p) for p in solution_pages(rec))
     fm = [
         "---",
         f"source: {yaml_scalar(source)}",
         f"pages: [{pages}]",
-        f"number: {yaml_scalar(rec['number'])}",
-        f"chapter: {yaml_scalar(rec['chapter'])}",
+        f"source_number: {yaml_scalar(rec['number'])}",
         f"tags: [math, problem, {slug}]",
+        f"points: {yaml_scalar(rec.get('points'))}",
+        f"importance: {yaml_scalar(rec.get('importance'))}",
         f"has_solution: {yaml_scalar(has_solution(rec))}",
         f"solution_pages: [{sol_pages}]",
+        f"from_solution: {yaml_scalar(bool(rec.get('from_solution')))}",
         f"confidence: {yaml_scalar(round(float(rec['confidence']), 3))}",
         "---",
         "",
     ]
-    return "\n".join(fm) + render_record_body(rec, "../img/")
+    return "\n".join(fm) + render_record_body(rec, "../img/", title_number=bank_number)
 
 
 def _load_ok_pages(state: dict) -> list[tuple[Any, int | None, dict]]:
@@ -1181,8 +1434,24 @@ def _load_ok_pages(state: dict) -> list[tuple[Any, int | None, dict]]:
     pages = []
     for n in page_numbers(state):
         if page_rec(state, n)["status"] == "ok":
-            pages.append((n, n, read_json_tolerant(page_json(slug, n))))
+            pages.append((n, n, read_page_data(page_json(slug, n))[0]))
     return pages
+
+
+def review_reasons(rec: dict, state: dict, notes_by_page: dict[int, str]) -> list[str]:
+    """Why a human should look at this problem: retries, handwriting, low confidence."""
+    reasons: list[str] = []
+    labels = list(rec["pages"]) + (list(rec["solution"]["pages"]) if rec["solution"] else [])
+    main_pages = sorted({p for p in labels if isinstance(p, int)})
+    retried = [p for p in main_pages if page_rec(state, p).get("attempts", 0) >= 2]
+    if retried:
+        reasons.append("재시도 " + ", ".join(f"p{p:03d}" for p in retried))
+    hand = [p for p in main_pages if HANDWRITING_RE.search(notes_by_page.get(p, ""))]
+    if hand:
+        reasons.append("손글씨 " + ", ".join(f"p{p:03d}" for p in hand))
+    if float(rec["confidence"]) < REVIEW_CONFIDENCE:
+        reasons.append(f"신뢰도 {float(rec['confidence']):.2f}")
+    return reasons
 
 
 def _load_merged_streams(state: dict) -> list[tuple[str, list[tuple[Any, int | None, dict]]]]:
@@ -1206,15 +1475,24 @@ def assemble(state: dict) -> dict:
     odir = out_dir(slug)
     source = Path(state["pdf_path"]).name
 
-    records, orphans, page_entries = stitch_stream(_load_ok_pages(state))
+    ok_pages = _load_ok_pages(state)
+    notes_by_page = {n: data.get("page_notes", "") for n, _png, data in ok_pages}
+    records, orphans, page_entries = stitch_stream(ok_pages, kinds=state["ranges"]["kinds"])
     merged_records: list[dict] = []
-    for _other, pages in _load_merged_streams(state):
-        recs, orph, _entries = stitch_stream(pages)
+    for other, pages in _load_merged_streams(state):
+        recs, orph, _entries = stitch_stream(pages, stream=other)
         merged_records.extend(recs)
         orphans.extend(orph)
     problems = [r for r in records if r["kind"] == "problem"]
     solutions = [r for r in records if r["kind"] == "solution"] + [r for r in merged_records if r["kind"] == "solution"]
     unmatched = match_solutions(problems, solutions)
+    # A solution that restates its problem but matches nothing is a problem in its own right
+    # (model answers, handwritten solutions of sheets whose problem pages are absent).
+    restated = [s for s in unmatched if statement_text(s)]
+    unmatched = [s for s in unmatched if not statement_text(s)]
+    problems.extend(restated_as_problem(s) for s in restated)
+    problems.sort(key=_rec_order)
+    assign_importance(problems)
 
     # figures: crop for problems and their attached solutions
     generated: set[Path] = set()
@@ -1241,11 +1519,12 @@ def assemble(state: dict) -> dict:
     # problem files
     rows: list[dict] = []
     for i, rec in enumerate(problems, start=1):
-        scope = normalize_chapter(rec["chapter"]) or "none"
-        name = sanitize_name(f"{i:03d}-ch{scope}-{rec['number'] or 'x'}") + ".md"
+        name = sanitize_name(f"{i:03d}-{slug}") + ".md"
         rec["file"] = name
+        rec["bank_number"] = i
+        rec["review"] = review_reasons(rec, state, notes_by_page)
         target = odir / "problems" / name
-        atomic_write_text(target, render_problem_file(rec, slug, source))
+        atomic_write_text(target, render_problem_file(rec, slug, source, i))
         generated.add(target.resolve())
         rows.append(rec)
 
@@ -1292,18 +1571,32 @@ def assemble(state: dict) -> dict:
     atomic_write_text(odir / f"{slug}.md", "\n".join(whole).rstrip() + "\n")
 
     # index
-    idx: list[str] = [INDEX_BANNER, "", f"# {slug} index", "", "| # | 장 | 번호 | 파일 | 페이지 | 해설 | 신뢰도 |", "|---|---|---|---|---|---|---|"]
+    idx: list[str] = [INDEX_BANNER, "", f"# {slug} index", "", "| # | 파일 | 페이지 | 원번호 | 배점 | 중요도 | 해설 | 신뢰도 |", "|---|---|---|---|---|---|---|---|"]
     for i, rec in enumerate(rows, start=1):
         sol_cell = "아니오"
         if has_solution(rec):
             sol_cell = "예 (" + ", ".join(page_label(p) for p in solution_pages(rec)) + ")"
+        points = "" if rec.get("points") is None else str(rec["points"])
+        importance = "" if rec.get("importance") is None else f"{rec['importance']:.2f}"
         idx.append(
-            f"| {i} | {rec['chapter'] or ''} | {rec['number'] or ''} | [{rec['file']}](problems/{rec['file']}) | "
-            f"{', '.join(page_label(p) for p in rec['pages'])} | {sol_cell} | {float(rec['confidence']):.2f} |"
+            f"| {i} | [{rec['file']}](problems/{rec['file']}) | {', '.join(page_label(p) for p in rec['pages'])} | "
+            f"{rec['number'] or ''} | {points} | {importance} | {sol_cell} | {float(rec['confidence']):.2f} |"
         )
     idx.append("")
+    idx.append("## 검토 권장")
+    review_rows = [r for r in rows if r["review"]]
+    idx.extend(f"- {r['bank_number']} [{r['file']}](problems/{r['file']}): {'; '.join(r['review'])}" for r in review_rows)
+    if not review_rows:
+        idx.append("없음")
+    idx.append("")
+    idx.append("## 해설에서 만든 문제")
+    from_sol = [r for r in rows if r.get("from_solution")]
+    idx.extend(f"- {r['bank_number']} [{r['file']}](problems/{r['file']}): {page_label(r['pages'][0])} 해설 {r['number'] or '?'}" for r in from_sol)
+    if not from_sol:
+        idx.append("없음")
+    idx.append("")
     idx.append("## 미매칭 해설")
-    idx.extend(f"- {page_label(s['pages'][0])} 해설 {s['number'] or '?'} (장 {s['chapter'] or '없음'})" for s in unmatched)
+    idx.extend(f"- {page_label(s['pages'][0])} 해설 {s['number'] or '?'} (문제 재진술 없음)" for s in unmatched)
     if not unmatched:
         idx.append("없음")
     idx.append("")
@@ -1338,6 +1631,8 @@ def assemble(state: dict) -> dict:
         "run_dir": str(run_dir(slug)),
         "counts": counts,
         "problems": [r["file"] for r in rows],
+        "from_solution": [r["file"] for r in rows if r.get("from_solution")],
+        "review": {r["file"]: r["review"] for r in rows if r["review"]},
         "unmatched_solutions": [f"{page_label(s['pages'][0])}:{s['number'] or '?'}" for s in unmatched],
         "orphans": [f"{page_label(o['page'])}[{o['idx']}]" for o in orphans],
     }
@@ -1412,6 +1707,7 @@ def status_rows(state: dict) -> list[dict]:
                 "attempts": rec["attempts"],
                 "stale": json_is_stale(state["slug"], n, rec),
                 "first_error": rec["errors"][0] if rec["errors"] else (rec["reason"] or ""),
+                "history": rec.get("history", []),
             }
         )
     return rows
@@ -1530,7 +1826,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         raise CLIError(2, "check needs --page N or --all")
     if not 1 <= args.page <= state["page_count"]:
         raise CLIError(2, f"page {args.page} is outside 1..{state['page_count']}")
-    ok, errors, warnings = check_page(state, args.page, force=args.force)
+    ok, errors, warnings = check_page(state, args.page, force=args.force, reason=args.reason)
     save_state(state)
     _print_check_result(args.page, ok, errors, warnings, page_rec(state, args.page))
     return 0 if ok else 1
@@ -1654,7 +1950,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("slug")
     p.add_argument("--page", type=int)
     p.add_argument("--all", action="store_true")
-    p.add_argument("--force", action="store_true")
+    p.add_argument("--force", action="store_true", help="re-check a skipped page; needs --reason")
+    p.add_argument("--reason", help="who asked to re-check the skipped page and why (recorded in history)")
     p.set_defaults(func=cmd_check)
 
     p = sub.add_parser("merge-solutions", help="copy solution pages from another run")

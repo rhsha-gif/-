@@ -105,10 +105,12 @@ def write_page(slug: str, data: dict, n: int | None = None) -> Path:
     return path
 
 
-def check(slug: str, n: int, force: bool = False) -> tuple[int, str]:
+def check(slug: str, n: int, force: bool = False, reason: str | None = None) -> tuple[int, str]:
     argv = ["check", slug, "--page", n]
     if force:
         argv.append("--force")
+    if reason is not None:
+        argv += ["--reason", reason]
     return run_cli(argv)
 
 

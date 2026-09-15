@@ -12,8 +12,8 @@ def test_problem_spanning_three_pages_is_stitched_into_one_file(h):
     code, out = h.run_cli(["assemble", slug])
     assert code == 0, out
     files = sorted(p.name for p in (h.out_dir(slug) / "problems").iterdir())
-    assert files == ["001-chnone-1.md", "002-chnone-2.md"]
-    body = (h.out_dir(slug) / "problems" / "001-chnone-1.md").read_text(encoding="utf-8")
+    assert files == ["001-t.md", "002-t.md"]
+    body = (h.out_dir(slug) / "problems" / "001-t.md").read_text(encoding="utf-8")
     assert "pages: [1, 2, 3]" in body
     assert "confidence: 0.7" in body
     assert "Part one of the statement.\n\nPart two." in body
@@ -67,5 +67,5 @@ def test_continuation_after_skipped_middle_page_becomes_orphan(h):
     assert "p003 item[0] continuation 1: Orphaned tail" in section
     failed = index.split("## 실패·건너뜀 페이지")[1].split("## 그림 미추출")[0]
     assert "p002: skipped" in failed and "unreadable scan" in failed
-    body = (h.out_dir(slug) / "problems" / "001-chnone-1.md").read_text(encoding="utf-8")
+    body = (h.out_dir(slug) / "problems" / "001-t.md").read_text(encoding="utf-8")
     assert "Orphaned tail" not in body and "pages: [1]" in body

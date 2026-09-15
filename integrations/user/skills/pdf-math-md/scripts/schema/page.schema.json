@@ -24,6 +24,7 @@
           "number": {"type": ["string", "null"], "pattern": "^[0-9]+([.\\-][0-9]+)*(\\([a-z]\\)|[a-z])?$"},
           "statement_md": {"type": "string"},
           "solution_md": {"type": "string"},
+          "points": {"type": ["number", "null"], "minimum": 0},
           "parts": {
             "type": "array",
             "items": {
@@ -33,7 +34,8 @@
               "properties": {
                 "label": {"type": "string", "pattern": "^\\([a-z0-9]+\\)$|^[ㄱ-ㅎ가-힣]\\)$"},
                 "statement_md": {"type": "string"},
-                "solution_md": {"type": "string"}
+                "solution_md": {"type": "string"},
+                "points": {"type": ["number", "null"], "minimum": 0}
               }
             }
           },

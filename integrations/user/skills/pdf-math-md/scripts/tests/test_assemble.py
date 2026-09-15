@@ -16,20 +16,20 @@ def test_running_assemble_twice_produces_byte_identical_tree(h):
     code, out = h.run_cli(["assemble", slug])
     assert code == 0, out
     first = h.tree_bytes(h.out_dir(slug))
-    assert {"index.md", f"{slug}.md", ".pdf2md.json", "img/p001-1.png", "problems/001-ch1-1.md", "problems/002-ch1-2.md"} <= set(first)
+    assert {"index.md", f"{slug}.md", ".pdf2md.json", "img/p001-1.png", "problems/001-asm.md", "problems/002-asm.md"} <= set(first)
     code, out = h.run_cli(["assemble", slug])
     assert code == 0, out
     assert h.tree_bytes(h.out_dir(slug)) == first
     summary = h.pdf2md.read_json_tolerant(h.out_dir(slug) / ".pdf2md.json")
     assert summary["counts"] == {"ok": 2, "failed": 0, "skipped": 0, "pending": 0}
-    assert summary["problems"] == ["001-ch1-1.md", "002-ch1-2.md"]
+    assert summary["problems"] == ["001-asm.md", "002-asm.md"]
     assert summary["orphans"] == [] and summary["unmatched_solutions"] == []
     assert "timestamp" not in (h.out_dir(slug) / ".pdf2md.json").read_text(encoding="utf-8")
 
 
 def test_stale_problem_and_image_files_are_removed(h):
     slug = build_two_page_run(h)
-    stale_md = h.out_dir(slug) / "problems" / "999-chold-9.md"
+    stale_md = h.out_dir(slug) / "problems" / "999-old.md"
     stale_png = h.out_dir(slug) / "img" / "p099-1.png"
     for p in (stale_md, stale_png):
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -37,7 +37,7 @@ def test_stale_problem_and_image_files_are_removed(h):
     code, out = h.run_cli(["assemble", slug])
     assert code == 0, out
     assert not stale_md.exists() and not stale_png.exists()
-    assert (h.out_dir(slug) / "problems" / "001-ch1-1.md").is_file()
+    assert (h.out_dir(slug) / "problems" / "001-asm.md").is_file()
 
 
 def test_prompt_and_assemble_refuse_before_ranges_are_confirmed(h):
@@ -69,7 +69,7 @@ def test_prompt_carries_context_from_previous_ok_page(h):
     slug = build_two_page_run(h)
     code, out = h.run_cli(["prompt", slug, "--page", 2])
     assert code == 0
-    assert "- 현재 장: §1" in out
+    assert "- 현재 heading(인쇄된 제목): §1" in out
     assert "- 마지막 문제 번호: 1" in out
     assert "- 이전 페이지 마지막 항목 kind: problem" in out
     assert "First $x$" in out
@@ -104,4 +104,4 @@ def test_set_ranges_after_confirm_resets_range_skips(h):
 def test_version_prints_script_path(h):
     code, out = h.run_cli(["--version"])
     assert code == 0
-    assert out.strip() == f"pdf2md 0.1.0 {h.pdf2md.SCRIPT_PATH}"
+    assert out.strip() == f"pdf2md 0.2.0 {h.pdf2md.SCRIPT_PATH}"
