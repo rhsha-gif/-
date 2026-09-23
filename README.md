@@ -108,7 +108,7 @@ TRIP, LazyCodex, autoresearch, SyMerge 등 참고 자료를 선별해 이 소스
 
 worker receipt는 완료 증명이 아니라 주장입니다. `aorch exec`는 각 worker 실행 전후의 Git 상태를 비교해 `receipt.filesChanged`와 실제 변경이 일치하는지, 변경이 `allowedScope` 안이고 `forbiddenScope` 밖인지, read-only 작업이 파일을 건드리지 않았는지, `HEAD`가 바뀌지 않았는지 확인합니다. orchestrator가 receipt와 evidence를 쓰는 configured state root는 비교에서 제외합니다. 위반은 더 강한 모델로 복구할 수 없으므로 escalation 없이 즉시 `verification.json` 증거와 함께 사람에게 반환합니다.
 
-task가 `verificationCommands`를 선언하면 **`aorch exec`가 change guard 통과 후 그 명령을 직접 실행**하고, 실패하면 같은 provider의 escalation 사다리(Claude: opus→fable, Codex: sol/high→sol/xhigh)를 실패 증거와 함께 상향합니다. 총 attempt는 3회이며, 소진되면 증거와 함께 사람에게 반환합니다. verify 결과는 실행 증거로 기록됩니다. 주간 학습에서는 부모 실행기의 확인 기록과 대조한 일반 작업 표본이 5건 이상일 때 배분을 조정합니다. 고위험 작업과 사용자 모델 지정은 자동 학습에서 제외하며, 실행 중 검증 실패에 대한 기존 상향 절차는 유지합니다. Git 밖의 read-only 작업은 호환성을 유지하되 change guard가 `not-git-repository`로 기록됩니다.
+task가 `verificationCommands`를 선언하면 **`aorch exec`가 change guard 통과 후 그 명령을 직접 실행**하고, 실패하면 같은 provider의 escalation 사다리(Claude: opus→fable, Codex: sol/high→sol/xhigh)를 실패 증거와 함께 상향합니다. 사다리를 오르기 전에 `escalation.diagnosis`에 지정된 상위 모델(Claude: fable, Codex: astra)이 실패한 시도를 read-only로 한 번 읽고 원인과 다음 시도가 바꿔야 할 점을 `receipt.summary`로 남기며, 이 진단은 이후 모든 시도의 objective에 붙습니다. 진단은 attempt로 세지 않고, 실패·타임아웃은 경고만 남기며, 진단이 작업 트리를 바꾸면 change guard 실패로 멈춥니다. 검증 명령이 끝난 뒤에도 `HEAD`·제어 파일 변경, `forbiddenScope` 쓰기, read-only 작업의 추적 파일 수정은 거부합니다(새 미추적 빌드 산출물은 허용). 총 attempt는 3회이며, 소진되면 증거와 함께 사람에게 반환합니다. verify 결과는 실행 증거로 기록됩니다. 주간 학습에서는 부모 실행기의 확인 기록과 대조한 일반 작업 표본이 5건 이상일 때 배분을 조정합니다. 고위험 작업과 사용자 모델 지정은 자동 학습에서 제외하며, 실행 중 검증 실패에 대한 기존 상향 절차는 유지합니다. Git 밖의 read-only 작업은 호환성을 유지하되 change guard가 `not-git-repository`로 기록됩니다.
 
 ### provider limits와 크로스 fallback
 
@@ -323,6 +323,23 @@ Task envelope에서 선택적으로 지정할 수 있습니다.
 ```bash
 aorch exec --task examples/task.json --dry-run
 ```
+
+### 배분 규칙 (`~/.aorch/allocation.json`)
+
+모델 배분을 자주 손으로 바꾸는 경우를 위한 전역 파일 하나입니다. route 시점에 읽으므로 등록 프로젝트를 재설치하지 않아도 바로 반영됩니다(`AORCH_HOME`을 따릅니다). 파일이 없으면 라우팅은 카탈로그 prior만으로 결정됩니다. 예시는 [examples/allocation.json](examples/allocation.json)이며 복사해서 고칩니다.
+
+```json
+{ "version": 1, "rules": [
+  { "id": "grunt-to-flash", "match": { "kinds": ["implementation","testing","documentation"], "complexities": ["low","standard"], "tags": ["grunt"] },
+    "prefer": ["agy-flash:high", "claude-sonnet-general", "codex-luna-repeatable"] }
+] }
+```
+
+- `match`는 `kinds`·`complexities`·`tags`(모두 포함)를 AND로 봅니다. 생략한 키는 전부 허용합니다.
+- 위에서부터 첫 매칭 규칙의 `prefer` 순서대로, 안전 필터를 통과한 첫 후보(`profileId` 또는 `profileId:effort`)를 고릅니다. `profileId`만 쓰면 effort는 평소 우선순위로 정합니다.
+- 규칙은 후보를 **좁히기만** 합니다. `minimumQuality`, `allowedProfileIds`, 모델 계열 제외, validated-* 제한, critical challenger 게이트, capability 요구로 빠진 후보는 되살리지 못합니다. prior·effort·활성화는 카탈로그 몫입니다.
+- 형식 오류, 없는 프로필·effort, 모르는 키는 파일 경로와 함께 route·exec·dispatch·classify를 멈춥니다(fail-closed).
+- route 출력의 `decision.candidates`는 모든 프로필×effort의 prior·보수 품질·비용과 탈락 사유(`kind`, `not-validated`, `effort-complexity`, `explicit-constraint`, `allocation:<rule>`, `quality-stage` 등)를, `decision.allocation`은 적용된 규칙을 보여줍니다.
 
 `--dry-run`은 워커를 띄우지 않고 선택된 route, capability, 실제 실행될 command spec을 보여줍니다. 워커를 띄우지 않으므로 write isolation 검사도 이 시점에는 하지 않습니다.
 
