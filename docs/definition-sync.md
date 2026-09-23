@@ -90,3 +90,36 @@ aorch dispatch --plan "run/plan.json" --resume "run/dispatch.json" --answers "an
 ```
 
 Only the waiting task and untouched suffix are resumed. The waiting task receives previous changes, completed receipts and user answers; it reports only its new delta. Answers never expand scope. Repeating the same resume returns saved evidence without replaying work, including a saved failure. To retry a failed dispatch, explicitly resume its newly returned plan/result pair without `--answers`; this skips its completed prefix and continues from the failed task and its evidence. Changed answers or an interrupted/pending continuation require inspection; they are not automatically rerun. If another question is needed, continue from the newly returned plan/result pair with its explicit answers.
+# Reviewed reconciliation and runtime caches
+
+Skill collection excludes `__pycache__`, `.pytest_cache`, `*.pyc`, and `*.pyo`.
+Previously managed skill cache entries are reported in `released` and removed
+from the ownership ledger without deleting their local files. `--check` reports
+the proposed release without changing files or the ledger.
+
+Preserve and compare edited installed copies before merging their behavior into
+the canonical source. To apply that reviewed merge, `install` and `update`
+accept `--reconcile <manifest>`. For `update`, select `--user` or one explicit
+`--project`; a manifest cannot authorize multiple installation roots.
+
+```json
+{
+  "version": 1,
+  "root": "C:/Users/example",
+  "files": [{
+    "path": ".claude/skills/example/SKILL.md",
+    "currentHash": "<SHA-256 of the installed bytes>",
+    "desiredHash": "<SHA-256 of the newly rendered bytes>"
+  }]
+}
+```
+
+Both hashes must be actual 64-character lowercase SHA-256 values. Only existing
+files with a desired replacement may be reconciled, including reviewed new
+installed assets not yet in the ledger. Wrong roots, stale
+hashes, extra entries, and newly discovered conflicts fail closed. The normal
+preflight and concurrent-change guards remain active. Changed installed bytes
+and the previous ledger are backed up before replacement. Inspect the result's
+`backup` manifest to recover the corresponding previous files and ledger.
+After applying, run a normal check without the one-use reconciliation manifest;
+reusing an old manifest after a successful replacement intentionally fails.

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { isSkillCachePath } from './skill-cache.js';
 
 export const contentHash = (content) => createHash('sha256').update(content).digest('hex');
 export async function readOptional(file) {
@@ -47,9 +48,26 @@ async function atomicWrite(file, content) {
 
 // The ledger is ownership evidence, not a timestamp. Preflight the entire
 // update before writing any payload. Unknown or edited files are conflicts.
-export async function syncGeneratedFiles({ root, files, ledgerPath = '.aorch/generated-files.json', check = false }) {
+export async function syncGeneratedFiles({ root, files, ledgerPath = '.aorch/generated-files.json', check = false, reconcile }) {
   root = path.resolve(root);
   const ledgerFile = scopedPath(root, ledgerPath);
+  const approvals = new Map();
+  if (reconcile !== undefined) {
+    if (!reconcile || reconcile.version !== 1 || typeof reconcile.root !== 'string'
+      || path.resolve(reconcile.root) !== root || !Array.isArray(reconcile.files)
+      || Object.keys(reconcile).some((key) => !['version', 'root', 'files'].includes(key))) {
+      throw new Error('Invalid reconcile manifest: expected version 1, matching root and files');
+    }
+    for (const entry of reconcile.files) {
+      if (!entry || typeof entry.path !== 'string' || Object.keys(entry).some((key) => !['path', 'currentHash', 'desiredHash'].includes(key))
+        || !/^[a-f0-9]{64}$/.test(entry.currentHash ?? '') || !/^[a-f0-9]{64}$/.test(entry.desiredHash ?? '')) {
+        throw new Error('Invalid reconcile entry: path and two SHA-256 hashes are required');
+      }
+      const relative = path.relative(root, scopedPath(root, entry.path)).replaceAll('\\', '/');
+      if (relative === ledgerPath || approvals.has(relative)) throw new Error(`Duplicate or reserved reconcile path: ${relative}`);
+      approvals.set(relative, entry);
+    }
+  }
   const inspect = async () => {
     await assertScopedFile(root, ledgerFile);
     const raw = await readOptional(ledgerFile);
@@ -61,25 +79,41 @@ export async function syncGeneratedFiles({ root, files, ledgerPath = '.aorch/gen
       if (relative === ledgerPath || wanted.has(relative)) throw new Error(`Duplicate or reserved generated path: ${relative}`);
       wanted.set(relative, { ...file, path: relative, content: Buffer.from(file.content) });
     }
-    const conflicts = [], changes = [], next = {};
+    const conflicts = [], changes = [], next = {}, released = [], seenApprovals = new Set();
     for (const relative of [...new Set([...Object.keys(previous.files), ...wanted.keys()])].sort()) {
       const destination = scopedPath(root, relative);
       await assertScopedFile(root, destination);
+      // Release previously managed skill caches without deleting local bytes.
+      const old = previous.files[relative];
+      if (old?.definitionId?.startsWith('skill:') && isSkillCachePath(relative) && !wanted.has(relative)) {
+        released.push(relative);
+        continue;
+      }
       const current = await readOptional(destination);
       const actual = current === null ? null : contentHash(current);
-      const old = previous.files[relative];
       const file = wanted.get(relative);
       const desired = file ? contentHash(file.content) : null;
       if (old && (typeof old.hash !== 'string' || !/^[a-f0-9]{64}$/.test(old.hash))) throw new Error(`Invalid ownership hash: ${relative}`);
+      const approval = approvals.get(relative);
+      if (approval) {
+        seenApprovals.add(relative);
+        if (!file || approval.currentHash !== actual || approval.desiredHash !== desired) {
+          conflicts.push({ path: relative, reason: 'reconcile-hash-mismatch', actual, desired });
+          continue;
+        }
+      }
       const conflict = actual !== null && (old ? actual !== old.hash : actual !== desired && !file?.merge);
-      if (conflict) { conflicts.push({ path: relative, reason: old ? 'edited-generated-file' : 'unmanaged-file', expected: old?.hash ?? null, actual }); continue; }
+      if (conflict && !approval) { conflicts.push({ path: relative, reason: old ? 'edited-generated-file' : 'unmanaged-file', expected: old?.hash ?? null, actual, desired }); continue; }
       if (file && !file.merge) next[relative] = { hash: desired, ...(file.definitionId ? { definitionId: file.definitionId, provider: file.provider, mode: file.mode } : {}) };
       if (actual !== desired) changes.push({ path: relative, destination, before: current, after: file?.content ?? null });
+    }
+    for (const relative of approvals.keys()) {
+      if (!seenApprovals.has(relative)) conflicts.push({ path: relative, reason: 'reconcile-path-not-managed' });
     }
     const ledger = { version: 1, files: next };
     const ledgerContent = Buffer.from(`${JSON.stringify(ledger, null, 2)}\n`);
     const ledgerChanged = raw === null || !raw.equals(ledgerContent);
-    return { conflicts, changes, ledger, ledgerContent, ledgerChanged };
+    return { conflicts, changes, released, ledger, ledgerContent, ledgerChanged };
   };
   let lock;
   if (!check) {
@@ -91,7 +125,7 @@ export async function syncGeneratedFiles({ root, files, ledgerPath = '.aorch/gen
   try {
     const planned = await inspect();
     const result = { status: planned.conflicts.length ? 'conflict' : planned.changes.length || planned.ledgerChanged ? 'stale' : 'current',
-      changed: planned.changes.map((entry) => entry.path), conflicts: planned.conflicts, ledger: planned.ledger };
+      changed: planned.changes.map((entry) => entry.path), released: planned.released, conflicts: planned.conflicts, ledger: planned.ledger };
     if (check || result.status === 'conflict' || result.status === 'current') return result;
     const backup = `.aorch/backups/${new Date().toISOString().replaceAll(':', '-')}-${randomUUID().slice(0, 8)}`;
     // Back up all changed files before applying any change; the manifest also

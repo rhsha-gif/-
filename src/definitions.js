@@ -1,4 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
+import { isSkillCachePath } from './skill-cache.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertScopedFile, scopedPath, readOptional } from './definition-sync.js';
@@ -141,6 +142,7 @@ function projectSkillLinks(text, definition, relative, destination) {
 async function skillFiles(root, dir = root) {
   const files = [];
   for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : 1)) {
+    if (isSkillCachePath(entry.name)) continue;
     if (/^(desktop\.ini|thumbs\.db|\.DS_Store)$/i.test(entry.name)) continue;
     if (entry.name === '.git' || entry.name === 'node_modules' || /^\.env(?:\.|$)/.test(entry.name)) continue;
     const file = scopedPath(root, path.relative(root, path.join(dir, entry.name)));

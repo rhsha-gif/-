@@ -70,7 +70,7 @@ async function treePayload(source, destination) {
   return files;
 }
 
-export async function installUserDefinitions({ homeDir = os.homedir(), target, check = false } = {}) {
+export async function installUserDefinitions({ homeDir = os.homedir(), target, check = false, reconcile } = {}) {
   if (await readStamp(homeDir)) throw new Error('User definitions cannot share a root with a project installation; keep the project in its own directory');
   const ledgerPath = '.aorch/generated-user-files.json';
   const raw = await readOptional(path.join(homeDir, ledgerPath));
@@ -81,10 +81,10 @@ export async function installUserDefinitions({ homeDir = os.homedir(), target, c
     target = target ? mergeTargets(previousTarget, target) : previousTarget;
   }
   const definitions = (await loadDefinitions({ cwd: homeDir, includeUser: true })).filter((entry) => entry.sourceScope !== 'project');
-  return syncGeneratedFiles({ root: homeDir, files: await renderDefinitions({ definitions, target: target ?? 'both', installScope: 'user' }), ledgerPath, check });
+  return syncGeneratedFiles({ root: homeDir, files: await renderDefinitions({ definitions, target: target ?? 'both', installScope: 'user' }), ledgerPath, check, reconcile });
 }
 
-export async function installProject({ projectRoot = process.cwd(), target = 'both', forceConfig = false, check = false } = {}) {
+export async function installProject({ projectRoot = process.cwd(), target = 'both', forceConfig = false, check = false, reconcile } = {}) {
   target = serializeTargets(targetList(target));
   projectRoot = path.resolve(projectRoot);
   if (projectRoot === path.resolve(os.homedir()) || await exists(path.join(projectRoot, '.aorch/generated-user-files.json'))) {
@@ -118,7 +118,7 @@ export async function installProject({ projectRoot = process.cwd(), target = 'bo
   if (forceConfig || !(await exists(configPath))) files.push({ path: '.aorch/config.json', content: await readFile(path.join(PACKAGE_ROOT, 'config/aorch.config.json')), merge: true });
   if (wantsClaude) files.push({ path: '.claude/settings.json', content: `${JSON.stringify(mergedSettings, null, 2)}\n`, merge: true });
   if (wantsCodex) files.push({ path: '.codex/hooks.json', content: `${JSON.stringify(mergedCodexHooks, null, 2)}\n`, merge: true });
-  const sync = await syncGeneratedFiles({ root: projectRoot, files, check });
+  const sync = await syncGeneratedFiles({ root: projectRoot, files, check, reconcile });
   if (check) return { projectRoot, target, ...sync };
   if (sync.status === 'conflict') {
     const error = new Error(`Generated-file conflict; edit the canonical source or restore the generated copy: ${sync.conflicts.map((entry) => entry.path).join(', ')}`);

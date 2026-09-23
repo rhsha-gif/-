@@ -4,7 +4,7 @@
 import { computePayloadHash, forgetInstall, inspectProject, readRegistry } from './install-registry.js';
 import { installProject } from './install.js';
 
-export async function updateInstalls({ projects, check = false, prune = true } = {}) {
+export async function updateInstalls({ projects, check = false, prune = true, reconcile } = {}) {
   const registry = await readRegistry();
   const explicit = Array.isArray(projects) && projects.length > 0;
   const targets = explicit ? projects : Object.keys(registry.projects);
@@ -21,7 +21,7 @@ export async function updateInstalls({ projects, check = false, prune = true } =
       continue;
     }
     try {
-      const sync = await installProject({ projectRoot: inspected.projectRoot, target: inspected.target, check: true });
+      const sync = await installProject({ projectRoot: inspected.projectRoot, target: inspected.target, check: true, reconcile });
       if (sync.status === 'conflict') {
         results.push({ projectRoot: inspected.projectRoot, target: inspected.target, status: 'failed', conflicts: sync.conflicts, error: 'Generated-file conflict; no files changed' });
         continue;
@@ -32,7 +32,7 @@ export async function updateInstalls({ projects, check = false, prune = true } =
       }
       // forceConfig stays false: a refresh must never discard a project's
       // tuned .aorch/config.json.
-      const result = await installProject({ projectRoot: inspected.projectRoot, target: inspected.target, forceConfig: false });
+      const result = await installProject({ projectRoot: inspected.projectRoot, target: inspected.target, forceConfig: false, reconcile });
       results.push({ projectRoot: inspected.projectRoot, target: inspected.target, status: 'refreshed', changed: result.changed, backup: result.backup });
     } catch (error) {
       results.push({
