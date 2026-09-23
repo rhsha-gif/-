@@ -101,6 +101,64 @@ async function failReceiptVerdict({ attempt, route, runDir, changeGuard, attempt
   throw error;
 }
 
+// Before the ladder climbs, an apex model reads the failed attempt and says
+// why it failed; the next attempt gets that diagnosis instead of only a stderr
+// tail (measured: every escalation observed so far failed again). Read-only,
+// pinned by forced route, and never fatal: a diagnosis that errors or times out
+// is a warning and the ladder proceeds as before. A diagnosis that changes the
+// tree is a trust-boundary breach and stops the run.
+async function diagnoseFailure({ step, task, runId, execution, failed, changeGuard, cwd, passthrough, executeTaskImpl, captureGitSnapshotImpl, evaluateChangeGuardImpl, stateRoot, attempts, learningWarnings }) {
+  const diagnosisTask = {
+    id: `${task.id}.diag`,
+    runId,
+    kind: 'debugging',
+    role: 'reviewer',
+    risk: 'standard',
+    complexity: 'high',
+    write: false,
+    // A pin is required: the forced route still applies validated-* limits,
+    // which an apex challenger's automatic scope does not cover.
+    allowedProfileIds: [step.profileId],
+    objective: [
+      'Diagnose why the previous attempt at the task below failed verification. Do not modify any file; read what you need.',
+      '## Original task', task.objective,
+      '## Failed attempt',
+      `Route: ${execution.route.model}@${execution.route.effort}`,
+      `Files changed by the attempt: ${changeGuard.actualFiles?.join(', ') || '(none)'}`,
+      `Failing command: ${failed?.command} (exit ${failed?.exitCode}${failed?.timedOut ? ', timed out' : ''})`,
+      failed?.stderrTail || failed?.stdoutTail || '(no output captured)',
+      '## Report',
+      'In receipt.summary, state the most likely root cause with file paths, and concretely what the next attempt must do differently. Be brief.'
+    ].join('\n'),
+    acceptanceCriteria: ['Names the most likely root cause with file paths', 'States what the next attempt must do differently'],
+    allowedScope: task.allowedScope ?? [],
+    forbiddenScope: task.forbiddenScope ?? [],
+    verificationCommands: [],
+    capabilityIds: [],
+    tags: []
+  };
+  const before = await captureGitSnapshotImpl({ cwd });
+  let result;
+  try {
+    result = await executeTaskImpl({ task: diagnosisTask, ...passthrough, forcedRoute: step });
+  } catch (error) {
+    learningWarnings.push(`diagnosis skipped: ${error.message}`);
+    return null;
+  } finally {
+    const after = await captureGitSnapshotImpl({ cwd });
+    const guard = evaluateChangeGuardImpl({ task: diagnosisTask, receipt: { filesChanged: [] }, before, after, ignoredPaths: [stateRoot] });
+    if (!guard.passed) {
+      await failChangeGuard({ attempt: 0, route: result?.route ?? { provider: execution.route.provider, profileId: step.profileId, model: step.profileId, effort: step.effort }, runDir: path.join(stateRoot, 'task-runs', runId, diagnosisTask.id), changeGuard: guard, attempts });
+    }
+  }
+  const summary = typeof result?.receipt?.summary === 'string' ? result.receipt.summary.trim().slice(0, 4000) : '';
+  if (!summary) {
+    learningWarnings.push('diagnosis returned no summary');
+    return null;
+  }
+  return { model: result.route.model, summary };
+}
+
 // Exec -> verify -> escalate. A failed verification climbs the provider's
 // escalation ladder with the failure evidence attached; when the attempt
 // budget or the ladder runs out, the human gets the evidence back instead of
@@ -137,6 +195,8 @@ export async function executeWithVerification({
   const forbiddenProviders = new Set(task.forbiddenProviders ?? []);
   let currentTask = { ...structuredClone(task), runId };
   let forcedRoute;
+  // undefined = not tried yet; null = tried or not configured. Once per run.
+  let diagnosis;
 
   // Capture the baseline once, before any attempt. Escalation retries build on
   // the tree the previous attempt left behind, so re-snapshotting per attempt
@@ -301,6 +361,7 @@ export async function executeWithVerification({
     }
 
     let verification;
+    let verificationChangeGuard = null;
     try {
       verification = await runVerificationImpl({ commands, cwd, timeoutMs: config.verification?.commandTimeoutMs });
     } catch (error) {
@@ -309,16 +370,21 @@ export async function executeWithVerification({
     }
     if (verification.passed) {
       const afterVerificationSnapshot = await captureGitSnapshotImpl({ cwd });
-      const verificationChangeGuard = evaluateChangeGuardImpl({
+      verificationChangeGuard = evaluateChangeGuardImpl({
         task: currentTask,
         receipt: { filesChanged: [] },
         before: afterSnapshot,
         after: afterVerificationSnapshot,
         ignoredPaths: [stateRoot]
       });
-      // Verification can generate build artefacts, so only repository control
-      // state is an integrity boundary after commands complete.
-      if (verificationChangeGuard.headChanged || verificationChangeGuard.controlPathsChanged.length > 0) {
+      // Verification can generate build artefacts, so new untracked files are
+      // tolerated. What it may not do is move HEAD, touch control state, write
+      // into forbiddenScope, or modify a tracked file on a read-only task —
+      // those would ship a result nobody approved (audit 2026-09-23 P1).
+      const trackedReadOnly = (verificationChangeGuard.readOnlyFiles ?? [])
+        .filter((file) => afterVerificationSnapshot?.entries?.[file]?.status !== '??');
+      if (verificationChangeGuard.headChanged || verificationChangeGuard.controlPathsChanged.length > 0
+        || (verificationChangeGuard.forbiddenFiles?.length ?? 0) > 0 || trackedReadOnly.length > 0) {
         await recordEvidence({ execution, attempt, status: 'complete', artifact: 'fail', evaluation: { source: 'independent-gate', status: 'error' } });
         await failChangeGuard({
           attempt,
@@ -340,7 +406,8 @@ export async function executeWithVerification({
       route: routeSummary(execution.route),
       passed: verification.passed,
       results: verification.results,
-      changeGuard
+      changeGuard,
+      verificationChangeGuard
     });
     // A read-only worker whose tree the guard just proved untouched cannot
     // have influenced what the commands measure, so the outcome would grade
@@ -391,6 +458,12 @@ export async function executeWithVerification({
       error.runDir = execution.runDir;
       throw error;
     }
+    if (diagnosis === undefined) {
+      const step = config.escalation?.diagnosis?.[execution.route.provider];
+      diagnosis = step
+        ? await diagnoseFailure({ step, task, runId, execution, failed, changeGuard, cwd, passthrough, executeTaskImpl, captureGitSnapshotImpl, evaluateChangeGuardImpl, stateRoot, attempts, learningWarnings })
+        : null;
+    }
     currentTask = {
       ...structuredClone(task),
       runId,
@@ -399,7 +472,8 @@ export async function executeWithVerification({
       objective: `${task.objective}\n\n## Previous attempt failed verification\n` +
         `Route: ${execution.route.model}@${execution.route.effort}\n` +
         `Command: ${failed?.command} (exit ${failed?.exitCode}${failed?.timedOut ? ', timed out' : ''})\n` +
-        `${failed?.stderrTail || failed?.stdoutTail || '(no output captured)'}`
+        `${failed?.stderrTail || failed?.stdoutTail || '(no output captured)'}` +
+        (diagnosis ? `\n\n## Diagnosis by ${diagnosis.model}\n${diagnosis.summary}` : '')
     };
   }
   throw new Error('unreachable: attempt loop exited without a verdict');

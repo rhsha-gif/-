@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "grunt-to-flash",
+      "match": {
+        "kinds": ["implementation", "testing", "documentation"],
+        "complexities": ["low", "standard"],
+        "tags": ["grunt"]
+      },
+      "prefer": ["agy-flash:high", "claude-sonnet-general", "codex-luna-repeatable"]
+    },
+    {
+      "id": "opus-standard",
+      "match": {
+        "kinds": ["implementation", "review", "planning", "debugging", "writing", "architecture"],
+        "complexities": ["standard"]
+      },
+      "prefer": ["claude-opus-deep:medium", "claude-sonnet-general"]
+    }
+  ]
+}

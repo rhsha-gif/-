@@ -102,8 +102,8 @@ test('debug wording is not misclassified as research by the new low-tier rules',
 const CROSS_MATRIX = [
   { objective: 'Extract the atomic write helper into a shared module', provider: 'anthropic', model: 'haiku' },
   { objective: 'Fix the typo in the README', provider: 'anthropic', model: 'haiku' },
-  { objective: 'Design the architecture for the delegation subsystem', provider: 'openai', model: 'gpt-5.6-sol' },
-  { objective: 'Review the auth token handling for vulnerabilities', provider: 'openai', model: 'gpt-5.6-sol' }
+  { objective: 'Design the architecture for the delegation subsystem', provider: 'openai', model: 'gpt-6-sol' },
+  { objective: 'Review the auth token handling for vulnerabilities', provider: 'openai', model: 'gpt-6-sol' }
 ];
 
 test('cross-provider routing: cheap stays on claude-haiku, deep goes to codex-sol', async () => {
@@ -123,8 +123,8 @@ test('cross-provider routing: cheap stays on claude-haiku, deep goes to codex-so
 // risk-analysis is not emitted by the classifier, so it is not tuned here.
 const DOMAIN_MATRIX = [
   { objective: 'Find the root cause of the race condition and debug it', provider: 'anthropic', model: 'opus' },
-  { objective: 'Design the architecture for the delegation subsystem', provider: 'openai', model: 'gpt-5.6-sol' },
-  { objective: 'Review the auth token handling for vulnerabilities', provider: 'openai', model: 'gpt-5.6-sol' }
+  { objective: 'Design the architecture for the delegation subsystem', provider: 'openai', model: 'gpt-6-sol' },
+  { objective: 'Review the auth token handling for vulnerabilities', provider: 'openai', model: 'gpt-6-sol' }
 ];
 
 test('deep-tier domain split: debugging → claude-opus, architecture/security → codex-sol', async () => {
@@ -155,23 +155,24 @@ function writingTask(complexity) {
   });
 }
 
-test('writing kind: drafting lands deep, editing lands mid, low has no route', async () => {
+test('writing kind: drafting lands deep, standard editing lands on opus medium, low stays mid', async () => {
   const catalog = await loadPackagedCatalog();
 
   const drafting = selectRoute({ task: writingTask('high'), catalog, observations: [] });
-  assert.ok(['opus', 'gpt-5.6-sol', 'fable'].includes(drafting.model),
+  assert.ok(['opus', 'gpt-6-sol', 'fable'].includes(drafting.model),
     `writing/high must land on a deep model, got ${drafting.model}`);
 
   const critical = selectRoute({ task: writingTask('critical'), catalog, observations: [] });
-  assert.ok(['opus', 'gpt-5.6-sol', 'fable'].includes(critical.model),
+  assert.ok(['opus', 'gpt-6-sol', 'fable'].includes(critical.model),
     `writing/critical must land on a deep model, got ${critical.model}`);
 
   const editing = selectRoute({ task: writingTask('standard'), catalog, observations: [] });
-  assert.ok(['sonnet', 'gpt-5.6-terra'].includes(editing.model),
-    `writing/standard must land on the middle tier, got ${editing.model}`);
+  // Opus 5.5 is opened to standard work at medium effort (2026-09-23 decision).
+  assert.equal(editing.model, 'opus');
+  assert.equal(editing.effort, 'medium');
 
   const low = selectRoute({ task: writingTask('low'), catalog, observations: [] });
-  assert.ok(['sonnet', 'gpt-5.6-terra'].includes(low.model),
+  assert.ok(['sonnet', 'gpt-6-luna'].includes(low.model),
     `writing/low must still land mid — the cheap tier never holds the pen — got ${low.model}`);
 });
 
@@ -222,4 +223,21 @@ test('an unreadable observation ledger does not block the subagent gate', async 
   // classify catches this and routes on the priors instead; the point is that
   // readObservations reports the problem rather than silently returning [].
   await assert.rejects(readObservations(bad), /Invalid observation record 1/);
+});
+
+test('shipped allocation example: grunt work goes to Flash, standard work to Opus medium, untagged cheap work stays tokens-first', async () => {
+  const catalog = await loadPackagedCatalog();
+  catalog.allocation = JSON.parse(await readFile(path.join(root, 'examples/allocation.json'), 'utf8'));
+  const route = (task) => selectRoute({ task: validateTask({ id: 't', objective: 'x', role: 'executor', risk: 'standard', ...task }), catalog, observations: [] });
+
+  const grunt = route({ kind: 'testing', complexity: 'standard', tags: ['grunt'], routingPriorities: ['tokens', 'quality', 'latency'], minimumQuality: 0.8 });
+  assert.equal(`${grunt.profileId}:${grunt.effort}`, 'agy-flash:high');
+  assert.equal(grunt.model, 'gemini-3.8-flash');
+
+  const review = route({ kind: 'review', complexity: 'standard', routingPriorities: ['tokens', 'quality', 'latency'], minimumQuality: 0.8 });
+  assert.equal(`${review.profileId}:${review.effort}`, 'claude-opus-deep:medium');
+
+  const cheap = route({ kind: 'testing', complexity: 'low', routingPriorities: ['tokens', 'quality', 'latency'], minimumQuality: 0.8 });
+  assert.equal(cheap.decision.allocation, null);
+  assert.equal(cheap.profileId, 'claude-haiku-scout');
 });

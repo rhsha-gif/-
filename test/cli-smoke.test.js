@@ -10,24 +10,20 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cli = path.join(root, 'src/cli.js');
 const defaultConfig = path.join(root, 'config/aorch.config.json');
 
-test('quota command reports remaining percent per provider, null without a probe', async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-quota-'));
-  const configPath = path.join(dir, 'aorch.config.json');
-  const base = JSON.parse(await readFile(defaultConfig, 'utf8'));
-  const openai = base.providers.find((p) => p.id === 'openai');
-  openai.usageProbe = {
-    command: process.execPath,
-    args: ['-e', 'process.stdout.write(JSON.stringify({usage:{primary:{remainingPercent:64}}}))'],
-    remainingField: 'usage.primary.remainingPercent'
-  };
-  await writeFile(configPath, JSON.stringify(base));
+// Spawned CLIs inherit this env: isolate them from the real ~/.aorch so a
+// user allocation.json or weekly policy cannot change what these tests see.
+process.env.AORCH_HOME = await mkdtemp(path.join(os.tmpdir(), 'aorch-home-'));
 
-  const result = spawnSync(process.execPath, [cli, 'quota', '--config', configPath, '--cwd', dir], { encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-  const parsed = JSON.parse(result.stdout);
-  const byId = Object.fromEntries(parsed.map((row) => [row.provider, row.remainingPercent]));
-  assert.equal(byId.openai, 64);
-  assert.equal(byId.anthropic, null);   // no usageProbe configured
+test('a malformed allocation file stops route with its path instead of routing silently', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'aorch-home-bad-'));
+  await writeFile(path.join(home, 'allocation.json'), '{"version":1,"rules":[{"id":"x","prefer":["ghost"]}]}');
+  const taskPath = path.join(home, 'task.json');
+  await writeFile(taskPath, JSON.stringify({ id: 'T1', kind: 'implementation', role: 'executor', risk: 'standard', tags: [] }));
+  const result = spawnSync(process.execPath, [cli, 'route', '--config', defaultConfig, '--task', taskPath], {
+    encoding: 'utf8', env: { ...process.env, AORCH_HOME: home }
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /allocation .*allocation\.json.*ghost/);
 });
 
 test('route command returns a concrete provider, model, and effort', async () => {

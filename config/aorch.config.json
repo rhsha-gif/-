@@ -14,13 +14,7 @@
       "quality",
       "tokens",
       "latency"
-    ],
-    "quota": {
-      "softThresholdPercent": 40,
-      "hardThresholdPercent": 10,
-      "cacheTtlMinutes": 5,
-      "premiumThresholdPercent": 60
-    }
+    ]
   },
   "roleAgents": {
     "worker": {
@@ -283,6 +277,15 @@
       "maturity": "stable",
       "efforts": [
         {
+          "name": "medium",
+          "qualityDelta": -0.01,
+          "tokenMultiplier": 0.75,
+          "latencyMultiplier": 0.75,
+          "complexities": [
+            "standard"
+          ]
+        },
+        {
           "name": "high",
           "qualityDelta": 0,
           "tokenMultiplier": 1,
@@ -308,28 +311,6 @@
           "latencyMultiplier": 1.8,
           "complexities": [
             "critical"
-          ]
-        },
-        {
-          "name": "ultracode",
-          "qualityDelta": 0.05,
-          "tokenMultiplier": 6,
-          "latencyMultiplier": 2.5,
-          "complexities": [
-            "high",
-            "critical"
-          ],
-          "quotaGate": "premium",
-          "taskKinds": [
-            "review",
-            "security",
-            "risk-analysis",
-            "research",
-            "exploration",
-            "log-analysis",
-            "implementation",
-            "debugging",
-            "testing"
           ]
         }
       ],
@@ -376,28 +357,6 @@
           "complexities": [
             "critical"
           ]
-        },
-        {
-          "name": "ultracode",
-          "qualityDelta": 0.03,
-          "tokenMultiplier": 6,
-          "latencyMultiplier": 2.5,
-          "complexities": [
-            "high",
-            "critical"
-          ],
-          "quotaGate": "premium",
-          "taskKinds": [
-            "review",
-            "security",
-            "risk-analysis",
-            "research",
-            "exploration",
-            "log-analysis",
-            "implementation",
-            "debugging",
-            "testing"
-          ]
         }
       ],
       "modelFamily": "claude"
@@ -405,7 +364,7 @@
     {
       "id": "codex-luna-repeatable",
       "provider": "openai",
-      "model": "gpt-5.6-luna",
+      "model": "gpt-6-luna",
       "enabled": true,
       "roles": [
         "executor",
@@ -426,7 +385,7 @@
       },
       "tokenIndex": 0.55,
       "latencyIndex": 0.5,
-      "maturity": "stable",
+      "maturity": "challenger",
       "efforts": [
         {
           "name": "low",
@@ -473,7 +432,7 @@
       "id": "codex-terra-general",
       "provider": "openai",
       "model": "gpt-5.6-terra",
-      "enabled": true,
+      "enabled": false,
       "roles": [
         "planner",
         "executor",
@@ -544,36 +503,17 @@
             "standard",
             "high"
           ]
-        },
-        {
-          "name": "ultra",
-          "qualityDelta": 0.055,
-          "tokenMultiplier": 5,
-          "latencyMultiplier": 1.6,
-          "complexities": [
-            "standard",
-            "high"
-          ],
-          "quotaGate": "soft",
-          "taskKinds": [
-            "review",
-            "security",
-            "risk-analysis",
-            "research",
-            "exploration",
-            "log-analysis",
-            "implementation",
-            "debugging",
-            "testing"
-          ]
         }
       ],
-      "modelFamily": "gpt"
+      "modelFamily": "gpt",
+      "metadata": {
+        "retired": "2026-09-23: gpt-5.6-terra is listed as Older and there is no gpt-6-terra."
+      }
     },
     {
       "id": "codex-sol-deep",
       "provider": "openai",
-      "model": "gpt-5.6-sol",
+      "model": "gpt-6-sol",
       "enabled": true,
       "roles": [
         "planner",
@@ -608,7 +548,7 @@
       },
       "tokenIndex": 1.8,
       "latencyIndex": 1.4,
-      "maturity": "stable",
+      "maturity": "challenger",
       "efforts": [
         {
           "name": "medium",
@@ -645,28 +585,6 @@
           "latencyMultiplier": 1.85,
           "complexities": [
             "critical"
-          ]
-        },
-        {
-          "name": "ultra",
-          "qualityDelta": 0.06,
-          "tokenMultiplier": 4.5,
-          "latencyMultiplier": 1.7,
-          "complexities": [
-            "high",
-            "critical"
-          ],
-          "quotaGate": "premium",
-          "taskKinds": [
-            "review",
-            "security",
-            "risk-analysis",
-            "research",
-            "exploration",
-            "log-analysis",
-            "implementation",
-            "debugging",
-            "testing"
           ]
         }
       ],
@@ -749,7 +667,7 @@
     {
       "id": "agy-flash",
       "provider": "antigravity",
-      "model": "gemini-3.8-flash-medium",
+      "model": "gemini-3.8-flash",
       "modelFamily": "gemini",
       "enabled": true,
       "automatic": true,
@@ -780,7 +698,8 @@
       "latencyIndex": 1,
       "maturity": "challenger",
       "metadata": {
-        "activation": "2026-09-14: passed closed-bars implementation acceptance with real native tools and structured receipt. Ordinary risk, standard complexity, file implementation only; parent runs verification. Priors remain assumptions."
+        "activation": "2026-09-14: passed closed-bars implementation acceptance with real native tools and structured receipt. Ordinary risk, standard complexity, file implementation only; parent runs verification. Priors remain assumptions.",
+        "allocation": "2026-09-23: Opus partner for large grunt work (bulk implementation, tests, docs) via the allocation rules; validated kinds widened by user decision, priors unchanged."
       },
       "efforts": [
         {
@@ -805,7 +724,9 @@
         }
       ],
       "validatedTaskKinds": [
-        "implementation"
+        "implementation",
+        "testing",
+        "documentation"
       ],
       "validatedComplexities": [
         "standard"
@@ -877,7 +798,7 @@
     {
       "id": "grok-general",
       "provider": "grok",
-      "model": "grok-4.6",
+      "model": "grok-4.7",
       "modelFamily": "grok",
       "enabled": true,
       "automatic": true,
@@ -946,67 +867,6 @@
       ],
       "validatedTaskTags": [
         "local-evidence"
-      ]
-    },
-    {
-      "id": "grok-47-evaluation",
-      "provider": "grok",
-      "model": "grok-4.7",
-      "modelFamily": "grok",
-      "enabled": true,
-      "automatic": false,
-      "roles": [
-        "planner",
-        "executor",
-        "reviewer"
-      ],
-      "taskKinds": [
-        "architecture",
-        "planning",
-        "implementation",
-        "debugging",
-        "testing",
-        "review",
-        "research",
-        "exploration",
-        "documentation",
-        "writing",
-        "qa",
-        "security",
-        "risk-analysis"
-      ],
-      "quality": {
-        "default": 0.9
-      },
-      "tokenIndex": 1,
-      "latencyIndex": 1,
-      "maturity": "challenger",
-      "metadata": {
-        "activation": "2026-09-23: listed by authenticated grok models. Explicit evaluation only; no automatic promotion from a read probe."
-      },
-      "efforts": [
-        {
-          "name": "medium",
-          "complexities": [
-            "low",
-            "standard",
-            "high"
-          ],
-          "qualityDelta": 0,
-          "tokenMultiplier": 1,
-          "latencyMultiplier": 1
-        },
-        {
-          "name": "high",
-          "complexities": [
-            "low",
-            "standard",
-            "high"
-          ],
-          "qualityDelta": 0,
-          "tokenMultiplier": 1.2,
-          "latencyMultiplier": 1.2
-        }
       ]
     }
   ],
@@ -1103,6 +963,16 @@
           "effort": "max"
         }
       ]
+    },
+    "diagnosis": {
+      "anthropic": {
+        "profileId": "claude-fable-apex",
+        "effort": "high"
+      },
+      "openai": {
+        "profileId": "codex-astra",
+        "effort": "high"
+      }
     }
   },
   "paths": {

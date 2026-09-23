@@ -1,9 +1,7 @@
-// 'ultracode' engages Claude Code's multi-agent workflow mode. Headless -p
-// runs do not detect the prompt keyword (measured: probe reports OFF), but the
-// CLI accepts ultracode as a native --effort value since 2.1.205 (measured on
-// 2.1.228: probe reports ON), so the route effort passes through unchanged.
-// The injected instruction assigns per-agent effort by purpose and the turn
-// budget rises to cover workflow spawn/collect/verify loops.
+// Claude Code 2.1.280: --effort accepts low|medium|high|xhigh|max (Opus 5.5
+// defaults to medium; code.claude.com/docs/en/model-config). The route effort
+// passes through unchanged; model aliases (opus, fable, sonnet, haiku) resolve
+// to the latest model of each family inside the CLI.
 // Bash is in the read set because every task's verification runs through it.
 // PowerShell is listed separately because on Windows it is a distinct tool name,
 // and an allowlist carrying only Bash sends the worker into a denial loop that
@@ -21,11 +19,6 @@ const READ_TOOLS = Object.freeze([
 ]);
 const WRITE_TOOLS = Object.freeze(['Write', 'Edit']);
 
-const ULTRACODE_EFFORT = 'ultracode';
-const ULTRACODE_MIN_MAX_TURNS = 200;
-const ULTRACODE_PROMPT_PREFIX = 'Assign each workflow agent\'s reasoning effort by purpose: '
-  + 'low for mechanical stages, high for verification and judging stages.\n\n';
-
 export function buildClaudeCommand({
   prompt,
   route,
@@ -40,9 +33,8 @@ export function buildClaudeCommand({
   executable = 'claude'
 }) {
   if (!route?.model || !route?.effort) throw new TypeError('route.model and route.effort are required');
-  const ultracode = route.effort === ULTRACODE_EFFORT;
   const args = [
-    '-p', ultracode ? ULTRACODE_PROMPT_PREFIX + prompt : prompt,
+    '-p', prompt,
     '--model', route.model,
     '--effort', route.effort,
     '--output-format', outputFormat,
@@ -63,7 +55,7 @@ export function buildClaudeCommand({
     // the change guard comparing the tree, not by a sandbox.
     '--permission-mode', 'auto',
     '--allowed-tools', ...READ_TOOLS, ...(write ? WRITE_TOOLS : []), ...(mcpConfig ? mcpTools : []),
-    '--max-turns', String(ultracode ? Math.max(maxTurns, ULTRACODE_MIN_MAX_TURNS) : maxTurns),
+    '--max-turns', String(maxTurns),
     '--no-session-persistence'
   ];
   if (!write) args.push('--disallowed-tools', ...WRITE_TOOLS, 'NotebookEdit');

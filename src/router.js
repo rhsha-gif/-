@@ -93,52 +93,69 @@ function profileApprovedForTask(profile, task) {
     && (!profile.validatedTaskTags || profile.validatedTaskTags.every(tag => task.tags?.includes(tag)));
 }
 
-function supportsTask(profile, task, catalog) {
+// Ordered eligibility checks; the first failing one names why a profile is
+// out, so route output can explain every exclusion instead of a bare boolean.
+function profileRejection(profile, task, catalog) {
   const provider = providerMetadata(catalog, profile.provider);
-  return profile.enabled !== false
-    && provider.enabled !== false
-    && familyAllowed(profile, provider, task)
-    && profileApprovedForTask(profile, task)
-    && providerAllowedForTask(provider, task, catalog.controlPlane ?? {})
-    && agentSupportsProfile(profile, task, catalog)
-    && (profile.roles?.includes(task.role) ?? true)
-    && (profile.taskKinds?.includes(task.kind) ?? true)
-    && (!task.allowedProviders?.length || task.allowedProviders.includes(profile.provider))
-    && !(task.forbiddenProviders ?? []).includes(profile.provider)
-    && !(task.forbiddenProfileIds ?? []).includes(profile.id)
+  const checks = [
+    ['disabled', () => profile.enabled !== false],
+    ['provider-disabled', () => provider.enabled !== false],
+    ['model-family', () => familyAllowed(profile, provider, task)],
+    ['not-validated', () => profileApprovedForTask(profile, task)],
+    ['adapter-risk', () => providerAllowedForTask(provider, task, catalog.controlPlane ?? {})],
+    ['agent', () => agentSupportsProfile(profile, task, catalog)],
+    ['role', () => profile.roles?.includes(task.role) ?? true],
+    ['kind', () => profile.taskKinds?.includes(task.kind) ?? true],
+    ['allowed-providers', () => !task.allowedProviders?.length || task.allowedProviders.includes(profile.provider)],
+    ['forbidden-provider', () => !(task.forbiddenProviders ?? []).includes(profile.provider)],
+    ['forbidden-profile', () => !(task.forbiddenProfileIds ?? []).includes(profile.id)],
     // The positive twin of forbiddenProfileIds. Its one legitimate use is a
     // task whose point is a specific model's judgement (the model-upgrade
     // audit); routing by quality cannot express that, because a cheaper tier
     // with an effort bump ties or wins on the prior.
-    && (!task.allowedProfileIds?.length || task.allowedProfileIds.includes(profile.id))
-    && providerSupportsCapabilities(provider, task.capabilityIds, catalog.capabilities)
-    && providerSupportsCapabilities(provider, task.agentId ? [task.agentId] : [], catalog.capabilities, 'agent');
+    ['allowed-profiles', () => !task.allowedProfileIds?.length || task.allowedProfileIds.includes(profile.id)],
+    ['capabilities', () => providerSupportsCapabilities(provider, task.capabilityIds, catalog.capabilities)],
+    ['agent-capability', () => providerSupportsCapabilities(provider, task.agentId ? [task.agentId] : [], catalog.capabilities, 'agent')]
+  ];
+  return checks.find(([, ok]) => !ok())?.[0] ?? null;
 }
 
 function expandCandidates(task, catalog, complexity) {
-  return (catalog.models ?? [])
-    .filter((profile) => supportsTask(profile, task, catalog))
-    .flatMap((profile) => (profile.efforts ?? [{ name: 'medium' }])
-      .filter((effort) => !effort.complexities?.length || effort.complexities.includes(complexity))
-      .filter((effort) => !effort.taskKinds?.length || effort.taskKinds.includes(task.kind))
-      .map((effort) => {
-        const provider = providerMetadata(catalog, profile.provider);
-        const prior = profile.quality?.[task.kind] ?? profile.quality?.default ?? 0.5;
-        return {
-          provider: profile.provider,
-          profileId: profile.id,
-          model: profile.model,
-          modelFamily: modelFamily(profile, provider),
-          effort: effort.name,
-          quotaGate: effort.quotaGate ?? null,
-          maturity: profile.maturity ?? 'stable',
-          adapterMaturity: provider.adapterMaturity ?? 'stable',
-          priorQuality: clamp01(prior + (effort.qualityDelta ?? 0)),
-          tokenIndex: (profile.tokenIndex ?? 1) * (effort.tokenMultiplier ?? 1),
-          latencyIndex: (profile.latencyIndex ?? 1) * (effort.latencyMultiplier ?? 1),
-          metadata: profile.metadata ?? {}
-        };
-      }));
+  const candidates = [];
+  const excluded = [];
+  for (const profile of catalog.models ?? []) {
+    const rejection = profileRejection(profile, task, catalog);
+    if (rejection) {
+      excluded.push({ profileId: profile.id, effort: null, excludedBy: rejection });
+      continue;
+    }
+    const provider = providerMetadata(catalog, profile.provider);
+    const prior = profile.quality?.[task.kind] ?? profile.quality?.default ?? 0.5;
+    for (const effort of profile.efforts ?? [{ name: 'medium' }]) {
+      if (effort.complexities?.length && !effort.complexities.includes(complexity)) {
+        excluded.push({ profileId: profile.id, effort: effort.name, excludedBy: 'effort-complexity' });
+        continue;
+      }
+      if (effort.taskKinds?.length && !effort.taskKinds.includes(task.kind)) {
+        excluded.push({ profileId: profile.id, effort: effort.name, excludedBy: 'effort-kind' });
+        continue;
+      }
+      candidates.push({
+        provider: profile.provider,
+        profileId: profile.id,
+        model: profile.model,
+        modelFamily: modelFamily(profile, provider),
+        effort: effort.name,
+        maturity: profile.maturity ?? 'stable',
+        adapterMaturity: provider.adapterMaturity ?? 'stable',
+        priorQuality: clamp01(prior + (effort.qualityDelta ?? 0)),
+        tokenIndex: (profile.tokenIndex ?? 1) * (effort.tokenMultiplier ?? 1),
+        latencyIndex: (profile.latencyIndex ?? 1) * (effort.latencyMultiplier ?? 1),
+        metadata: profile.metadata ?? {}
+      });
+    }
+  }
+  return { candidates, excluded };
 }
 
 function byStableIdentity(left, right) {
@@ -171,81 +188,6 @@ function applyHardConstraints(candidates, task) {
   ));
 }
 
-// Quota is a cost-optimization signal, never a safety gate. Unknown quota
-// (provider absent from the map, or a non-finite value) means "no signal" and
-// leaves the candidate untouched in every quota decision below.
-function quotaThresholds(policy) {
-  return {
-    soft: policy.quota?.softThresholdPercent ?? 40,
-    hard: policy.quota?.hardThresholdPercent ?? 10,
-    premium: policy.quota?.premiumThresholdPercent ?? 60
-  };
-}
-
-function quotaState(quota, providerId, thresholds) {
-  const remaining = quota?.[providerId];
-  if (typeof remaining !== 'number' || !Number.isFinite(remaining)) return 'unknown';
-  if (remaining < thresholds.hard) return 'depleted';
-  if (remaining < thresholds.soft) return 'low';
-  return 'ok';
-}
-
-// Drop depleted-quota providers only while an alternative survives: an
-// exclusion that would empty the set rolls back, degrading depletion from an
-// exclusion to a preference (the soft stage still disprefers those providers).
-function excludeDepletedProviders(candidates, quota, thresholds) {
-  const surviving = candidates.filter(
-    (candidate) => quotaState(quota, candidate.provider, thresholds) !== 'depleted'
-  );
-  if (surviving.length === 0 || surviving.length === candidates.length) {
-    return { candidates, excludedProviders: [] };
-  }
-  const excludedProviders = [...new Set(
-    candidates
-      .filter((candidate) => quotaState(quota, candidate.provider, thresholds) === 'depleted')
-      .map((candidate) => candidate.provider)
-  )];
-  return { candidates: surviving, excludedProviders };
-}
-
-// Fan-out modes (efforts carrying quotaGate: ultra, ultracode) invert the
-// unknown-quota rule above on purpose. Depletion exclusion refuses to punish a
-// provider for a missing signal; a gated effort is an opt-in luxury that only
-// turns on when the remaining quota is positively confirmed to cover it — an
-// absent or unreadable signal keeps it off. Like depletion, an exclusion that
-// would empty the candidate set rolls back so a task never loses its only
-// route to the gate.
-function applyWideModeGate(candidates, quota, thresholds) {
-  const surviving = candidates.filter((candidate) => {
-    if (!candidate.quotaGate) return true;
-    const remaining = quota?.[candidate.provider];
-    const floor = candidate.quotaGate === 'premium' ? thresholds.premium : thresholds.soft;
-    return typeof remaining === 'number' && Number.isFinite(remaining) && remaining >= floor;
-  });
-  if (surviving.length === 0 || surviving.length === candidates.length) {
-    return { candidates, excludedCandidates: [] };
-  }
-  const excludedCandidates = candidates
-    .filter((candidate) => !surviving.includes(candidate))
-    .map((candidate) => ({ profileId: candidate.profileId, effort: candidate.effort, quotaGate: candidate.quotaGate }));
-  return { candidates: surviving, excludedCandidates };
-}
-
-// Within the tie set left by the first priority metric, prefer providers whose
-// quota is not running low. Placed after the first metric on purpose: the tie
-// set after the full narrowing chain is almost always a single candidate, so a
-// last-place tie-break would never fire, while here the preference decides
-// among candidates the leading metric already considers equivalent.
-function preferComfortableQuota(tier, quota, thresholds) {
-  const comfortable = tier.filter(
-    (candidate) => !['low', 'depleted'].includes(quotaState(quota, candidate.provider, thresholds))
-  );
-  if (comfortable.length === 0 || comfortable.length === tier.length) {
-    return { tier, applied: false };
-  }
-  return { tier: comfortable, applied: true };
-}
-
 function narrowByMetric(candidates, metric, policy) {
   if (candidates.length <= 1) return candidates;
   if (metric === 'quality') {
@@ -259,6 +201,32 @@ function narrowByMetric(candidates, metric, policy) {
     ? (policy.tokenTolerance ?? 0.05)
     : (policy.latencyTolerance ?? policy.tokenTolerance ?? 0.05);
   return candidates.filter((candidate) => candidate[field] <= best * (1 + tolerance));
+}
+
+function ruleMatches(rule, task, complexity) {
+  const { kinds, complexities, tags } = rule.match ?? {};
+  return (!kinds?.length || kinds.includes(task.kind))
+    && (!complexities?.length || complexities.includes(complexity))
+    && (!tags?.length || tags.every((tag) => task.tags?.includes(tag)));
+}
+
+// The user's hand-tuned allocation rules (~/.aorch/allocation.json). The first
+// matching rule with a surviving preferred candidate narrows the tier to it;
+// runs after every safety filter, so it can reorder but never resurrect.
+function applyAllocation(candidates, allocation, task, complexity) {
+  for (const rule of allocation?.rules ?? []) {
+    if (!ruleMatches(rule, task, complexity)) continue;
+    for (const entry of rule.prefer) {
+      const [profileId, effort] = entry.split(':');
+      const preferred = candidates.filter((c) => c.profileId === profileId && (!effort || c.effort === effort));
+      if (preferred.length > 0) return { tier: preferred, allocation: { ruleId: rule.id, preferred: entry } };
+    }
+  }
+  return { tier: candidates, allocation: null };
+}
+
+function candidateKey(candidate) {
+  return `${candidate.profileId}:${candidate.effort}`;
 }
 
 // Escalation deliberately bypasses the eligibility filters: a ladder is a
@@ -308,7 +276,7 @@ export function forceRoute({ catalog, profileId, effort, task = {} }) {
   };
 }
 
-export function selectRoute({ task, catalog, observations = [], now = new Date(), quota = null }) {
+export function selectRoute({ task, catalog, observations = [], now = new Date() }) {
   if (!task?.kind || !task?.role) {
     throw new TypeError('task.kind and task.role are required');
   }
@@ -320,7 +288,14 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
     ? (catalog.weeklyPolicy ? policyObservations(catalog.weeklyPolicy, { ...task, complexity }, { minimumSamples: catalog.learning.minimumSamples ?? 5 }) : [])
     : observations;
 
-  let candidates = expandCandidates(task, catalog, complexity).map((route) => ({
+  const expanded = expandCandidates(task, catalog, complexity);
+  const reasons = new Map();
+  const drop = (from, kept, reason) => {
+    const keep = new Set(kept.map(candidateKey));
+    for (const candidate of from) if (!keep.has(candidateKey(candidate))) reasons.set(candidateKey(candidate), reason);
+    return kept;
+  };
+  const all = expanded.candidates.map((route) => ({
     ...route,
     quality: estimateRouteQuality({
       route,
@@ -333,6 +308,7 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
       uncertaintyPenalty: policy.uncertaintyPenalty ?? 0.02
     })
   }));
+  let candidates = all;
 
   // Report generic ineligibility before the critical challenger gate so an
   // empty candidate set is not misattributed to model maturity.
@@ -349,46 +325,27 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
     if (eligible.length === 0) {
       throw new Error(`No proven route is eligible for critical task ${task.id ?? '<unknown>'}`);
     }
-    candidates = eligible;
+    candidates = drop(candidates, eligible, 'critical-challenger');
   }
 
   const beforeConstraints = candidates.length;
-  candidates = applyHardConstraints(candidates, task);
+  candidates = drop(candidates, applyHardConstraints(candidates, task), 'explicit-constraint');
   if (candidates.length === 0) {
     throw new Error(`No eligible route meets the explicit constraints for task ${task.id ?? '<unknown>'}`);
   }
 
-  // Quota runs after the explicit-constraint filter so a constraint failure is
-  // never misattributed to quota, and its exclusion can only shrink a set that
-  // already satisfies the task's floors.
-  const thresholds = quotaThresholds(policy);
-  let excludedProviders = [];
-  if (quota) {
-    ({ candidates, excludedProviders } = excludeDepletedProviders(candidates, quota, thresholds));
-  }
-
-  // Runs even without a quota map: gated efforts stay sealed until a reading
-  // positively confirms headroom, so a missing signal never unlocks them.
-  const wideGate = applyWideModeGate(candidates, quota, thresholds);
-  candidates = wideGate.candidates;
-
   const priorities = effectivePriorities(task, policy);
+  const allocated = applyAllocation(candidates, catalog.allocation, task, complexity);
+  let tier = drop(candidates, allocated.tier, `allocation:${allocated.allocation?.ruleId}`);
   const stageCounts = [];
-  let softQuotaApplied = false;
-  let tier = candidates;
-  for (const [index, metric] of priorities.entries()) {
-    tier = narrowByMetric(tier, metric, policy);
+  for (const metric of priorities) {
+    tier = drop(tier, narrowByMetric(tier, metric, policy), `${metric}-stage`);
     stageCounts.push({ metric, remaining: tier.length });
-    if (index === 0 && quota) {
-      const preference = preferComfortableQuota(tier, quota, thresholds);
-      tier = preference.tier;
-      softQuotaApplied = preference.applied;
-      stageCounts.push({ metric: 'quota', remaining: tier.length });
-    }
   }
 
   tier.sort(byStableIdentity);
   const selected = tier[0];
+  drop(tier, [selected], 'tie-break');
   return {
     ...selected,
     decision: {
@@ -403,20 +360,23 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
         maxTokenIndex: task.maxTokenIndex ?? null,
         maxLatencyIndex: task.maxLatencyIndex ?? null
       },
-      quota: quota
-        ? {
-          remainingByProvider: { ...quota },
-          excludedProviders,
-          softPreferenceApplied: softQuotaApplied,
-          softThresholdPercent: thresholds.soft,
-          hardThresholdPercent: thresholds.hard
-        }
-        : null,
-      wideGate: {
-        premiumThresholdPercent: thresholds.premium,
-        softThresholdPercent: thresholds.soft,
-        excludedCandidates: wideGate.excludedCandidates
-      }
+      allocation: allocated.allocation,
+      // Every profile x effort with why it lost, so a hand-tuned allocation can
+      // be checked without reading the router.
+      candidates: [
+        ...all.map((candidate) => ({
+          profileId: candidate.profileId,
+          effort: candidate.effort,
+          status: candidate === selected ? 'selected' : 'excluded',
+          excludedBy: candidate === selected ? null : reasons.get(candidateKey(candidate)) ?? null,
+          priorQuality: candidate.priorQuality,
+          conservativeQuality: candidate.quality.conservative,
+          tokenIndex: candidate.tokenIndex,
+          latencyIndex: candidate.latencyIndex,
+          maturity: candidate.maturity
+        })),
+        ...expanded.excluded.map((entry) => ({ ...entry, status: 'excluded' }))
+      ]
     }
   };
 }

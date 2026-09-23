@@ -22,3 +22,25 @@ test('explicit four-CLI config upgrade adds defaults without replacing user choi
   assert.deepEqual(mergeFourCliConfig(merged, defaults), merged);
   assert.equal(current.providers.length, 2);
 });
+
+test('config upgrade moves retired model strings, drops removed quota gates and adds missing packaged efforts', () => {
+  const current = structuredClone(defaults);
+  const stale = (id) => current.models.find((entry) => entry.id === id);
+  stale('codex-sol-deep').model = 'gpt-5.6-sol';
+  stale('codex-sol-deep').quality.review = 0.5; // user tuning survives
+  stale('codex-sol-deep').efforts.push({ name: 'ultra', qualityDelta: 0.06, tokenMultiplier: 4.5, latencyMultiplier: 1.7, quotaGate: 'premium' });
+  stale('codex-terra-general').enabled = true;
+  stale('claude-opus-deep').efforts = stale('claude-opus-deep').efforts.filter((effort) => effort.name !== 'medium');
+  delete current.escalation.diagnosis;
+
+  const merged = mergeFourCliConfig(current, defaults);
+  const sol = merged.models.find((entry) => entry.id === 'codex-sol-deep');
+  assert.equal(sol.model, 'gpt-6-sol');
+  assert.equal(sol.maturity, 'challenger');
+  assert.equal(sol.quality.review, 0.5);
+  assert.equal(sol.efforts.some((effort) => effort.quotaGate), false);
+  assert.equal(merged.models.find((entry) => entry.id === 'codex-terra-general').enabled, false);
+  assert.ok(merged.models.find((entry) => entry.id === 'claude-opus-deep').efforts.some((effort) => effort.name === 'medium'));
+  assert.deepEqual(merged.escalation.diagnosis, defaults.escalation.diagnosis);
+  assert.deepEqual(mergeFourCliConfig(merged, defaults), merged);
+});

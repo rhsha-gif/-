@@ -21,7 +21,6 @@ import { clearLimits, readLimits, setLimit } from './limits.js';
 
 import { computeBranchStatus } from './branch-status.js';
 import { applyBranchAction } from './branch-apply.js';
-import { readAllProviderQuotas } from './quota.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TASK_PLAN_SCHEMA_PATH = path.join(PACKAGE_ROOT, 'schemas', 'task-plan.schema.json');
@@ -37,7 +36,6 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  limits    Show, set, or clear provider usage limits (limits [set <provider> --minutes N | clear [provider]])\n` +
   `  branch    Branch lifecycle: status | apply --action <start|finish|cleanup|sync>\n` +
   `  inventory Print agents, skills, plugins and hooks with source and sync state (--type, --match, --runtime)\n` +
-  `  quota     Report each provider's remaining subscription quota via its usageProbe\n` +
   `  diagnose  Inspect CLI paths, authentication and models ([--probe] runs bounded read tasks)\n` +
   `  configure Add four-CLI defaults without replacing user tuning ([--check])\n` +
   `  evaluate  Report weekly evidence ([--apply] [--restore <version>] [--home-dir <path>])\n` +
@@ -61,7 +59,6 @@ const COMMAND_FLAGS = Object.freeze({
   record: [...COMMON_FLAGS, 'input', 'observations'],
   limits: [...COMMON_FLAGS, 'minutes', 'note'],
   inventory: [...COMMON_FLAGS, 'runtime', 'type', 'match'],
-  quota: [...COMMON_FLAGS],
   diagnose: [...COMMON_FLAGS, 'probe'],
   configure: [...COMMON_FLAGS, 'check'],
   evaluate: [...COMMON_FLAGS, 'apply', 'restore', 'home-dir'],
@@ -242,6 +239,10 @@ async function main(argv = process.argv.slice(2)) {
     const { readWeeklyPolicy } = await import('./evaluation.js');
     config.weeklyPolicy = await readWeeklyPolicy({});
   }
+  if (['route', 'exec', 'dispatch', 'classify'].includes(command)) {
+    const { loadAllocation } = await import('./allocation.js');
+    config.allocation = await loadAllocation({ catalog: config });
+  }
   config.capabilities = mergeCapabilities(
     config.capabilities,
     await discoverCapabilities({ cwd, includeUser: flags['project-only'] !== true })
@@ -250,12 +251,7 @@ async function main(argv = process.argv.slice(2)) {
   if (command === 'route') {
     const task = await applyActiveLimits(validateTask(await readJson(requireFlag(flags, 'task'), cwd)), config, cwd);
     const observations = await readObservations(resolveObservationPath(config, flags, cwd));
-    const quota = await readAllProviderQuotas(config.providers, {
-      stateRoot: resolveStateRoot(config, cwd),
-      ttlMs: (config.routing?.quota?.cacheTtlMinutes ?? 5) * 60_000,
-      cwd
-    });
-    const route = selectRoute({ task, catalog: config, observations, quota });
+    const route = selectRoute({ task, catalog: config, observations });
     process.stdout.write(`${JSON.stringify({ ...cleanRoute(route), readiness: 'unknown', executionStatus: 'not-probed' }, null, 2)}\n`);
     return 0;
   }
@@ -304,14 +300,6 @@ async function main(argv = process.argv.slice(2)) {
       allowedProviders,
       routingPriorities: classification.routingPriorities
     });
-    // Cache-only (refresh: false): classify backs the subagent gate, which is
-    // called far too often to ever pay a 10s-per-provider probe on expiry.
-    const quota = await readAllProviderQuotas(config.providers, {
-      stateRoot: resolveStateRoot(config, cwd),
-      ttlMs: (config.routing?.quota?.cacheTtlMinutes ?? 5) * 60_000,
-      refresh: false,
-      cwd
-    });
     // classify used to pass observations: [], which meant the subagent gate —
     // the one routing decision made on nearly every prompt — could never see
     // that a tier had been failing verification. Reading them is what makes
@@ -324,7 +312,7 @@ async function main(argv = process.argv.slice(2)) {
     } catch (error) {
       process.stderr.write(`aorch classify: ignoring unreadable observations (${error.message})\n`);
     }
-    const route = selectRoute({ task, catalog: config, observations, quota });
+    const route = selectRoute({ task, catalog: config, observations });
     process.stdout.write(`${JSON.stringify({
       classification,
       route: { provider: route.provider, model: route.model, effort: route.effort }
@@ -430,22 +418,6 @@ async function main(argv = process.argv.slice(2)) {
     const inventory = getInventory(config, { runtime });
     inventory.capabilities = inventory.capabilities.filter((entry) => (!flags.type || entry.type === flags.type) && (!flags.match || entry.id.includes(requireFlag(flags, 'match'))));
     process.stdout.write(`${JSON.stringify(inventory, null, 2)}\n`);
-    return 0;
-  }
-
-  if (command === 'quota') {
-    // ttlMs 0: a human asking for quota wants fresh numbers, and the forced
-    // probe doubles as a cache refresh for the routing paths.
-    const quota = await readAllProviderQuotas(config.providers, {
-      stateRoot: resolveStateRoot(config, cwd),
-      ttlMs: 0,
-      cwd
-    });
-    const results = (config.providers ?? []).map((provider) => ({
-      provider: provider.id,
-      remainingPercent: quota[provider.id] ?? null
-    }));
-    process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
     return 0;
   }
 

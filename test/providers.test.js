@@ -146,7 +146,7 @@ test('Grok keeps prompt paths intact, denies nested agents, and never blanket-ap
   const promptPath = 'C:\\작업 공간\\프롬프트 파일.md';
   const cwd = 'C:\\작업 공간';
   const readOnly = buildGrokCommand({
-    route: { model: 'grok-4.6', effort: 'low' }, promptPath, cwd, agent: 'aorch-reviewer'
+    route: { model: 'grok-4.7', effort: 'low' }, promptPath, cwd, agent: 'aorch-reviewer'
   });
   assert.equal(readOnly.command, 'grok');
   assert.equal(readOnly.args[readOnly.args.indexOf('--prompt-file') + 1], promptPath);
@@ -168,7 +168,7 @@ test('Grok keeps prompt paths intact, denies nested agents, and never blanket-ap
   assert.ok(readOnly.args.includes('Grep(C:/작업 공간/**)'));
 
   const writer = buildGrokCommand({
-    route: { model: 'grok-4.6', effort: 'high' }, promptPath, cwd, write: true
+    route: { model: 'grok-4.7', effort: 'high' }, promptPath, cwd, write: true
   });
   assert.equal(writer.args[writer.args.indexOf('--sandbox') + 1], 'workspace');
   assert.match(writer.args[writer.args.indexOf('--tools') + 1], /search_replace/);
@@ -177,7 +177,7 @@ test('Grok keeps prompt paths intact, denies nested agents, and never blanket-ap
 
   const jsonSchema = { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] };
   const finalize = buildGrokFinalizeCommand({
-    route: { model: 'grok-4.6', effort: 'low' },
+    route: { model: 'grok-4.7', effort: 'low' },
     sessionId: '00000000-0000-0000-0000-000000000000', promptPath, cwd, jsonSchema,
     agent: 'aorch-reviewer'
   });
@@ -233,30 +233,6 @@ test('provider executables can be replaced without changing adapter code', () =>
   });
   assert.equal(claude.command, '/opt/claude');
   assert.equal(codex.command, '/opt/codex');
-});
-
-test('ultracode route passes through as a native effort with per-agent guidance and a raised turn budget', () => {
-  const spec = buildClaudeCommand({
-    prompt: 'audit the repo',
-    route: { ...route, model: 'opus', effort: 'ultracode' },
-    write: true
-  });
-  const prompt = spec.args[spec.args.indexOf('-p') + 1];
-  assert.match(prompt, /^Assign each workflow agent/);
-  assert.match(prompt, /reasoning effort by purpose/);
-  assert.match(prompt, /audit the repo/);
-  assert.equal(spec.args[spec.args.indexOf('--effort') + 1], 'ultracode');
-  assert.equal(spec.args[spec.args.indexOf('--max-turns') + 1], '200');
-});
-
-test('an explicit turn budget above the ultracode floor is respected', () => {
-  const spec = buildClaudeCommand({
-    prompt: 'x',
-    route: { ...route, model: 'opus', effort: 'ultracode' },
-    write: false,
-    maxTurns: 300
-  });
-  assert.equal(spec.args[spec.args.indexOf('--max-turns') + 1], '300');
 });
 
 test('codex ultra and max efforts pass through as model_reasoning_effort', () => {
@@ -388,8 +364,20 @@ test('codex workers get web search through the flag exec actually accepts', () =
 
 test('Grok finalization preserves the originating sandbox while exposing only a read tool', async () => {
   const {buildGrokFinalizeCommand} = await import('../src/providers/grok-cli.js');
-  const spec=buildGrokFinalizeCommand({route:{model:'grok-4.6',effort:'medium'},write:true,sessionId:'11111111-1111-1111-1111-111111111111',promptPath:'C:/work/final.md',cwd:'C:/work',jsonSchema:{type:'object'}});
+  const spec=buildGrokFinalizeCommand({route:{model:'grok-4.7',effort:'medium'},write:true,sessionId:'11111111-1111-1111-1111-111111111111',promptPath:'C:/work/final.md',cwd:'C:/work',jsonSchema:{type:'object'}});
   assert.equal(spec.args[spec.args.indexOf('--sandbox')+1], 'workspace');
   assert.equal(spec.args[spec.args.indexOf('--tools')+1], 'read_file');
   assert.ok(!spec.args.includes('--always-approve'));
+});
+
+test('Antigravity Gemini base slugs take the effort as the model suffix and send no --effort', () => {
+  const base = { prompt: 'x', schemaPath: 's.json', cwd: 'C:\\w' };
+  const flash = buildAntigravityCommand({ ...base, route: { model: 'gemini-3.8-flash', effort: 'high' } });
+  assert.equal(flash.args[flash.args.indexOf('--model') + 1], 'gemini-3.8-flash-high');
+  assert.equal(flash.args.includes('--effort'), false);
+  // Pro has no medium tier: composition must fail closed, not fall back.
+  assert.throws(() => buildAntigravityCommand({ ...base, route: { model: 'gemini-3.1-pro', effort: 'medium' } }), /gemini-3\.1-pro-medium is not in the verified/);
+  // Non-Gemini models keep the explicit option.
+  const oss = buildAntigravityCommand({ ...base, route: { model: 'gpt-oss-120b-medium', effort: 'high' } });
+  assert.equal(oss.args[oss.args.indexOf('--effort') + 1], 'high');
 });
