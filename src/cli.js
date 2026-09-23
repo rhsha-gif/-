@@ -3,7 +3,7 @@ import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadConfig } from './config.js';
+import { loadConfig, resolveConfigPath } from './config.js';
 import { upgradeConfigFile } from './config-upgrade.js';
 import { readObservations, appendObservation } from './observations.js';
 import { selectRoute } from './router.js';
@@ -212,13 +212,16 @@ async function main(argv = process.argv.slice(2)) {
     return result.failed > 0 ? 1 : 0;
   }
 
-  const config = await loadConfig({ cwd, configPath: flags.config });
+  // configure repairs configs the current validator rejects (e.g. a removed
+  // quotaGate), so it reads the raw file and validates only the merged result.
   if (command === 'configure') {
-    if (config._configPath === path.join(PACKAGE_ROOT, 'config', 'aorch.config.json')) throw new Error('configure requires an existing project config; run install first');
-    const result = await upgradeConfigFile({ configPath: config._configPath, check: flags.check === true });
+    const configPath = await resolveConfigPath({ cwd, configPath: flags.config });
+    if (configPath === path.join(PACKAGE_ROOT, 'config', 'aorch.config.json')) throw new Error('configure requires an existing project config; run install first');
+    const result = await upgradeConfigFile({ configPath, check: flags.check === true });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return 0;
   }
+  const config = await loadConfig({ cwd, configPath: flags.config });
   if (command === 'diagnose') {
     const { diagnoseProviders } = await import('./provider-diagnostics.js');
     const { probeProviders } = await import('./provider-probe.js');

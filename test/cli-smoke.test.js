@@ -231,3 +231,24 @@ test('decompose without a target fails closed rather than doing nothing quietly'
   assert.equal(result.status, 1);
   assert.match(result.stderr, /--print-schema or --plan/);
 });
+
+test('configure repairs an installed config that still carries a removed quotaGate', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-configure-'));
+  const stale = JSON.parse(await readFile(defaultConfig, 'utf8'));
+  const opus = stale.models.find((entry) => entry.id === 'claude-opus-deep');
+  opus.efforts.push({ name: 'ultracode', qualityDelta: 0.05, tokenMultiplier: 6, latencyMultiplier: 2.5, quotaGate: 'premium' });
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(path.join(dir, '.aorch'), { recursive: true });
+  const configPath = path.join(dir, '.aorch', 'config.json');
+  await writeFile(configPath, JSON.stringify(stale));
+
+  const routed = spawnSync(process.execPath, [cli, 'inventory', '--cwd', dir], { encoding: 'utf8' });
+  assert.notEqual(routed.status, 0);
+  assert.match(routed.stderr, /removed quotaGate/);
+
+  const repaired = spawnSync(process.execPath, [cli, 'configure', '--cwd', dir], { encoding: 'utf8' });
+  assert.equal(repaired.status, 0, repaired.stderr);
+  assert.equal(JSON.parse(repaired.stdout).status, 'updated');
+  const after = JSON.parse(await readFile(configPath, 'utf8'));
+  assert.equal(after.models.find((entry) => entry.id === 'claude-opus-deep').efforts.some((effort) => effort.quotaGate), false);
+});
