@@ -62,7 +62,7 @@ def test_restated_solution_without_a_matching_problem_becomes_a_problem_note(h):
     assert "> **Sol)** Plain answer." in files["001-t.md"]
     two = files["002-t.md"]
     assert "from_solution: true" in two and "has_solution: true" in two and "pages: [2]" in two
-    assert "### 2. Find the eigenvalues of $B$." in two and "(10점)" not in two and "points: 10" in two
+    assert "### 2.\n\nFind the eigenvalues of $B$." in two and "(10점)" not in two and "points: 10" in two
     assert "**(a)** for $B = I$" in two and "> **Sol)** They are $1$ and $2$.\n>\n> **(a)** all one" in two
     index = (h.out_dir(slug) / "index.md").read_text(encoding="utf-8")
     section = index.split("## 해설에서 만든 문제")[1].split("## 미매칭 해설")[0]

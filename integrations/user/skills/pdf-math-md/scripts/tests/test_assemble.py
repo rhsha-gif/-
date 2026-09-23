@@ -104,4 +104,4 @@ def test_set_ranges_after_confirm_resets_range_skips(h):
 def test_version_prints_script_path(h):
     code, out = h.run_cli(["--version"])
     assert code == 0
-    assert out.strip() == f"pdf2md 0.2.0 {h.pdf2md.SCRIPT_PATH}"
+    assert out.strip() == f"pdf2md {h.pdf2md.VERSION} {h.pdf2md.SCRIPT_PATH}"

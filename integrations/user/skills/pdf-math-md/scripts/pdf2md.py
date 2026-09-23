@@ -32,6 +32,7 @@ import re
 import shutil
 import sys
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -39,7 +40,7 @@ from typing import Any, Iterable
 # Constants
 # ---------------------------------------------------------------------------
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 SCRIPT_PATH = Path(__file__).resolve()
 SCRIPT_DIR = SCRIPT_PATH.parent
 SCHEMA_PATH = SCRIPT_DIR / "schema" / "page.schema.json"
@@ -71,6 +72,15 @@ ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50}
 SIMILARITY_THRESHOLD = 0.5
 REVIEW_CONFIDENCE = 0.9
 HANDWRITING_RE = re.compile(r"손글씨|필기|handwrit", re.I)
+
+# Post-processing and sanitization constants
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ufffd]")
+PUA_RE = re.compile(r"[\ue000-\uf8ff]")
+MATH_MARKERS_RE = re.compile(r"(\$|\\sum|\\frac|\\int|\\lim|\^|_\{)")
+OPERATOR_LINEBREAK_RE = re.compile(r"\\(sum|int|lim|prod)\s*\n")
+DANGLING_OPERATOR_RE = re.compile(r"[+\-=×·\\]\s*(\$|\$\$)?\s*$")
+INSTRUCTION_KO_RE = re.compile(r"(구하여라|구하시오|증명하라|보여라|보이라|값은|무엇인가|대하여|다음|성립함을|동치임을|만족하는|구하라)")
+INSTRUCTION_EN_RE = re.compile(r"\b(find|compute|prove|show|determine|evaluate|calculate|suppose|let|which|such that)\b", re.I)
 
 
 class CLIError(Exception):
@@ -1333,6 +1343,263 @@ def _render_figures(figs: list[dict], img_prefix: str, quoted: bool) -> list[str
     return lines
 
 
+# ---------------------------------------------------------------------------
+# Post-processing and Quality Audit
+# ---------------------------------------------------------------------------
+
+
+def clean_unicode_text(text: str, *, legacy_ocr_fixes: bool = False) -> str:
+    """Normalize unicode to NFC, strip control and PUA characters, clean trailing spaces."""
+    if not text:
+        return text
+    # 1. NFC normalization
+    text = unicodedata.normalize("NFC", text)
+    # 2. Control characters removal (keep \t and \n, discard \x00-\x08, \x0b, \x0c, \x0e-\x1f, etc.)
+    text = CONTROL_CHARS_RE.sub("", text)
+    # 3. PUA characters removal
+    if legacy_ocr_fixes:
+        text = PUA_RE.sub("", text)
+    # 4. Clean trailing whitespace per line
+    lines = [line.rstrip() for line in text.splitlines()]
+    cleaned = "\n".join(lines)
+    # 5. Compress 3+ consecutive newlines to 2
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned
+
+
+def normalize_math_tokens(text: str) -> str:
+    """Deterministic math token normalizations based on audited patterns."""
+    if not text:
+        return text
+
+    # 1. Alternating sign exponents
+    text = re.sub(r"\(-1\)n\+1\b", r"(-1)^{n+1}", text)
+    text = re.sub(r"\(-1\)n\b", r"(-1)^n", text)
+    text = re.sub(r"(\(-1\)\^\{?[^\}]*\}?)\s*(\d+)n\b", r"\1 \2^n", text)
+
+    # 2. Subscripts
+    text = re.sub(r"\\sqrt\{([abcrs])n\+1\}", r"\\sqrt{\1_{n+1}}", text)
+    text = re.sub(r"\\sqrt\{([abcrs])n\}", r"\\sqrt{\1_n}", text)
+    text = re.sub(r"\b([abcrs])\{n\}", r"\1_n", text)
+    text = re.sub(r"\b([abcrs])n\+1\b", r"\1_{n+1}", text)
+    text = re.sub(r"\b([abcrs])n\b", r"\1_n", text)
+
+    # 3. Disambiguated power on parens
+    text = re.sub(r"\((\d+n\s*[+\-]\s*\d+)\)\s*(\d+)n\b", r"(\1)\2^n", text)
+    text = re.sub(r"\(([a-zA-Z0-9+\-\s]+)\)(\d+)n\b", r"(\1)\2^n", text)
+    text = re.sub(r"\(([^\)]+)\)([sp])\b", r"(\1)^{\2}", text)
+    text = re.sub(r"\((?!-1\))([^\)]+)\)n\b", r"(\1)^n", text)
+    text = re.sub(r"\(([^\)]+)\)(\d+)(?![0-9^_\w])", r"(\1)^{\2}", text)
+
+    # 4. Variable powers
+    text = re.sub(r"\bxn\+1\b", r"x^{n+1}", text)
+    text = re.sub(r"\bxn\b", r"x^n", text)
+    text = re.sub(r"\b([xyzt])(\d+)\b", r"\1^{\2}", text)
+
+    # 5. Index/Letter powers
+    text = re.sub(r"\bn2n\b", r"n\\,2^n", text)
+    text = re.sub(r"\bnen\b", r"n e^n", text)
+    text = re.sub(r"\ben\b", r"e^n", text)
+    text = re.sub(r"\be-n\b", r"e^{-n}", text)
+    text = re.sub(r"\b3n\+1\b", r"3^{n+1}", text)
+    text = re.sub(r"\b2012n\b", r"2012^n", text)
+    text = re.sub(r"\bn(\d+)\b", r"n^{\1}", text)
+    text = re.sub(r"\bn([ps])\b", r"n^{\1}", text)
+    text = re.sub(r"\bnn\b", r"n^n", text)
+
+    # 6. Trig functions with 1/n
+    text = re.sub(r"\\(sin|cos|tan|cot|sec|csc|arcsin|arccos|arctan)\s+1\s*/?\s*n\b", r"\\\1\\frac{1}{n}", text)
+
+    # 7. Curve notation
+    text = re.sub(r"\\sum\(t\)", r"X(t)", text)
+
+    return text
+
+
+def audit_math_syntax(text: str) -> list[str]:
+    """Detect syntax defects like unbalanced $, broken tokens, operator linebreaks."""
+    issues: list[str] = []
+    if not text:
+        return issues
+    if PUA_RE.search(text):
+        issues.append("PUA 문자 보존: 원문 확인 필요")
+    if normalize_math_tokens(text) != text:
+        issues.append("OCR 수식 표기 의심: 자동 변경 없이 원문 확인 필요")
+    stripped = re.sub(r"\\\$", "", text)
+    stripped_for_single = re.sub(r"\$\$", "", stripped)
+    if stripped_for_single.count("$") % 2 != 0:
+        issues.append("미닫힘 수식 구분자($)")
+    if stripped.count("$$") % 2 != 0:
+        issues.append("미닫힘 디스플레이 수식 구분자($$)")
+    if re.search(r"(_|\^)\{\s*\$\$", text) or re.search(r"(_|\^)\$\$", text):
+        issues.append("손상된 수식 토큰(_{$$} 등)")
+    if OPERATOR_LINEBREAK_RE.search(text):
+        issues.append("수식 연산자 줄바꿈 분절(\\sum\\n 등)")
+    if DANGLING_OPERATOR_RE.search(text.strip()):
+        issues.append("수식 연산자로 비정상 종결")
+    return issues
+
+
+def assess_record_quality(rec: dict, notes_by_page: dict[int, str] | None = None) -> tuple[str, bool, list[str]]:
+    """Determine text_quality ('good' | 'poor' | 'broken'), instruction_lost, and notes."""
+    notes: list[str] = []
+    stmt = rec.get("statement_md", "").strip()
+    sol = rec.get("solution_md", "").strip()
+    parts = rec.get("parts", [])
+    full_text = stmt + " " + sol + " " + " ".join(p.get("statement_md", "") + " " + p.get("solution_md", "") for p in parts)
+
+    # Check instruction lost
+    instruction_lost = False
+    if rec.get("kind") == "problem":
+        if not stmt and not any(p.get("statement_md", "").strip() for p in parts):
+            instruction_lost = True
+            notes.append("문제 본문 완전 결손")
+        elif len(stmt) < 20 and not INSTRUCTION_KO_RE.search(stmt) and not INSTRUCTION_EN_RE.search(stmt):
+            if not any(INSTRUCTION_KO_RE.search(p.get("statement_md", "")) or INSTRUCTION_EN_RE.search(p.get("statement_md", "")) for p in parts):
+                instruction_lost = True
+                notes.append("질의 지시문 결손 의심")
+
+    # Math syntax issues
+    syntax_issues = audit_math_syntax(full_text)
+    if syntax_issues:
+        notes.extend(syntax_issues)
+
+    # Confidence check
+    conf = float(rec.get("confidence", 1.0))
+    if conf < 0.8:
+        notes.append(f"낮은 신뢰도({conf:.2f})")
+
+    # Handwriting check
+    labels = list(rec.get("pages", [])) + (list(rec["solution"]["pages"]) if rec.get("solution") else [])
+    main_pages = sorted({p for p in labels if isinstance(p, int)})
+    if notes_by_page:
+        hand = [p for p in main_pages if HANDWRITING_RE.search(notes_by_page.get(p, ""))]
+        if hand:
+            notes.append("손글씨 " + ", ".join(f"p{p:03d}" for p in hand))
+
+    # Classify text_quality
+    if instruction_lost or any("미닫힘" in n or "손상된" in n for n in notes):
+        text_quality = "broken"
+    elif conf < 0.8 or any("손글씨" in n for n in notes):
+        text_quality = "poor"
+    else:
+        text_quality = "good"
+
+    return text_quality, instruction_lost, notes
+
+
+def transform_text(text: str, *, legacy_ocr_fixes: bool = False,
+                   changes: list | None = None, field: str = "") -> str:
+    cleaned = clean_unicode_text(text, legacy_ocr_fixes=legacy_ocr_fixes)
+    result = normalize_math_tokens(cleaned) if legacy_ocr_fixes else cleaned
+    if legacy_ocr_fixes and result != text:
+        if changes is None:
+            raise ValueError("legacy OCR fixes require a change log")
+        changes.append({"field": field, "before": text, "after": result})
+    return result
+
+
+def write_legacy_changes(slug: str, changes: list) -> None:
+    if changes:
+        target = run_dir(slug) / "legacy-ocr-fixes.jsonl"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("a", encoding="utf-8") as handle:
+            for change in changes:
+                handle.write(json.dumps(change, ensure_ascii=False) + "\n")
+
+
+def postprocess_record(rec: dict, notes_by_page: dict[int, str] | None = None, *,
+                       legacy_ocr_fixes: bool = False, changes: list | None = None) -> dict:
+    """Normalize presentation while preserving ambiguous math by default."""
+    def visit(obj: dict, prefix: str) -> None:
+        for key in ("statement_md", "solution_md"):
+            if key in obj:
+                obj[key] = transform_text(obj[key], legacy_ocr_fixes=legacy_ocr_fixes,
+                                          changes=changes, field=f"{prefix}.{key}")
+        for i, part in enumerate(obj.get("parts", [])):
+            visit(part, f"{prefix}.parts[{i}]")
+        if obj.get("solution"):
+            visit(obj["solution"], f"{prefix}.solution")
+    visit(rec, str(rec.get("number", "?")))
+    tq, inst_lost, notes = assess_record_quality(rec, notes_by_page)
+    rec["text_quality"] = tq
+    rec["instruction_lost"] = inst_lost
+    rec["quality_notes"] = notes
+    return rec
+
+
+def postprocess_file_content(content: str, *, legacy_ocr_fixes: bool = False) -> tuple[str, dict]:
+    """Post-process markdown content (split frontmatter and body, unwrap headers, clean text)."""
+    if content.startswith("---\n"):
+        parts = content.split("\n---\n", 1)
+        if len(parts) == 2:
+            fm_text, body = parts[0][4:], parts[1]
+        else:
+            fm_text, body = "", content
+    else:
+        fm_text, body = "", content
+
+    # Clean body
+    changes: list = []
+    body = transform_text(body, legacy_ocr_fixes=legacy_ocr_fixes, changes=changes, field="body")
+
+    # Unwrap header-trapped lines: ### N. Some statement -> ### N.\n\nSome statement
+    body = re.sub(r"^###\s+([0-9]+)\.[ \t]+(?![\(\>])(.+)$", r"### \1.\n\n\2", body, flags=re.M)
+
+    # Clean fm_text
+    fm_lines = [clean_unicode_text(l) for l in fm_text.splitlines()]
+
+    # Check syntax issues
+    syntax_issues = audit_math_syntax(body)
+
+    # Assess instruction lost
+    instruction_lost = False
+    clean_body_for_inst = re.sub(r"^###\s+.*$", "", body, flags=re.M).strip()
+    if "> [!solution]" in clean_body_for_inst:
+        clean_body_for_inst = clean_body_for_inst.split("> [!solution]")[0].strip()
+    if clean_body_for_inst and len(clean_body_for_inst) < 30:
+        if not INSTRUCTION_KO_RE.search(clean_body_for_inst) and not INSTRUCTION_EN_RE.search(clean_body_for_inst):
+            instruction_lost = True
+
+    if instruction_lost or any("미닫힘" in s or "손상된" in s for s in syntax_issues):
+        text_quality = "broken"
+    elif any("손글씨" in l for l in fm_lines) or any("confidence: 0." in l and float(l.split("confidence:")[1].strip()) < 0.8 for l in fm_lines):
+        text_quality = "poor"
+    else:
+        text_quality = "good"
+
+    # Update frontmatter
+    new_fm_lines = []
+    has_tq = False
+    has_inst_lost = False
+    for line in fm_lines:
+        if line.startswith("text_quality:"):
+            new_fm_lines.append(f"text_quality: {yaml_scalar(text_quality)}")
+            has_tq = True
+        elif line.startswith("instruction_lost:"):
+            new_fm_lines.append(f"instruction_lost: {yaml_scalar(instruction_lost)}")
+            has_inst_lost = True
+        else:
+            new_fm_lines.append(line)
+    if fm_lines and not has_tq:
+        new_fm_lines.append(f"text_quality: {yaml_scalar(text_quality)}")
+    if fm_lines and not has_inst_lost:
+        new_fm_lines.append(f"instruction_lost: {yaml_scalar(instruction_lost)}")
+
+    if new_fm_lines:
+        new_content = "---\n" + "\n".join(new_fm_lines) + "\n---\n" + body.lstrip("\n")
+    else:
+        new_content = body
+
+    info = {
+        "text_quality": text_quality,
+        "instruction_lost": instruction_lost,
+        "syntax_issues": syntax_issues,
+        "legacy_changes": changes,
+    }
+    return new_content, info
+
+
 def render_record_body(rec: dict, img_prefix: str, title_number: Any = None) -> str:
     """Markdown body of a stitched problem (or solution) record.
 
@@ -1355,11 +1622,11 @@ def render_record_body(rec: dict, img_prefix: str, title_number: Any = None) -> 
         lines.extend(_render_figures(rec["figures"], img_prefix, quoted=False))
         return "\n".join(lines).rstrip() + "\n"
     heading_number = number if title_number is None else title_number
-    lines.append(f"### {heading_number}. {strip_points_label(md_first_line(rec['statement_md']))}".rstrip())
+    lines.append(f"### {heading_number}.")
     lines.append("")
-    rest = md_rest(rec["statement_md"])
-    if rest:
-        lines.append(rest)
+    stmt = strip_points_label(rec["statement_md"]).strip()
+    if stmt:
+        lines.append(stmt)
         lines.append("")
     for part in rec["parts"]:
         if part["statement_md"].strip():
@@ -1411,6 +1678,8 @@ def solution_pages(rec: dict) -> list:
 def render_problem_file(rec: dict, slug: str, source: str, bank_number: int) -> str:
     pages = ", ".join(yaml_scalar(p) for p in rec["pages"])
     sol_pages = ", ".join(yaml_scalar(p) for p in solution_pages(rec))
+    text_quality = rec.get("text_quality", "good")
+    instruction_lost = bool(rec.get("instruction_lost", False))
     fm = [
         "---",
         f"source: {yaml_scalar(source)}",
@@ -1423,6 +1692,8 @@ def render_problem_file(rec: dict, slug: str, source: str, bank_number: int) -> 
         f"solution_pages: [{sol_pages}]",
         f"from_solution: {yaml_scalar(bool(rec.get('from_solution')))}",
         f"confidence: {yaml_scalar(round(float(rec['confidence']), 3))}",
+        f"text_quality: {yaml_scalar(text_quality)}",
+        f"instruction_lost: {yaml_scalar(instruction_lost)}",
         "---",
         "",
     ]
@@ -1467,7 +1738,7 @@ def _load_merged_streams(state: dict) -> list[tuple[str, list[tuple[Any, int | N
     return streams
 
 
-def assemble(state: dict) -> dict:
+def assemble(state: dict, *, legacy_ocr_fixes: bool = False) -> dict:
     """Build the output tree deterministically. Returns the summary dict."""
     slug = state["slug"]
     if not state["ranges"]["confirmed"]:
@@ -1493,6 +1764,15 @@ def assemble(state: dict) -> dict:
     problems.extend(restated_as_problem(s) for s in restated)
     problems.sort(key=_rec_order)
     assign_importance(problems)
+
+    changes: list = []
+    # Post-process all problem and solution records
+    for rec in problems:
+        postprocess_record(rec, notes_by_page, legacy_ocr_fixes=legacy_ocr_fixes, changes=changes)
+    for rec in solutions:
+        postprocess_record(rec, notes_by_page, legacy_ocr_fixes=legacy_ocr_fixes, changes=changes)
+
+    write_legacy_changes(slug, changes)
 
     # figures: crop for problems and their attached solutions
     generated: set[Path] = set()
@@ -1583,6 +1863,21 @@ def assemble(state: dict) -> dict:
             f"{rec['number'] or ''} | {points} | {importance} | {sol_cell} | {float(rec['confidence']):.2f} |"
         )
     idx.append("")
+    idx.append("## 텍스트 품질 요약")
+    tq_counts = {"good": 0, "poor": 0, "broken": 0}
+    for r in rows:
+        tq = r.get("text_quality", "good")
+        tq_counts[tq] = tq_counts.get(tq, 0) + 1
+    idx.append(f"- 양호(good): {tq_counts.get('good', 0)}개, 미흡(poor): {tq_counts.get('poor', 0)}개, 결손(broken): {tq_counts.get('broken', 0)}개")
+    quality_issues = [r for r in rows if r.get("text_quality") != "good" or r.get("quality_notes")]
+    if quality_issues:
+        for r in quality_issues:
+            notes_str = "; ".join(r.get("quality_notes", [])) or r.get("text_quality", "")
+            idx.append(f"- {r['bank_number']} [{r['file']}](problems/{r['file']}) ({r.get('text_quality')}): {notes_str}")
+    else:
+        idx.append("- 특이사항 없음 (전 문항 양호)")
+
+    idx.append("")
     idx.append("## 검토 권장")
     review_rows = [r for r in rows if r["review"]]
     idx.extend(f"- {r['bank_number']} [{r['file']}](problems/{r['file']}): {'; '.join(r['review'])}" for r in review_rows)
@@ -1633,11 +1928,14 @@ def assemble(state: dict) -> dict:
         "problems": [r["file"] for r in rows],
         "from_solution": [r["file"] for r in rows if r.get("from_solution")],
         "review": {r["file"]: r["review"] for r in rows if r["review"]},
+        "text_quality": tq_counts,
+        "quality_issues": {r["file"]: r["quality_notes"] for r in rows if r.get("quality_notes")},
         "unmatched_solutions": [f"{page_label(s['pages'][0])}:{s['number'] or '?'}" for s in unmatched],
         "orphans": [f"{page_label(o['page'])}[{o['idx']}]" for o in orphans],
     }
     atomic_write_text(odir / ".pdf2md.json", dump_json(summary))
     return summary
+
 
 
 # ---------------------------------------------------------------------------
@@ -1881,11 +2179,103 @@ def cmd_assemble(args: argparse.Namespace) -> int:
     failed = [n for n, (ok, _e, _w) in results.items() if not ok]
     if failed:
         print(f"check --all: {len(failed)} failed pages ({', '.join(map(str, failed))}); assembling ok pages only")
-    summary = assemble(state)
+    summary = assemble(state, legacy_ocr_fixes=getattr(args, "legacy_ocr_fixes", False))
     print(f"out dir: {out_dir(state['slug'])}")
     print(f"problems: {len(summary['problems'])}  unmatched solutions: {len(summary['unmatched_solutions'])}  orphans: {len(summary['orphans'])}")
     print("counts: " + "  ".join(f"{k} {v}" for k, v in summary["counts"].items()))
+    tq = summary.get("text_quality", {})
+    print(f"text quality: good={tq.get('good', 0)}  poor={tq.get('poor', 0)}  broken={tq.get('broken', 0)}")
     return 0
+
+
+def cmd_postprocess(args: argparse.Namespace) -> int:
+    slug = args.slug
+    odir = out_dir(slug)
+    if not odir.is_dir():
+        raise CLIError(2, f"output directory not found: {odir}; run assemble first")
+
+    state = load_state(slug)
+    if state and state.get("ranges", {}).get("confirmed"):
+        assemble(state, legacy_ocr_fixes=getattr(args, "legacy_ocr_fixes", False))
+        print(f"postprocess: re-assembled '{slug}' with latest quality metrics")
+        return 0
+
+    pdir = odir / "problems"
+    modified = 0
+    tq_counts = {"good": 0, "poor": 0, "broken": 0}
+
+    if pdir.is_dir():
+        for f in sorted(pdir.glob("*.md")):
+            orig = f.read_text(encoding="utf-8")
+            new_c, info = postprocess_file_content(orig, legacy_ocr_fixes=getattr(args, "legacy_ocr_fixes", False))
+            tq = info["text_quality"]
+            tq_counts[tq] = tq_counts.get(tq, 0) + 1
+            if new_c != orig:
+                write_legacy_changes(slug, [{"file": str(f), **c} for c in info["legacy_changes"]])
+                atomic_write_text(f, new_c)
+                modified += 1
+
+    slug_md = odir / f"{slug}.md"
+    if slug_md.is_file():
+        orig = slug_md.read_text(encoding="utf-8")
+        new_c, _info = postprocess_file_content(orig, legacy_ocr_fixes=getattr(args, "legacy_ocr_fixes", False))
+        if new_c != orig:
+            write_legacy_changes(slug, [{"file": str(slug_md), **c} for c in _info["legacy_changes"]])
+            atomic_write_text(slug_md, new_c)
+            modified += 1
+
+    print(f"postprocess: updated {modified} files on disk for '{slug}'")
+
+    print(f"text quality: good={tq_counts.get('good', 0)}  poor={tq_counts.get('poor', 0)}  broken={tq_counts.get('broken', 0)}")
+    return 0
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    slug = args.slug
+    odir = out_dir(slug)
+    if not odir.is_dir():
+        raise CLIError(2, f"output directory not found: {odir}; run assemble first")
+
+    pdir = odir / "problems"
+    if not pdir.is_dir():
+        print("no problems directory found")
+        return 0
+
+    tq_counts = {"good": 0, "poor": 0, "broken": 0}
+    pua_count = 0
+    ctrl_count = 0
+    syntax_errors = []
+    header_trapped = []
+
+    files = sorted(pdir.glob("*.md"))
+    for f in files:
+        c = f.read_text(encoding="utf-8")
+        pua_matches = PUA_RE.findall(c)
+        if pua_matches:
+            pua_count += len(pua_matches)
+        ctrl_matches = CONTROL_CHARS_RE.findall(c)
+        if ctrl_matches:
+            ctrl_count += len(ctrl_matches)
+        if re.search(r"^###\s+[0-9]+\.[ \t]+(?![\(\>])\S+", c, flags=re.M):
+            header_trapped.append(f.name)
+        errs = audit_math_syntax(c)
+        if errs:
+            syntax_errors.append((f.name, errs))
+        tq_match = re.search(r"^text_quality:\s*\"?([a-z]+)\"?", c, flags=re.M)
+        tq = tq_match.group(1) if tq_match else "unknown"
+        tq_counts[tq] = tq_counts.get(tq, 0) + 1
+
+    print(f"=== Quality Audit for '{slug}' ({len(files)} problems) ===")
+    print(f"  Text Quality: good={tq_counts.get('good', 0)}, poor={tq_counts.get('poor', 0)}, broken={tq_counts.get('broken', 0)}")
+    print(f"  PUA Characters: {pua_count}")
+    print(f"  Ghost Control Characters: {ctrl_count}")
+    print(f"  Header-trapped Problems: {len(header_trapped)}")
+    if header_trapped:
+        print(f"    Sample: {', '.join(header_trapped[:5])}")
+    print(f"  LaTeX Syntax Issues: {len(syntax_errors)}")
+    for fn, errs in syntax_errors[:5]:
+        print(f"    - {fn}: {'; '.join(errs)}")
+    return 1 if (tq_counts.get("broken", 0) > 0 or pua_count > 0 or ctrl_count > 0 or syntax_errors) else 0
 
 
 # ---------------------------------------------------------------------------
@@ -1918,7 +2308,17 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("assemble", help="check --all then build the Markdown output tree")
     p.add_argument("slug")
     p.add_argument("--out-root", help="parent folder for the output dir (persisted in state)")
+    p.add_argument("--legacy-ocr-fixes", action="store_true", help="apply historical ambiguous OCR substitutions with a before/after log")
     p.set_defaults(func=cmd_assemble)
+
+    p = sub.add_parser("postprocess", help="apply text/math normalizations and quality assessment to assembled files")
+    p.add_argument("slug")
+    p.add_argument("--legacy-ocr-fixes", action="store_true", help="apply historical ambiguous OCR substitutions with a before/after log")
+    p.set_defaults(func=cmd_postprocess)
+
+    p = sub.add_parser("audit", help="inspect assembled markdown files for quality defects and print summary")
+    p.add_argument("slug")
+    p.set_defaults(func=cmd_audit)
 
     p = sub.add_parser("set-out-root", help="store the output root for a run (e.g. a subject folder)")
     p.add_argument("slug")
@@ -1959,6 +2359,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from", dest="from_slug", required=True)
     p.set_defaults(func=cmd_merge_solutions)
     return parser
+
 
 
 def _reconfigure_streams() -> None:

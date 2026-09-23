@@ -51,8 +51,10 @@ def test_problem_frontmatter_fields(h):
         "solution_pages: [1]",
         "from_solution: false",
         "confidence: 0.6",
+        'text_quality: "poor"',
+        "instruction_lost: false",
     ]
-    assert "### 2. Compute $\\int_0^1 x\\,dx$." in body and "[20 pts]" not in body
+    assert "### 2.\n\nCompute $\\int_0^1 x\\,dx$." in body and "[20 pts]" not in body
     assert "**(a)** for $n=1$\n" in body and "(5점)" not in body
     assert "> [!solution]- 해설\n> **Sol)**\n>\n> **(a)** one half" in body
 
@@ -76,7 +78,7 @@ def test_points_from_part_labels_and_importance_null_without_points(h):
 def test_proof_problems_use_pf_and_others_use_sol(h):
     slug = build(h)
     one = (h.out_dir(slug) / "problems" / "001-idx.md").read_text(encoding="utf-8")
-    assert "### 1. Prove that $1 + 1 = 2$." in one
+    assert "### 1.\n\nProve that $1 + 1 = 2$." in one
     assert "> [!solution]- 해설\n> **pf)** Trivial.\n> QED." in one
     three = (h.out_dir(slug) / "problems" / "003-idx.md").read_text(encoding="utf-8")
     assert "> **pf)** 제곱은 음이 아니다." in three
@@ -92,7 +94,8 @@ def test_whole_file_lists_pages_headings_and_other_blocks(h):
     slug = build(h)
     whole = (h.out_dir(slug) / "idx.md").read_text(encoding="utf-8")
     assert whole.startswith("# idx\n\n<!-- page 001 -->\n## p.001\n\n## §2.1 Exercises 2.1\n")
-    assert "### 1. Prove that $1 + 1 = 2$.\n\nMore text." in whole, "the whole file keeps printed numbers"
+    assert "### 1.\n\nProve that $1 + 1 = 2$." in whole, "the whole file keeps printed numbers"
+    assert "More text." in whole
     assert "> Hint: use induction." in whole
     assert "<!-- page 003 -->\n## p.003\n\n### 1. (해설)\n\nTrivial.\nQED." in whole
     assert "![](img/" not in whole and "../img" not in whole

@@ -21,7 +21,7 @@ def test_problem_spanning_three_pages_is_stitched_into_one_file(h):
     assert "**(b)** second part" in body
     whole = (h.out_dir(slug) / f"{slug}.md").read_text(encoding="utf-8")
     assert "<!-- page 002 -->\n## p.002\n\n(앞 페이지에서 이어짐)" in whole
-    assert whole.count("### 1. Part one") == 1
+    assert whole.count("### 1.\n\nPart one") == 1
 
 
 def test_continuation_after_closed_page_is_error_naming_previous_page(h):
