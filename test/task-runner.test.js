@@ -5,7 +5,9 @@ import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { executeTask } from '../src/task-runner.js';
+import { executeTask as realExecuteTask } from '../src/task-runner.js';
+import { createReadinessContext } from '../src/provider-readiness.js';
+const executeTask = (options) => realExecuteTask({ readinessContext: createReadinessContext({ diagnose: async ({ providers }) => providers.map(p => ({ id: p.id, readiness: 'ready', models: null })) }), ...options });
 
 const execFileAsync = promisify(execFile);
 const workerScript = 'require("node:fs").writeFileSync(process.argv[1], "spawned")';

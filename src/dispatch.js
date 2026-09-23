@@ -7,13 +7,15 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { writeJsonAtomic } from './fs-util.js';
 import { modelFamily } from './model-family.js';
+import { createReadinessContext } from './provider-readiness.js';
 
 function routeSummary(route) {
   return route ? { provider: route.provider, profileId: route.profileId, model: route.model, effort: route.effort, modelFamily: modelFamily(route) } : undefined;
 }
 
 export async function dispatchPlan({ plan, config, observations = [], cwd = process.cwd(), dryRun = false, timeoutMs,
-  observationsPath, forbiddenProviders = [], executeImpl = executeWithVerification, selectRouteImpl = selectRoute }) {
+  observationsPath, forbiddenProviders = [], executeImpl = executeWithVerification, selectRouteImpl = selectRoute,
+  readinessContext = createReadinessContext() }) {
   const validated = validateTaskPlan(plan);
   const results = [];
   const runId = randomUUID();
@@ -21,7 +23,7 @@ export async function dispatchPlan({ plan, config, observations = [], cwd = proc
   const runDir = path.resolve(cwd, config.paths?.stateDir ?? '.aorch', 'task-runs', runId);
   const outcome = async (status) => {
     const result = { objective: validated.objective, decomposed: validated.decomposed, runId,
-      planFingerprint: fingerprint, status, results, ok: status === 'complete' || status === 'planned',
+      planFingerprint: fingerprint, status, results, preflightEvidence: [...readinessContext.evidence], ok: status === 'complete' || status === 'planned',
       ...(!dryRun ? { planPath: path.join(runDir, 'plan.json'), resultPath: path.join(runDir, 'dispatch.json') } : {}) };
     if (!dryRun) {
       await writeJsonAtomic(result.planPath, plan);
@@ -45,12 +47,14 @@ export async function dispatchPlan({ plan, config, observations = [], cwd = proc
       if (!adapter) throw new Error(`Unknown provider in route: ${route.provider}`);
       agent = roleAgentName({ config, agentRole: task.agentRole, agentId: task.agentId, adapter });
       if (dryRun) {
-        results.push({ taskId: task.id, agentRole: task.agentRole, ...(task.agentId ? { agentId: task.agentId } : {}), agent, adapter, status: 'planned', ...routeSummary(route) });
+        results.push({ taskId: task.id, agentRole: task.agentRole, ...(task.agentId ? { agentId: task.agentId } : {}), agent, adapter, status: 'planned', readiness: 'unknown', executionStatus: 'not-probed', ...routeSummary(route) });
         continue;
       }
-      const execution = await executeImpl({ task: { ...task, runId }, config, observations, cwd,
+      const execution = await executeImpl({ task: { ...task, runId }, config, observations, cwd, readinessContext,
         ...(observationsPath === undefined ? {} : { observationsPath }), ...(timeoutMs === undefined ? {} : { timeoutMs }) });
       const status = execution.status === 'awaiting-input' ? 'awaiting-input' : 'complete';
+      const actualAdapter = config.providers.find((entry) => entry.id === (execution.route ?? route).provider)?.adapter;
+      agent = roleAgentName({ config, agentRole: task.agentRole, agentId: task.agentId, adapter: actualAdapter });
       results.push({ taskId: task.id, agentRole: task.agentRole, ...(task.agentId ? { agentId: task.agentId } : {}), agent, status,
         route: routeSummary(execution.route ?? route), runDir: execution.runDir, receiptPath: execution.receiptPath,
         receipt: execution.receipt, verification: execution.verification, attempts: execution.attempts,

@@ -42,6 +42,17 @@ test('dry-run resolves a different agent per agentRole without executing anythin
   assert.deepEqual(result.results.map((entry) => entry.agent), ['aorch-worker', 'aorch-reviewer', 'aorch-fixer']);
   assert.deepEqual(result.results.map((entry) => entry.status), ['planned', 'planned', 'planned']);
   assert.equal(result.results[0].adapter, 'claude');
+  assert.equal(result.results[0].readiness, 'unknown');
+  assert.equal(result.results[0].executionStatus, 'not-probed');
+});
+
+test('dispatch reports the actual agent after a provider preflight fallback', async () => {
+  const tuned = { ...config, roleAgents: { ...config.roleAgents, worker: { ...config.roleAgents.worker, codex: 'alternate-worker' } } };
+  const result = await dispatchPlan({ plan: plan([{ ...baseTask, id: 'fallback-agent', agentRole: 'worker' }]), config: tuned,
+    selectRouteImpl: stubRoute('anthropic', 'claude-sonnet-general'),
+    executeImpl: async () => ({ route: { provider: 'openai', profileId: 'p', model: 'm', effort: 'high' } }) });
+  assert.equal(result.ok, true);
+  assert.equal(result.results[0].agent, 'alternate-worker');
 });
 
 test('an adapter with no configured agent fails closed before anything runs', async () => {

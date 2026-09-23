@@ -144,7 +144,7 @@ function parseModels(adapter, result) {
   return null;
 }
 
-async function diagnoseProvider(provider, options) {
+export async function diagnoseProvider(provider, options) {
   const configuredExecutable = provider.executable ?? defaultExecutable(provider);
   const unsetEnv = provider.adapter === 'grok' ? ['XAI_API_KEY']
     : provider.adapter === 'antigravity' ? ['GEMINI_API_KEY', 'GOOGLE_API_KEY'] : [];
@@ -159,6 +159,9 @@ async function diagnoseProvider(provider, options) {
     installed: false,
     configuredEnabled: provider.enabled !== false,
     executionStatus: 'not-probed',
+    readiness: 'unknown',
+    readinessReason: null,
+    checkedAt: new Date().toISOString(),
     version: null,
     models: null,
     modelsStatus: null,
@@ -170,33 +173,59 @@ async function diagnoseProvider(provider, options) {
         ? `Configured executable was not found: ${configuredExecutable}`
         : null
   };
-  if (resolution.pathIssue === 'configured-not-found') return common;
+  if (resolution.pathIssue === 'configured-not-found') return { ...common, readiness: 'blocked', readinessReason: 'executable-missing' };
 
   const run = options.runCommandImpl ?? runCommand;
   const resolve = (args) => resolveProviderCommandSpec(
     { ...baseSpec, args }, { provider, ...options }
   );
-  let versionResult;
-  try { versionResult = await run(resolve(['--version']), { cwd: options.cwd, timeoutMs: options.timeoutMs ?? 5_000 }); }
-  catch (error) {
-    return { ...common, message: `Executable probe failed (${classifyProviderFailure({ error })}).` };
+  let versionResult, versionFailure;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      versionResult = await run(resolve(['--version']), { cwd: options.cwd, timeoutMs: options.timeoutMs ?? 5_000 });
+      versionFailure = versionResult.exitCode === 0 && !versionResult.timedOut ? null : classifyProviderFailure({ result: versionResult });
+    } catch (error) { versionFailure = classifyProviderFailure({ error }); }
+    if (!['timeout', 'network'].includes(versionFailure)) break;
   }
-  if (versionResult.exitCode !== 0) {
-    return { ...common, message: `Executable probe failed (${classifyProviderFailure({ result: versionResult })}).` };
-  }
+  if (versionFailure) return { ...common, readinessReason: versionFailure, message: 'Executable probe failed.' };
   const diagnosed = { ...common, available: true, installed: true, version: firstLine(versionResult) };
-  if (!['antigravity', 'grok'].includes(provider.adapter)) return diagnosed;
-
-  try {
-    const modelResult = await run(resolve(['models']), { cwd: options.cwd, timeoutMs: options.timeoutMs ?? 10_000 });
-    if (modelResult.exitCode === 0) {
-      diagnosed.models = parseModels(provider.adapter, modelResult);
-      diagnosed.modelsStatus = diagnosed.models ? 'available' : 'unsupported';
-    } else {
-      diagnosed.modelsStatus = classifyProviderFailure({ result: modelResult });
-    }
-  } catch (error) {
-    diagnosed.modelsStatus = classifyProviderFailure({ error });
+  const args = provider.adapter === 'claude' ? ['auth', 'status']
+    : provider.adapter === 'codex' ? ['login', 'status']
+      : ['antigravity', 'grok'].includes(provider.adapter) ? ['models'] : null;
+  if (!args) return { ...diagnosed, readiness: provider.enabled === false ? 'blocked' : 'unknown',
+    readinessReason: provider.enabled === false ? 'disabled' : 'custom-protocol' };
+  let result, failure;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      result = await run(resolve(args), { cwd: options.cwd, timeoutMs: options.timeoutMs ?? 15_000 });
+      failure = result.exitCode === 0 && !result.timedOut ? null : classifyProviderFailure({ result });
+    } catch (error) { failure = classifyProviderFailure({ error }); }
+    if (!['timeout', 'network'].includes(failure)) break;
+  }
+  if (failure) {
+    diagnosed.readiness = ['authentication', 'action-required', 'rate-limit'].includes(failure) ? 'blocked' : 'unknown';
+    diagnosed.readinessReason = failure;
+    if (args[0] === 'models') diagnosed.modelsStatus = failure;
+    return diagnosed;
+  }
+  if (args[0] === 'models') {
+    diagnosed.models = parseModels(provider.adapter, result);
+    diagnosed.modelsStatus = diagnosed.models ? 'available' : 'unsupported';
+    diagnosed.readiness = diagnosed.models ? 'ready' : 'unknown';
+    diagnosed.readinessReason = diagnosed.models ? null : 'models-unrecognized';
+  } else if (provider.adapter === 'claude') {
+    let auth;
+    try { auth = JSON.parse(result.stdout); } catch { /* Unrecognized status fails closed. */ }
+    diagnosed.readiness = auth?.loggedIn === true ? 'ready' : auth?.loggedIn === false ? 'blocked' : 'unknown';
+    diagnosed.readinessReason = auth?.loggedIn === true ? null : auth?.loggedIn === false ? 'authentication' : 'auth-status-unrecognized';
+  } else {
+    const output = (result.stdout ?? '') + '\n' + (result.stderr ?? '');
+    diagnosed.readiness = /logged in/i.test(output) && !/not logged in/i.test(output) ? 'ready' : 'unknown';
+    diagnosed.readinessReason = diagnosed.readiness === 'ready' ? null : 'auth-status-unrecognized';
+  }
+  if (provider.enabled === false) {
+    diagnosed.readiness = 'blocked';
+    diagnosed.readinessReason = 'disabled';
   }
   return diagnosed;
 }

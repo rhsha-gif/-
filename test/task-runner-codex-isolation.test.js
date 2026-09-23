@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { access, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { executeTask } from '../src/task-runner.js';
+import { executeTask as realExecuteTask } from '../src/task-runner.js';
+import { createReadinessContext } from '../src/provider-readiness.js';
+const executeTask = (options) => realExecuteTask({ readinessContext: createReadinessContext({ diagnose: async ({ providers }) => providers.map(p => ({ id: p.id, readiness: 'ready', models: null })) }), ...options });
 
 function task() {
   return {

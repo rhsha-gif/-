@@ -12,12 +12,19 @@ aorch install --user --target all
 aorch configure --check
 aorch configure
 aorch diagnose
+aorch diagnose --probe
 aorch evaluate
 aorch evaluate --apply
 aorch evaluate --restore <version>
 ```
 
 `configure`는 기존 프로젝트 설정에 없는 제공자·프로필만 추가하고 원래 설정을 백업합니다. 사용자 모델 선택·품질 기준·비활성화는 보존합니다. 새로운 모델은 대표 검증 전에는 명시적으로 지정한 평가 작업에만 사용합니다. Antigravity·Grok은 확인된 구독 모델과 기존 로그인을 사용하며, 별도 API 키 과금으로 전환하지 않습니다.
+
+진단의 `available`은 실행 파일 조회 성공을 뜻합니다. `readiness`는 인증·모델 사전 확인 결과(`ready`, `blocked`, `unknown`)이고, 실제 작업 성공 여부는 별도의 `executionStatus`입니다. `diagnose --probe`는 제공자마다 임시 저장소의 파일을 읽는 작업을 최대 120초 동안 실행하고, 부모가 값·receipt·무변경을 대조합니다. 이 검사는 구독 사용량을 소비할 수 있으며, 학습 관측이나 자동 프로필 승격을 만들지 않습니다.
+
+실제 `exec`·`dispatch`는 네 기본 제공자의 워커 시작 전에 인증·모델을 확인합니다. 성공은 같은 호출 안에서 5분간 재사용하고 실패한 제공자는 해당 호출에서 제외합니다. 대체 경로에도 원래 품질·capability·모델 지정·계열 독립성 조건을 적용합니다. 후보가 없으면 원인을 보고하고 중단합니다. `route`와 dry-run은 실행 상태를 `not-probed`로 표시합니다. 사용자 정의 generic 어댑터에는 공통 인증 명령을 가정하지 않으며 기존 실행 계약을 유지합니다.
+
+Python 실행 캐시는 스킬 동기화 대상이 아닙니다. 과거 관리 원장의 캐시 항목은 로컬 파일을 지우지 않고 관리만 해제합니다. 실제 수정본은 원본에 통합한 뒤 `update --user --reconcile <manifest>`로 해시를 대조해 반영할 수 있습니다. 계약과 복구 절차는 [동기화 문서](docs/definition-sync.md)를 참고하세요.
 
 큰 작업은 상위 모델이 설계와 종합을 맡고, 독립적으로 검증 가능한 구현·자료 수집을 낮은 모델에 배분합니다. 계획의 `independentOfTaskIds` 또는 작업의 `forbiddenModelFamilies`로 모델 계열의 독립성을 지정합니다. Antigravity로 호출한 Claude와 Claude Code의 Claude는 같은 계열입니다.
 

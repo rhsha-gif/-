@@ -109,7 +109,8 @@ export function buildAntigravityCommand({
     '--json-schema', schemaPath,
     '--add-dir', cwd,
     '--model', route.model,
-    '--effort', route.effort,
+    // Antigravity Sonnet 4.6 rejects the CLI effort option.
+    ...(route.model === 'claude-sonnet-4-6' ? [] : ['--effort', route.effort]),
     '--mode', write ? 'accept-edits' : 'plan',
     '--sandbox'
   ];

@@ -96,6 +96,17 @@ test('generic provider supports config-only command templates', () => {
   assert.equal(spec.stdin, 'work');
 });
 
+test('Antigravity Sonnet omits unsupported effort while preserving model and sandbox', () => {
+  const spec = buildAntigravityCommand({
+    prompt: 'Read evidence.txt', route: { model: 'claude-sonnet-4-6', effort: 'medium' },
+    schemaPath: 'receipt.schema.json', cwd: process.cwd(), write: false
+  });
+  assert.equal(spec.args[spec.args.indexOf('--model') + 1], 'claude-sonnet-4-6');
+  assert.equal(spec.args.includes('--effort'), false);
+  assert.equal(spec.args[spec.args.indexOf('--mode') + 1], 'plan');
+  assert.ok(spec.args.includes('--sandbox'));
+});
+
 test('Antigravity uses stdin NDJSON, structured output, sandboxing, and scoped modes', () => {
   const schemaPath = 'C:\\작업 공간\\결과 schema.json';
   const cwd = 'C:\\작업 공간';

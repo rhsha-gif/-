@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { executeTask } from '../src/task-runner.js';
+import { executeTask as realExecuteTask } from '../src/task-runner.js';
+import { createReadinessContext } from '../src/provider-readiness.js';
+const executeTask = (options) => realExecuteTask({ readinessContext: createReadinessContext({ diagnose: async ({ providers }) => providers.map(p => ({ id: p.id, readiness: 'ready', models: null })) }), ...options });
 
 // The worker prompt tells the worker "the wrapper will persist it to
 // <receiptPath>", and `aorch exec` returns that path to the caller. These tests

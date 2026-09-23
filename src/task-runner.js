@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { forceRoute, selectRoute } from './router.js';
+import { createReadinessContext, selectReadyRoute } from './provider-readiness.js';
 import { readAllProviderQuotas } from './quota.js';
 import { writeJsonAtomic } from './fs-util.js';
 import { selectCapabilities } from './capabilities.js';
@@ -226,6 +227,7 @@ export async function executeTask({
   dryRun = false,
   // Escalation override: pins profile and effort, bypassing route selection.
   forcedRoute,
+  readinessContext = createReadinessContext(),
   runCommandImpl = runCommand,
   resolveCommandSpecImpl = resolveProviderCommandSpec
 }) {
@@ -242,7 +244,7 @@ export async function executeTask({
       refresh: !dryRun,
       cwd
     });
-  const route = forcedRoute
+  const route = !dryRun ? await selectReadyRoute({ task, config, observations, quota, cwd, forcedRoute, context: readinessContext }) : forcedRoute
     ? forceRoute({ catalog: config, task, profileId: forcedRoute.profileId, effort: forcedRoute.effort })
     : selectRoute({ task, catalog: config, observations, quota });
   const provider = providerById(config, route.provider);
@@ -339,10 +341,11 @@ export async function executeTask({
   };
   commandSpec = resolveCommandSpecImpl(commandSpec, { provider, cwd });
 
-  if (dryRun) return { task, route, capabilities, provider, commandSpec, receiptPath, runDir };
+  if (dryRun) return { task, route, capabilities, provider, commandSpec, receiptPath, runDir, readiness: 'unknown', executionStatus: 'not-probed' };
 
   await assertWriteIsolation(task, cwd);
   await mkdir(runDir, { recursive: true });
+  await writeJsonAtomic(path.join(runDir, 'preflight.json'), readinessContext.evidence);
   if (provider.adapter === 'codex') await writeJsonAtomic(schemaPath, strictSchema);
   if (provider.adapter === 'antigravity') await writeJsonAtomic(schemaPath, schema);
   let grokPrompt;

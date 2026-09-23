@@ -10,6 +10,7 @@ import { captureGitSnapshot, evaluateChangeGuard } from './change-guard.js';
 import { normalizeReceiptInputRequest } from './receipts.js';
 import { modelFamily } from './model-family.js';
 import { forceRoute } from './router.js';
+import { createReadinessContext } from './provider-readiness.js';
 
 function routeSummary(route) {
   return { provider: route.provider, profileId: route.profileId, model: route.model, effort: route.effort, modelFamily: modelFamily(route) };
@@ -114,6 +115,7 @@ export async function executeWithVerification({
   dryRun = false,
   observationsPath,
   learningHomeDir,
+  readinessContext = createReadinessContext(),
   stateRoot = path.resolve(cwd, config.paths?.stateDir ?? '.aorch'),
   executeTaskImpl = executeTask,
   runVerificationImpl = runVerificationCommands,
@@ -122,7 +124,7 @@ export async function executeWithVerification({
   captureGitSnapshotImpl = captureGitSnapshot,
   evaluateChangeGuardImpl = evaluateChangeGuard
 }) {
-  const passthrough = { config, observations, cwd, ...(timeoutMs === undefined ? {} : { timeoutMs }) };
+  const passthrough = { config, observations, cwd, readinessContext, ...(timeoutMs === undefined ? {} : { timeoutMs }) };
   if (dryRun) return executeTaskImpl({ task, ...passthrough, dryRun: true });
 
   const commands = task.verificationCommands ?? [];
@@ -146,7 +148,7 @@ export async function executeWithVerification({
   const projectId = createHash('sha256').update(path.resolve(beforeSnapshot.root ?? cwd)).digest('hex').slice(0, 24);
   let registeredEvidence = false;
   const learningWarnings = [];
-  const withLearningWarnings = (value) => learningWarnings.length ? { ...value, learningWarnings: [...learningWarnings] } : value;
+  const withLearningWarnings = (value) => ({ ...value, preflightEvidence: [...readinessContext.evidence], ...(learningWarnings.length ? { learningWarnings: [...learningWarnings] } : {}) });
   const recordEvidence = async ({ execution, attempt, status, failureKind, artifact = 'unscored', evaluation }) => {
     if (config.learning?.enabled !== true || !execution?.route) return;
     try {
@@ -185,6 +187,9 @@ export async function executeWithVerification({
         ...(forcedRoute ? { forcedRoute } : {})
       });
     } catch (error) {
+      if (error.preflightEvidence) {
+        await writeJsonAtomic(path.join(stateRoot, 'task-runs', runId, currentTask.id, 'preflight.json'), error.preflightEvidence);
+      }
       if (error?.route) {
         const afterSnapshot = await captureGitSnapshotImpl({ cwd });
         const changeGuard = evaluateChangeGuardImpl({

@@ -38,18 +38,18 @@ const HELP = `Adaptive Orchestrator (aorch)\n\n` +
   `  branch    Branch lifecycle: status | apply --action <start|finish|cleanup|sync>\n` +
   `  inventory Print agents, skills, plugins and hooks with source and sync state (--type, --match, --runtime)\n` +
   `  quota     Report each provider's remaining subscription quota via its usageProbe\n` +
-  `  diagnose  Inspect CLI paths, versions, models and supported features\n` +
+  `  diagnose  Inspect CLI paths, authentication and models ([--probe] runs bounded read tasks)\n` +
   `  configure Add four-CLI defaults without replacing user tuning ([--check])\n` +
   `  evaluate  Report weekly evidence ([--apply] [--restore <version>] [--home-dir <path>])\n` +
   `  install   Generate integrations ([--project <path> | --user] [--target both|claude|codex|antigravity|grok|all] [--check])\n` +
-  `  update    Refresh installed integrations ([--project <path> | --user] [--check])\n` +
+  `  update    Refresh installed integrations ([--project <path> | --user] [--check] [--reconcile <manifest>])\n` +
   `  dispatch --plan <path> [--resume <dispatch.json> --answers <answers.json>] [--output <path>]\n\n` +
   `Common options:\n` +
   `  --config <path>       Config JSON; defaults to .aorch/config.json or packaged config\n` +
   `  --cwd <path>          Project working directory\n` +
   `  --observations <path> Reviewed outcomes JSONL\n`;
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h', 'approved', 'confirm-unmerged', 'check', 'print-schema', 'user', 'apply']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'force-config', 'project-only', 'help', 'h', 'approved', 'confirm-unmerged', 'check', 'print-schema', 'user', 'apply', 'probe']);
 
 const COMMON_FLAGS = ['config', 'cwd', 'project-only', 'help', 'h'];
 const COMMAND_FLAGS = Object.freeze({
@@ -62,12 +62,12 @@ const COMMAND_FLAGS = Object.freeze({
   limits: [...COMMON_FLAGS, 'minutes', 'note'],
   inventory: [...COMMON_FLAGS, 'runtime', 'type', 'match'],
   quota: [...COMMON_FLAGS],
-  diagnose: [...COMMON_FLAGS],
+  diagnose: [...COMMON_FLAGS, 'probe'],
   configure: [...COMMON_FLAGS, 'check'],
   evaluate: [...COMMON_FLAGS, 'apply', 'restore', 'home-dir'],
   branch: [...COMMON_FLAGS, 'action', 'approved', 'confirm-unmerged', 'name', 'observations', 'task'],
-  install: ['cwd', 'help', 'h', 'target', 'project', 'force-config', 'check', 'user'],
-  update: ['cwd', 'help', 'h', 'project', 'check', 'user']
+  install: ['cwd', 'help', 'h', 'target', 'project', 'force-config', 'check', 'user', 'reconcile'],
+  update: ['cwd', 'help', 'h', 'project', 'check', 'user', 'reconcile']
 });
 
 function coerceBoolean(rawKey, value) {
@@ -185,13 +185,16 @@ async function main(argv = process.argv.slice(2)) {
   validateCommandArgs(command, flags, positionals);
   const cwd = path.resolve(flags.cwd || process.cwd());
 
+  const reconcile = flags.reconcile ? JSON.parse(await readFile(path.resolve(cwd, flags.reconcile), 'utf8')) : undefined;
+  if (flags.reconcile && command === 'update' && !flags.user && !flags.project) throw new Error('--reconcile requires --user or one explicit --project');
+
   if (command === 'install') {
     if (flags.user && (flags.project || flags['force-config'])) throw new Error('--user cannot be combined with --project or --force-config');
-    const result = flags.user ? await installUserDefinitions({ target: flags.target || 'both', check: flags.check === true }) : await installProject({
+    const result = flags.user ? await installUserDefinitions({ target: flags.target || 'both', check: flags.check === true, reconcile }) : await installProject({
       projectRoot: path.resolve(cwd, flags.project || '.'),
       target: flags.target || 'both',
       forceConfig: flags['force-config'] === true,
-      check: flags.check === true
+      check: flags.check === true, reconcile
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return result.status === 'conflict' ? 1 : 0;
@@ -202,12 +205,12 @@ async function main(argv = process.argv.slice(2)) {
   if (command === 'update') {
     if (flags.user) {
       if (flags.project) throw new Error('--user cannot be combined with --project');
-      const result = await installUserDefinitions({ check: flags.check === true });
+      const result = await installUserDefinitions({ check: flags.check === true, reconcile });
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       return result.status === 'conflict' ? 1 : 0;
     }
     const explicit = typeof flags.project === 'string' ? [path.resolve(cwd, flags.project)] : undefined;
-    const result = await updateInstalls({ projects: explicit, check: flags.check === true });
+    const result = await updateInstalls({ projects: explicit, check: flags.check === true, reconcile });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return result.failed > 0 ? 1 : 0;
   }
@@ -221,8 +224,10 @@ async function main(argv = process.argv.slice(2)) {
   }
   if (command === 'diagnose') {
     const { diagnoseProviders } = await import('./provider-diagnostics.js');
-    process.stdout.write(`${JSON.stringify(await diagnoseProviders({ providers: config.providers, cwd }), null, 2)}\n`);
-    return 0;
+    const { probeProviders } = await import('./provider-probe.js');
+    const results = flags.probe ? await probeProviders({ config, cwd }) : await diagnoseProviders({ providers: config.providers, cwd });
+    process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
+    return flags.probe && results.some((entry) => entry.executionStatus !== 'passed') ? 1 : 0;
   }
   if (command === 'evaluate') {
     const { evaluateWeekly, restoreWeeklyPolicy } = await import('./evaluation.js');
@@ -251,7 +256,7 @@ async function main(argv = process.argv.slice(2)) {
       cwd
     });
     const route = selectRoute({ task, catalog: config, observations, quota });
-    process.stdout.write(`${JSON.stringify(cleanRoute(route), null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ ...cleanRoute(route), readiness: 'unknown', executionStatus: 'not-probed' }, null, 2)}\n`);
     return 0;
   }
 
@@ -273,8 +278,8 @@ async function main(argv = process.argv.slice(2)) {
       dryRun: flags['dry-run'] === true
     });
     const output = flags['dry-run'] === true
-      ? { route: cleanRoute(result.route), capabilities: result.capabilities, commandSpec: result.commandSpec, runDir: result.runDir }
-      : { status: result.status ?? 'complete', inputRequest: result.inputRequest, route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, runDir: result.runDir, verification: result.verification, attempts: result.attempts, usage: result.result?.usage, durationMs: result.result?.durationMs, learningWarnings: result.learningWarnings };
+      ? { route: cleanRoute(result.route), readiness: 'unknown', executionStatus: 'not-probed', capabilities: result.capabilities, commandSpec: result.commandSpec, runDir: result.runDir }
+      : { status: result.status ?? 'complete', inputRequest: result.inputRequest, route: cleanRoute(result.route), receipt: result.receipt, receiptPath: result.receiptPath, runDir: result.runDir, verification: result.verification, attempts: result.attempts, usage: result.result?.usage, durationMs: result.result?.durationMs, learningWarnings: result.learningWarnings, preflightEvidence: result.preflightEvidence };
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return result.status === 'awaiting-input' ? 2 : 0;
   }
