@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { diagnoseProviders } from './provider-diagnostics.js';
-import { createReadinessContext } from './provider-readiness.js';
+import { createReadinessContext, launchModel } from './provider-readiness.js';
 import { executeTask } from './task-runner.js';
 import { selectRoute } from './router.js';
 import { captureGitSnapshot, evaluateChangeGuard, runGit } from './change-guard.js';
@@ -42,17 +42,17 @@ export function chooseProbeTask(config, provider, models) {
   // Prefer an admitted route. A smoke test never promotes a profile.
   for (const kind of ['exploration', 'research', 'documentation']) {
     try {
-      const route = selectRoute({ task: { ...task, kind }, catalog: config, observations: [], quota: null });
-      if (!models || models.includes(route.model)) return { ...task, kind, allowedProfileIds: [route.profileId] };
+      const route = selectRoute({ task: { ...task, kind }, catalog: config, observations: [] });
+      if (!models || models.includes(launchModel(provider, route))) return { ...task, kind, allowedProfileIds: [route.profileId] };
     } catch { /* Try the next supported task kind. */ }
   }
-  const profiles = config.models.filter((m) => m.provider === provider.id && m.enabled !== false && (!models || models.includes(m.model)))
+  const profiles = config.models.filter((m) => m.provider === provider.id && m.enabled !== false && (!models || (m.efforts ?? []).some((effort) => models.includes(launchModel(provider, { model: m.model, effort: effort.name })))))
     .sort((a, b) => a.tokenIndex - b.tokenIndex || a.id.localeCompare(b.id));
   for (const profile of profiles) {
     for (const kind of ['exploration', 'research', 'documentation']) {
       for (const complexity of ['low', 'standard', 'high']) {
         const pinned = { ...task, kind, complexity, allowedProfileIds: [profile.id] };
-        try { selectRoute({ catalog: config, task: pinned, observations: [], quota: null }); return pinned; }
+        try { selectRoute({ catalog: config, task: pinned, observations: [] }); return pinned; }
         catch { /* Explicit evaluation still respects supported effort levels. */ }
       }
     }

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-23 — Opus 5.5 · GPT-6 · Gemini 3.8 Flash
+
+- **모델 카탈로그**: Opus 5.5(`opus`)를 standard 복잡도에 `medium` effort로 개방. Codex는 `gpt-6-luna`·`gpt-6-sol`로 교체(challenger), `gpt-5.6-terra` 은퇴. Gemini 3.8 Flash는 base 슬러그 `gemini-3.8-flash`로 두고 effort가 사고 수준 접미사를 고르며 `--effort`는 보내지 않음. Flash의 검증 범위를 구현·테스트·문서로 확장. Grok 자동 프로필은 `grok-4.7`(평가 전용 프로필 삭제). `aorch configure`가 바뀐 모델 문자열·은퇴·누락 effort를 설치본에 반영.
+- **배분 규칙 파일과 탈락 사유**: `~/.aorch/allocation.json`의 `prefer` 규칙이 안전 필터를 통과한 후보 중 선호 순서를 정한다. route 결정에 `candidates`(프로필×effort별 탈락 사유)와 `allocation`을 항상 포함.
+- **에스컬레이션 진단**: 검증 실패 뒤 사다리를 오르기 전에 상위 모델(fable/astra)이 read-only로 원인을 진단하고, 그 요약이 이후 시도에 붙는다.
+- **삭제: 쿼터 라우팅과 wide 모드**: `usageProbe`가 어떤 설정에도 없어 도달 불가였던 `aorch quota`, 쿼터 게이트, `ultra`/`ultracode` effort를 삭제. `quotaGate`가 남은 설치본은 `aorch configure` 안내와 함께 거부된다(무시하면 게이트 없는 최상위 후보가 되므로).
+- **검증 뒤 변경 감시(감사 P1)**: 검증 명령 이후의 `forbiddenScope` 쓰기와 read-only 작업의 추적 파일 수정이 성공 처리되던 공백을 막고, 검증 뒤 가드를 `verification.json`에 남긴다.
+
 ### Changed
 
 - **목적함수 개정**: "시간 + 구독 한도 절약" → **"사용자 개입 최소화 + 구독 한도 절약"**(품질 바닥선 유지). 벽시계 시간이 늘더라도 사람이 다시 손대는 횟수가 줄면 이득으로 친다. 귀결로 다운시프트의 기준이 "바닥선을 넘는 가장 싼 모델"에서 **"한 번에 검증을 통과할 모델"**이 됐고, `config`의 `quality.<kind>`는 `qualitySemantics` 필드로 그 의미(1회 통과 확률)를 명시한다.

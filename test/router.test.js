@@ -360,3 +360,50 @@ test('an effort with taskKinds is only a candidate for matching task kinds', () 
   const narrow = selectRoute({ task: { ...task, kind: 'documentation' }, catalog, observations: [] });
   assert.equal(narrow.effort, 'medium');
 });
+
+const allocationCatalog = () => ({
+  routing: baseRouting,
+  models: [
+    model({ id: 'cheap', tokenIndex: 0.3, quality: { default: 0.8 } }),
+    model({ id: 'grunt', tokenIndex: 0.6, quality: { default: 0.85 }, efforts: [
+      { name: 'medium', qualityDelta: 0, tokenMultiplier: 1, latencyMultiplier: 1 },
+      { name: 'high', qualityDelta: 0, tokenMultiplier: 1.2, latencyMultiplier: 1.2 }
+    ] }),
+    model({ id: 'deep', tokenIndex: 2, quality: { default: 0.93 }, maturity: 'challenger' })
+  ]
+});
+const rule = (prefer, match = { kinds: ['implementation'] }) => ({ version: 1, rules: [{ id: 'r1', match, prefer }] });
+
+test('an allocation rule picks the first preferred candidate that survives, and explains every loser', () => {
+  const catalog = { ...allocationCatalog(), allocation: rule(['ghost:high', 'grunt:high', 'cheap']) };
+  const route = selectRoute({ task, catalog, observations: [] });
+  assert.equal(route.profileId, 'grunt');
+  assert.equal(route.effort, 'high');
+  assert.deepEqual(route.decision.allocation, { ruleId: 'r1', preferred: 'grunt:high' });
+  const byKey = Object.fromEntries(route.decision.candidates.map((c) => [`${c.profileId}:${c.effort}`, c]));
+  assert.equal(byKey['grunt:high'].status, 'selected');
+  assert.equal(byKey['deep:medium'].excludedBy, 'allocation:r1');
+  // Without the rule, quality-first routing keeps the higher prior.
+  assert.equal(selectRoute({ task, catalog: allocationCatalog(), observations: [] }).profileId, 'deep');
+});
+
+test('an allocation rule cannot resurrect a candidate a safety filter excluded', () => {
+  const cases = [
+    { constrained: { ...task, minimumQuality: 0.9 }, preferred: 'cheap', reason: 'explicit-constraint' },
+    { constrained: { ...task, allowedProfileIds: ['cheap'] }, preferred: 'deep', reason: 'allowed-profiles' },
+    { constrained: { ...task, risk: 'critical', complexity: 'high' }, preferred: 'deep', reason: 'critical-challenger' }
+  ];
+  for (const { constrained, preferred, reason } of cases) {
+    const route = selectRoute({ task: constrained, catalog: { ...allocationCatalog(), allocation: rule([preferred]) }, observations: [] });
+    assert.notEqual(route.profileId, preferred, reason);
+    assert.equal(route.decision.allocation, null, reason);
+    assert.ok(route.decision.candidates.some((c) => c.profileId === preferred && c.excludedBy === reason), reason);
+  }
+});
+
+test('a rule that matches nothing leaves the decision unchanged', () => {
+  const plain = selectRoute({ task, catalog: allocationCatalog(), observations: [] });
+  const ruled = selectRoute({ task, catalog: { ...allocationCatalog(), allocation: rule(['cheap'], { kinds: ['testing'] }) }, observations: [] });
+  assert.equal(ruled.profileId, plain.profileId);
+  assert.equal(ruled.decision.allocation, null);
+});

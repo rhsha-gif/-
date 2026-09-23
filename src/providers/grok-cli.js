@@ -4,7 +4,8 @@ const READ_TOOLS = Object.freeze([
 const WRITE_TOOLS = Object.freeze([...READ_TOOLS, 'search_replace']);
 // `grok models` under grok.com login is the source of truth. Revalidate there
 // before adding a slug so a custom/BYOK model cannot silently enter routing.
-const SUBSCRIPTION_MODELS = new Set(['grok-4.6', 'grok-4.7']);
+// 2026-09-23: the authenticated catalog lists only grok-4.7.
+const SUBSCRIPTION_MODELS = new Set(['grok-4.7']);
 
 const HEADLESS_RULES =
   'Use the available file tools to do the requested work before returning the structured receipt. ' +

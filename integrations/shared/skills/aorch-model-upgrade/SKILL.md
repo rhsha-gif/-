@@ -24,10 +24,12 @@ description: 새 프런티어 모델이 나왔을 때 프로젝트를 신모델�
 정찰은 위임하지 않는다(adaptive-orchestrate 규율). 아래 패턴을 대상 루트에서 직접 돌리고 결과를 문서 "매핑표" 절에 `경로 | 현재 값 | 새 값 | 승인` 표로 적는다. 갱신은 사용자가 승인한 행만 한다.
 
 ```bash
-grep -rnE "claude-[a-z]+-[0-9]|\b(opus|sonnet|haiku|fable|mythos)\b|gpt-[0-9]|canonicalModel|^model:" \
+grep -rnE "claude-[a-z]+-[0-9]|\b(opus|sonnet|haiku|fable|mythos)\b|gpt-[0-9]|gpt-6|gemini-|grok-|canonicalModel|^model:" \
   --include=*.md --include=*.json --include=*.toml --include=*.yaml --include=*.yml --include=*.js --include=*.py \
   --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=task-runs --exclude-dir=worktrees .
 ```
+
+Antigravity Gemini 프로필은 base 슬러그(`gemini-3.8-flash`)로 두고 effort가 접미사(`-low/-medium/-high`)를 고른다 — 접미사형 슬러그를 카탈로그에 넣지 않는다(2026-09-23).
 
 ## 3. 실사용 실행 — 오케스트레이터가 직접
 

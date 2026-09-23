@@ -179,6 +179,33 @@ test('a passed verification rejects HEAD or control-path changes', async (t) => 
   }
 });
 
+test('a passed verification rejects forbidden-scope writes and tracked edits on a read-only task', async (t) => {
+  const cases = [
+    { name: 'writes into forbiddenScope', task: baseTask({ write: true, allowedScope: ['src/allowed.js'], forbiddenScope: ['protected'] }), file: 'protected/outside.js', field: 'forbiddenFiles' },
+    { name: 'modifies a tracked file on a read-only task', task: baseTask(), file: 'src/app.js', field: 'readOnlyFiles' }
+  ];
+  for (const { name, task, file, field } of cases) {
+    await t.test(name, async (t) => {
+      const dir = await temporaryDirectory(t);
+      const baseline = { applicable: true, reason: null, root: dir, head: 'before', entries: {}, control: {} };
+      const snapshots = [baseline, baseline, { ...baseline, entries: { [file]: { status: ' M', index: 'blob', worktree: 'file:changed' } } }];
+      await assert.rejects(
+        executeLoop({
+          task, config: baseConfig(), cwd: dir,
+          executeTaskImpl: stubExecutor(dir, []),
+          runVerificationImpl: stubVerifier([true]),
+          captureGitSnapshotImpl: async () => snapshots.shift()
+        }),
+        (error) => {
+          assert.match(error.message, /change guard failed/i);
+          assert.deepEqual(error.changeGuard[field], [file]);
+          return true;
+        }
+      );
+    });
+  }
+});
+
 test('a passed verification permits output-only changes after the worker guard', async (t) => {
   const dir = await temporaryDirectory(t);
   const calls = [];
@@ -817,4 +844,76 @@ test('a complete receipt whose criteria pass or were not run keeps the run movin
   });
   assert.equal(result.verification, null);
   assert.equal(calls.length, 1);
+});
+
+// Diagnosis: an apex model reads the failure once before the ladder climbs.
+function diagnosingExecutor(dir, calls, diagnose) {
+  const inner = stubExecutor(dir, calls);
+  return async (options) => {
+    if (!options.task.id.endsWith('.diag')) return inner(options);
+    calls.push({ task: options.task, forcedRoute: options.forcedRoute });
+    return diagnose(options);
+  };
+}
+const diagnosisConfig = () => baseConfig({
+  escalation: { ...baseConfig().escalation, diagnosis: { anthropic: { profileId: 'claude-fable-apex', effort: 'high' } } }
+});
+
+test('a failed attempt is diagnosed once, read-only, and the diagnosis reaches every later attempt', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const result = await executeLoop({
+    task: baseTask(),
+    config: diagnosisConfig(),
+    cwd: dir,
+    executeTaskImpl: diagnosingExecutor(dir, calls, async ({ task, forcedRoute }) => ({
+      task, route: { provider: 'anthropic', profileId: forcedRoute.profileId, model: 'fable', effort: forcedRoute.effort },
+      receipt: { status: 'complete', summary: 'root cause: off-by-one in src/app.js' }, runDir: dir
+    })),
+    runVerificationImpl: stubVerifier([false, false, true])
+  });
+  assert.equal(result.verification.passed, true);
+  assert.deepEqual(calls.map((call) => call.task.id), ['T-loop', 'T-loop.diag', 'T-loop.esc1', 'T-loop.esc2']);
+  const diag = calls[1];
+  assert.equal(diag.task.write, false);
+  assert.deepEqual(diag.forcedRoute, { profileId: 'claude-fable-apex', effort: 'high' });
+  assert.match(diag.task.objective, /assertion blew up/);
+  for (const later of calls.slice(2)) assert.match(later.task.objective, /## Diagnosis by fable\nroot cause: off-by-one/);
+  // Diagnosis is not an attempt: dispatch derives family exclusions from attempts.
+  assert.equal(result.attempts.length, 3);
+});
+
+test('a diagnosis error is a warning and the ladder proceeds', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const calls = [];
+  const result = await executeLoop({
+    task: baseTask(),
+    config: diagnosisConfig(),
+    cwd: dir,
+    executeTaskImpl: diagnosingExecutor(dir, calls, async () => { throw new Error('diagnosis timed out'); }),
+    runVerificationImpl: stubVerifier([false, true])
+  });
+  assert.equal(result.verification.passed, true);
+  assert.doesNotMatch(calls.at(-1).task.objective, /Diagnosis by/);
+  assert.match(result.learningWarnings.join(' '), /diagnosis skipped: diagnosis timed out/);
+});
+
+test('a diagnosis that changes the tree stops the run', async (t) => {
+  const dir = await temporaryDirectory(t);
+  const baseline = { applicable: true, reason: null, root: dir, head: 'before', entries: {}, control: {} };
+  const snapshots = [baseline, baseline, baseline, { ...baseline, entries: { 'src/app.js': { status: ' M', index: 'blob', worktree: 'file:changed' } } }];
+  await assert.rejects(
+    executeLoop({
+      task: baseTask({ write: true, allowedScope: ['src/app.js'] }),
+      config: diagnosisConfig(),
+      cwd: dir,
+      executeTaskImpl: diagnosingExecutor(dir, [], async ({ task, forcedRoute }) => ({
+        task, route: { provider: 'anthropic', profileId: forcedRoute.profileId, model: 'fable', effort: 'high' },
+        receipt: { status: 'complete', summary: 'x' }, runDir: dir
+      })),
+      runVerificationImpl: stubVerifier([false]),
+      captureGitSnapshotImpl: async () => snapshots.shift()
+    }),
+    /change guard failed/i
+  );
 });

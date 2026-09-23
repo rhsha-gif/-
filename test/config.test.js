@@ -44,29 +44,6 @@ test('stateDir stays in a dot-prefixed project-local directory', () => {
   }
 });
 
-test('validateConfig accepts a well-formed usageProbe and rejects malformed ones, and stays optional', () => {
-  const good = minimalConfig();
-  good.providers[0].usageProbe = { command: 'caut', args: ['usage', '--json'], remainingField: 'usage.primary.remainingPercent' };
-  const validated = validateConfig(good);
-  assert.deepEqual(validated.providers[0].usageProbe.args, ['usage', '--json']);
-  assert.equal(validated.providers[0].usageProbe.remainingField, 'usage.primary.remainingPercent');
-
-  const noCommand = minimalConfig();
-  noCommand.providers[0].usageProbe = { command: '', args: [], remainingField: 'x' };
-  assert.throws(() => validateConfig(noCommand), /usageProbe\.command/);
-
-  const badArgs = minimalConfig();
-  badArgs.providers[0].usageProbe = { command: 'caut', args: 'usage --json', remainingField: 'x' };
-  assert.throws(() => validateConfig(badArgs), /usageProbe\.args/);
-
-  const noField = minimalConfig();
-  noField.providers[0].usageProbe = { command: 'caut', args: [], remainingField: '' };
-  assert.throws(() => validateConfig(noField), /usageProbe\.remainingField/);
-
-  const absent = minimalConfig();
-  assert.doesNotThrow(() => validateConfig(absent));   // usageProbe is optional
-});
-
 test('loadConfig reads a project-supplied catalog without core changes', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'aorch-config-'));
   const configPath = path.join(dir, 'custom.json');
@@ -124,41 +101,6 @@ test('routing defaults are normalized without imposing a task-specific objective
   const validated = validateConfig(config);
   assert.deepEqual(validated.routing.defaultPriorities, ['quality', 'tokens', 'latency']);
   assert.equal(validated.routing.selectionPolicy, 'task-specific-priority-order');
-});
-
-test('routing.quota is normalized with defaults whether absent or partial', () => {
-  const absent = validateConfig(minimalConfig());
-  assert.deepEqual(absent.routing.quota, {
-    softThresholdPercent: 40, hardThresholdPercent: 10, premiumThresholdPercent: 60, cacheTtlMinutes: 5
-  });
-
-  const partial = minimalConfig();
-  partial.routing.quota = { softThresholdPercent: 60 };
-  const validated = validateConfig(partial);
-  assert.equal(validated.routing.quota.softThresholdPercent, 60);
-  assert.equal(validated.routing.quota.hardThresholdPercent, 10);
-  assert.equal(validated.routing.quota.cacheTtlMinutes, 5);
-
-  // An implicit premium floor rides above a raised soft threshold instead of
-  // failing the soft-vs-premium ordering check.
-  const raisedSoft = minimalConfig();
-  raisedSoft.routing.quota = { softThresholdPercent: 75 };
-  assert.equal(validateConfig(raisedSoft).routing.quota.premiumThresholdPercent, 75);
-});
-
-test('routing.quota rejects malformed thresholds', () => {
-  for (const quota of [
-    [],
-    { softThresholdPercent: 101 },
-    { hardThresholdPercent: -1 },
-    { softThresholdPercent: 'lots' },
-    { softThresholdPercent: 20, hardThresholdPercent: 30 },
-    { cacheTtlMinutes: -5 }
-  ]) {
-    const config = minimalConfig();
-    config.routing.quota = quota;
-    assert.throws(() => validateConfig(config), /routing\.quota/i, `quota ${JSON.stringify(quota)} should be rejected`);
-  }
 });
 
 test('model cost indices and effort variants reject malformed catalog entries', () => {
@@ -225,6 +167,13 @@ test('escalation ladders must reference known providers, profiles, and efforts',
 
   config.escalation = { maxAttempts: 0 };
   assert.throws(() => validateConfig(config), /escalation\.maxAttempts/i);
+
+  // A diagnosis step is checked like a ladder step: a typo would otherwise
+  // disable the non-fatal diagnosis silently.
+  config.escalation = { diagnosis: { newco: { profileId: 'newco-best', effort: 'high' } } };
+  assert.deepEqual(validateConfig(config).escalation.diagnosis.newco, { profileId: 'newco-best', effort: 'high' });
+  config.escalation = { diagnosis: { newco: { profileId: 'newco-best', effort: 'mystery' } } };
+  assert.throws(() => validateConfig(config), /escalation\.diagnosis\.newco .*unknown effort/i);
 });
 
 test('escalation ladder steps must stay on their own provider', () => {
@@ -243,17 +192,24 @@ test('control-plane validates the experimental adapter risk ceiling', () => {
 });
 
 
-test('effort taskKinds and quotaGate are validated', () => {
+test('effort taskKinds are validated and the removed quotaGate is refused', () => {
   const good = minimalConfig();
   good.models[0].efforts.push({
-    name: 'ultra', qualityDelta: 0.05, tokenMultiplier: 4, latencyMultiplier: 1.6,
-    quotaGate: 'premium', taskKinds: ['review', 'implementation']
+    name: 'xhigh', qualityDelta: 0.05, tokenMultiplier: 4, latencyMultiplier: 1.6,
+    taskKinds: ['review', 'implementation']
   });
   assert.doesNotThrow(() => validateConfig(good));
 
-  const badGate = minimalConfig();
-  badGate.models[0].efforts[0].quotaGate = 'always';
-  assert.throws(() => validateConfig(badGate), /quotaGate/);
+  // A stale installed copy still carrying a gated fan-out effort must fail
+  // loudly: silently dropping the gate would make it an ordinary candidate.
+  const staleGate = minimalConfig();
+  staleGate.models[0].efforts[0].quotaGate = 'premium';
+  assert.throws(() => validateConfig(staleGate), /removed quotaGate.*aorch configure/);
+
+  const ignoredProbe = minimalConfig();
+  ignoredProbe.providers[0].usageProbe = { command: 'caut' };
+  ignoredProbe.routing.quota = { softThresholdPercent: 40 };
+  assert.doesNotThrow(() => validateConfig(ignoredProbe));
 
   const dupKinds = minimalConfig();
   dupKinds.models[0].efforts[0].taskKinds = ['review', 'review'];
@@ -262,23 +218,6 @@ test('effort taskKinds and quotaGate are validated', () => {
   const emptyKinds = minimalConfig();
   emptyKinds.models[0].efforts[0].taskKinds = [];
   assert.throws(() => validateConfig(emptyKinds), /taskKinds/);
-});
-
-test('premiumThresholdPercent is normalized, ranged, and never below the soft threshold', () => {
-  const defaulted = validateConfig(minimalConfig());
-  assert.equal(defaulted.routing.quota.premiumThresholdPercent, 60);
-
-  const explicit = minimalConfig();
-  explicit.routing.quota = { softThresholdPercent: 40, hardThresholdPercent: 10, premiumThresholdPercent: 55 };
-  assert.equal(validateConfig(explicit).routing.quota.premiumThresholdPercent, 55);
-
-  const belowSoft = minimalConfig();
-  belowSoft.routing.quota = { softThresholdPercent: 40, premiumThresholdPercent: 30 };
-  assert.throws(() => validateConfig(belowSoft), /premiumThresholdPercent/);
-
-  const outOfRange = minimalConfig();
-  outOfRange.routing.quota = { premiumThresholdPercent: 130 };
-  assert.throws(() => validateConfig(outOfRange), /premiumThresholdPercent/);
 });
 
 // Every agentRole must be declared once a roleAgents block exists at all — a

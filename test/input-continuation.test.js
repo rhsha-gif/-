@@ -35,7 +35,7 @@ test('dispatch stops for input and continuation runs only the waiting task and u
   const { role: _role, ...declared } = task;
   const plan = { objective: 'Three bounded stages', decomposed: true, tasks: ['done', 'ask', 'later'].map((id) => ({ ...declared, id })) };
   const calls = [];
-  const first = await dispatchPlan({ plan, config, selectRouteImpl: () => route, executeImpl: async ({ task: current }) => {
+  const first = await dispatchPlan({ plan, config, cwd: await mkdtemp(path.join(os.tmpdir(), 'aorch-continuation-')), selectRouteImpl: () => route, executeImpl: async ({ task: current }) => {
     calls.push(current.id);
     return { route, status: current.id === 'ask' ? 'awaiting-input' : 'complete', receipt: current.id === 'ask' ? blocked : { status: 'complete', summary: 'done evidence' }, inputRequest: current.id === 'ask' ? request : undefined };
   } });
@@ -46,7 +46,7 @@ test('dispatch stops for input and continuation runs only the waiting task and u
   assert.deepEqual(resumed.tasks[0].allowedScope, ['src']);
   assert.match(resumed.tasks[0].objective, /done evidence/);
   assert.match(resumed.tasks[0].objective, /Denied/);
-  await dispatchPlan({ plan: resumed, config, selectRouteImpl: () => route, executeImpl: async ({ task: current }) => { calls.push(current.id); return { route }; } });
+  await dispatchPlan({ plan: resumed, config, cwd: await mkdtemp(path.join(os.tmpdir(), 'aorch-continuation-')), selectRouteImpl: () => route, executeImpl: async ({ task: current }) => { calls.push(current.id); return { route }; } });
   assert.deepEqual(calls, ['done', 'ask', 'ask', 'later']);
   for (const input of [{ taskId: 'wrong', answers: { scope: 'yes' } }, { taskId: 'ask', answers: {} }, { taskId: 'ask', answers: { scope: 'yes', extra: 'yes' } }]) assert.throws(() => continuationPlan(plan, first, input));
   assert.throws(() => continuationPlan({ ...plan, objective: 'changed' }, first, { taskId: 'ask', answers: { scope: 'yes' } }), /unchanged plan/);
@@ -100,7 +100,7 @@ test('a failed continuation can explicitly resume its new result without replayi
   const { role: _role, ...declared } = task;
   const plan = { objective: 'Recover remaining work', decomposed: true, tasks: ['done', 'ask', 'later'].map((id) => ({ ...declared, id })) };
   const calls = [];
-  const result = await dispatchPlan({ plan, config, selectRouteImpl: () => route, executeImpl: async ({ task: current }) => {
+  const result = await dispatchPlan({ plan, config, cwd: await mkdtemp(path.join(os.tmpdir(), 'aorch-continuation-')), selectRouteImpl: () => route, executeImpl: async ({ task: current }) => {
     calls.push(current.id);
     if (current.id === 'later') throw new Error('Provider temporarily unavailable');
     return { route, receipt: { status: 'complete', summary: 'Completed work evidence' } };
@@ -110,7 +110,7 @@ test('a failed continuation can explicitly resume its new result without replayi
   assert.deepEqual(retry.tasks.map((entry) => entry.id), ['later']);
   assert.match(retry.tasks[0].objective, /Completed work evidence/);
   assert.match(retry.tasks[0].objective, /Provider temporarily unavailable/);
-  await dispatchPlan({ plan: retry, config, selectRouteImpl: () => route, executeImpl: async ({ task: current }) => { calls.push(current.id); return { route }; } });
+  await dispatchPlan({ plan: retry, config, cwd: await mkdtemp(path.join(os.tmpdir(), 'aorch-continuation-')), selectRouteImpl: () => route, executeImpl: async ({ task: current }) => { calls.push(current.id); return { route }; } });
   assert.deepEqual(calls, ['done', 'ask', 'later', 'later']);
 });
 

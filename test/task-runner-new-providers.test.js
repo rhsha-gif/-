@@ -52,7 +52,7 @@ function config(adapter) {
     providers: [{ id: adapter, adapter, enabled: true, executable: adapter === 'antigravity' ? 'agy' : 'grok' }],
     models: [{
       id: `${adapter}-fixture`, provider: adapter,
-      model: adapter === 'antigravity' ? 'gemini-3.8-flash-high' : 'grok-4.6', enabled: true,
+      model: adapter === 'antigravity' ? 'gemini-3.8-flash-high' : 'grok-4.7', enabled: true,
       roles: ['executor'], taskKinds: ['implementation'], maturity: 'stable',
       quality: { default: 0.8, implementation: 0.8 }, tokenIndex: 1, latencyIndex: 1,
       efforts: [{

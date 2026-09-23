@@ -42,7 +42,7 @@ export async function dispatchPlan({ plan, config, observations = [], cwd = proc
         if (!families.length) throw new Error(`No known model family for independence reference ${dependency}`);
         task.forbiddenModelFamilies = [...new Set([...(task.forbiddenModelFamilies ?? []), ...families])];
       }
-      route = selectRouteImpl({ task, catalog: config, observations, quota: null });
+      route = selectRouteImpl({ task, catalog: config, observations });
       const adapter = config.providers?.find((entry) => entry.id === route.provider)?.adapter;
       if (!adapter) throw new Error(`Unknown provider in route: ${route.provider}`);
       agent = roleAgentName({ config, agentRole: task.agentRole, agentId: task.agentId, adapter });

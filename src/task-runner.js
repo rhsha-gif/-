@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { forceRoute, selectRoute } from './router.js';
 import { createReadinessContext, selectReadyRoute } from './provider-readiness.js';
-import { readAllProviderQuotas } from './quota.js';
 import { writeJsonAtomic } from './fs-util.js';
 import { selectCapabilities } from './capabilities.js';
 import { providerById } from './config.js';
@@ -232,21 +231,9 @@ export async function executeTask({
   resolveCommandSpecImpl = resolveProviderCommandSpec
 }) {
   task = validateTask(task, { forExecution: true });
-  // Forced routes (escalation) skip the quota read entirely — the ladder
-  // bypasses every eligibility signal, so probing would be pure latency.
-  // A dry run reads the cache without refreshing it: previewing a command
-  // must stay fast and side-effect free.
-  const quota = forcedRoute
-    ? null
-    : await readAllProviderQuotas(config.providers, {
-      stateRoot,
-      ttlMs: (config.routing?.quota?.cacheTtlMinutes ?? 5) * 60_000,
-      refresh: !dryRun,
-      cwd
-    });
-  const route = !dryRun ? await selectReadyRoute({ task, config, observations, quota, cwd, forcedRoute, context: readinessContext }) : forcedRoute
+  const route = !dryRun ? await selectReadyRoute({ task, config, observations, cwd, forcedRoute, context: readinessContext }) : forcedRoute
     ? forceRoute({ catalog: config, task, profileId: forcedRoute.profileId, effort: forcedRoute.effort })
-    : selectRoute({ task, catalog: config, observations, quota });
+    : selectRoute({ task, catalog: config, observations });
   const provider = providerById(config, route.provider);
   const capabilities = selectCapabilities({
     requestedIds: task.capabilityIds ?? [],

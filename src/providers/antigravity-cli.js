@@ -20,6 +20,17 @@ const HEADLESS_CONSTRAINTS =
   'Antigravity headless constraint: do not call run_command or any subagent, delegation, or inter-agent tool. ' +
   'Use file and search tools directly. Do not run the listed verification commands yourself; the parent wrapper runs them after this receipt.';
 
+// Gemini slugs carry the thinking level as a suffix, and agy's --effort is the
+// same axis (antigravity.google/docs/cli/headless). The catalog stores the base
+// slug; the route effort picks the suffix, so the two can never disagree.
+// Anything not in SUBSCRIPTION_MODELS after composition (e.g. a pro model with
+// an effort it does not offer) fails closed below.
+const SUFFIXED_FAMILIES = /^gemini-[\d.]+-(?:flash|pro)$/;
+
+export function resolveAntigravityModel(model, effort) {
+  return SUFFIXED_FAMILIES.test(model) ? `${model}-${effort}` : model;
+}
+
 function protocolError(message) {
   const error = new Error(`Antigravity protocol error: ${message}`);
   error.failureKind = 'protocol';
@@ -98,8 +109,9 @@ export function buildAntigravityCommand({
   if (!route?.model || !route?.effort) throw new TypeError('route.model and route.effort are required');
   if (!schemaPath) throw new TypeError('schemaPath is required');
   if (!cwd) throw new TypeError('cwd is required');
-  if (!SUBSCRIPTION_MODELS.has(route.model)) {
-    throw new Error(`Antigravity model ${route.model} is not in the verified subscription model catalog`);
+  const model = resolveAntigravityModel(route.model, route.effort);
+  if (!SUBSCRIPTION_MODELS.has(model)) {
+    throw new Error(`Antigravity model ${model} is not in the verified subscription model catalog`);
   }
   const instructions = agentInstructions ? `${agentInstructions.trim()}\n\n${HEADLESS_CONSTRAINTS}` : HEADLESS_CONSTRAINTS;
   const content = `${instructions}\n\n${prompt}`;
@@ -108,9 +120,10 @@ export function buildAntigravityCommand({
     '--output-format', 'stream-json',
     '--json-schema', schemaPath,
     '--add-dir', cwd,
-    '--model', route.model,
-    // Antigravity Sonnet 4.6 rejects the CLI effort option.
-    ...(route.model === 'claude-sonnet-4-6' ? [] : ['--effort', route.effort]),
+    '--model', model,
+    // Suffixed Gemini slugs already encode the effort; Antigravity Sonnet 4.6
+    // rejects the CLI effort option.
+    ...(model !== route.model || model === 'claude-sonnet-4-6' ? [] : ['--effort', route.effort]),
     '--mode', write ? 'accept-edits' : 'plan',
     '--sandbox'
   ];

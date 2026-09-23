@@ -7,7 +7,6 @@ const ROUTE_METRICS = ['quality', 'tokens', 'latency'];
 const TASK_COMPLEXITIES = ['low', 'standard', 'high', 'critical'];
 const RISK_TIERS = ['low', 'standard', 'high', 'critical'];
 const ADAPTER_MATURITIES = ['stable', 'experimental'];
-const QUOTA_GATES = ['premium', 'soft'];
 export const DEFAULT_CONFIG_PATH = path.join(PACKAGE_ROOT, 'config', 'aorch.config.json');
 
 function assertArray(value, name) {
@@ -187,8 +186,6 @@ function validateRouting(input = {}) {
     throw new RangeError('routing.criticalMinimumSamples must be a non-negative integer');
   }
 
-  const quota = validateRoutingQuota(input.quota);
-
   return {
     ...input,
     ...tolerances,
@@ -196,43 +193,9 @@ function validateRouting(input = {}) {
     priorWeight,
     uncertaintyPenalty,
     criticalMinimumSamples,
-    quota,
     defaultPriorities: [...defaultPriorities],
     selectionPolicy: input.selectionPolicy ?? 'task-specific-priority-order'
   };
-}
-
-// Thresholds for the quota routing signal. Always normalized (defaults apply
-// even when the block is absent) so the router and the cache layer never need
-// their own fallbacks to agree on.
-function validateRoutingQuota(input) {
-  if (input === undefined) {
-    return { softThresholdPercent: 40, hardThresholdPercent: 10, premiumThresholdPercent: 60, cacheTtlMinutes: 5 };
-  }
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    throw new TypeError('routing.quota must be an object');
-  }
-  const softThresholdPercent = input.softThresholdPercent ?? 40;
-  const hardThresholdPercent = input.hardThresholdPercent ?? 10;
-  for (const [field, value] of Object.entries({ softThresholdPercent, hardThresholdPercent })) {
-    if (!Number.isFinite(value) || value < 0 || value > 100) {
-      throw new RangeError(`routing.quota.${field} must be a number between 0 and 100`);
-    }
-  }
-  if (hardThresholdPercent > softThresholdPercent) {
-    throw new RangeError('routing.quota.hardThresholdPercent must not exceed softThresholdPercent');
-  }
-  // The default tracks a raised soft threshold so an implicit premium floor
-  // can never sit below the explicit soft one.
-  const premiumThresholdPercent = input.premiumThresholdPercent ?? Math.max(60, softThresholdPercent);
-  if (!Number.isFinite(premiumThresholdPercent) || premiumThresholdPercent < 0 || premiumThresholdPercent > 100) {
-    throw new RangeError('routing.quota.premiumThresholdPercent must be a number between 0 and 100');
-  }
-  if (premiumThresholdPercent < softThresholdPercent) {
-    throw new RangeError('routing.quota.premiumThresholdPercent must not be below softThresholdPercent');
-  }
-  const cacheTtlMinutes = nonNegativeNumber(input.cacheTtlMinutes, 'routing.quota.cacheTtlMinutes', 5);
-  return { ...input, softThresholdPercent, hardThresholdPercent, premiumThresholdPercent, cacheTtlMinutes };
 }
 
 // Ladders are same-provider by design: cross-provider fallback is a separate
@@ -252,25 +215,39 @@ function validateEscalation(input = {}, providers, models) {
   }
   const providerIds = new Set(providers.map((provider) => provider.id));
   const modelById = new Map(models.map((model) => [model.id, model]));
+  const checkStep = (field, providerId, step) => {
+    const profile = modelById.get(step?.profileId);
+    if (!profile) {
+      throw new Error(`escalation.${field}.${providerId} references unknown profile ${step?.profileId}`);
+    }
+    if (profile.provider !== providerId) {
+      throw new Error(`escalation.${field}.${providerId} step ${step.profileId} belongs to provider ${profile.provider}`);
+    }
+    if (!(profile.efforts ?? []).some((effort) => effort.name === step.effort)) {
+      throw new Error(`escalation.${field}.${providerId} step ${step.profileId} references unknown effort ${step.effort}`);
+    }
+  };
   for (const [providerId, steps] of Object.entries(ladders)) {
     if (!providerIds.has(providerId)) {
       throw new Error(`escalation.ladders references unknown provider ${providerId}`);
     }
     assertArray(steps, `escalation.ladders.${providerId}`);
-    for (const step of steps) {
-      const profile = modelById.get(step?.profileId);
-      if (!profile) {
-        throw new Error(`escalation.ladders.${providerId} references unknown profile ${step?.profileId}`);
-      }
-      if (profile.provider !== providerId) {
-        throw new Error(`escalation.ladders.${providerId} step ${step.profileId} belongs to provider ${profile.provider}`);
-      }
-      if (!(profile.efforts ?? []).some((effort) => effort.name === step.effort)) {
-        throw new Error(`escalation.ladders.${providerId} step ${step.profileId} references unknown effort ${step.effort}`);
-      }
-    }
+    for (const step of steps) checkStep('ladders', providerId, step);
   }
-  return { ...input, maxAttempts, ladders };
+  // Optional per-provider diagnosis step: an apex model reads the failure
+  // before the ladder climbs. Checked like a ladder step because a typo here
+  // would otherwise disable diagnosis silently (it is non-fatal at run time).
+  const diagnosis = input.diagnosis ?? {};
+  if (!diagnosis || typeof diagnosis !== 'object' || Array.isArray(diagnosis)) {
+    throw new TypeError('escalation.diagnosis must be an object');
+  }
+  for (const [providerId, step] of Object.entries(diagnosis)) {
+    if (!providerIds.has(providerId)) {
+      throw new Error(`escalation.diagnosis references unknown provider ${providerId}`);
+    }
+    checkStep('diagnosis', providerId, step);
+  }
+  return { ...input, maxAttempts, ladders, diagnosis };
 }
 
 function validateQualityMap(quality, id) {
@@ -298,21 +275,6 @@ export function validateConfig(input) {
     }
     if (provider.adapter === 'generic' && (!provider.executable || !Array.isArray(provider.args))) {
       throw new Error(`Generic provider ${provider.id} requires executable and args`);
-    }
-    if (provider.usageProbe !== undefined) {
-      const p = provider.usageProbe;
-      if (typeof p !== 'object' || p === null || Array.isArray(p)) {
-        throw new TypeError(`provider ${provider.id}.usageProbe must be an object`);
-      }
-      if (typeof p.command !== 'string' || p.command.trim() === '') {
-        throw new TypeError(`provider ${provider.id}.usageProbe.command must be a non-empty string`);
-      }
-      if (!Array.isArray(p.args) || p.args.some((arg) => typeof arg !== 'string')) {
-        throw new TypeError(`provider ${provider.id}.usageProbe.args must be an array of strings`);
-      }
-      if (typeof p.remainingField !== 'string' || p.remainingField.trim() === '') {
-        throw new TypeError(`provider ${provider.id}.usageProbe.remainingField must be a non-empty string`);
-      }
     }
     return {
       ...provider,
@@ -375,8 +337,11 @@ export function validateConfig(input) {
           throw new TypeError(`model ${model.id} effort ${effort.name}.taskKinds must be unique non-empty strings`);
         }
       }
-      if (effort.quotaGate !== undefined && !QUOTA_GATES.includes(effort.quotaGate)) {
-        throw new Error(`model ${model.id} effort ${effort.name}.quotaGate must be one of ${QUOTA_GATES.join(', ')}`);
+      // Quota-gated fan-out efforts (ultra, ultracode) were removed with the
+      // quota router on 2026-09-23. Ignoring the key would turn a stale
+      // installed copy's gated effort into an ordinary, top-scoring candidate.
+      if (effort.quotaGate !== undefined) {
+        throw new Error(`model ${model.id} effort ${effort.name} uses the removed quotaGate; run "aorch configure" to update this config`);
       }
     }
   }
