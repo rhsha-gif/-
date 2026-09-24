@@ -267,6 +267,17 @@
       ]
     },
     {
+      "id": "colab-operator",
+      "description": "Operate Google Colab runtimes through the colab CLI: provision CPU/GPU/TPU sessions, run Python scripts or notebooks on the remote VM, sync files, install packages and export session history. Use when a task needs a GPU, more RAM or CPU than the local machine, an isolated Python sandbox, or an offloaded batch job (backtests, parameter sweeps, fine-tuning, PDF/embedding pipelines). Do not use for interactive REPL/console/Drive-mount work from a headless worker.",
+      "source": "skills/colab-operator",
+      "providers": [
+        "anthropic",
+        "openai",
+        "antigravity",
+        "grok"
+      ]
+    },
+    {
       "id": "dependency-audit",
       "description": "Check the need, compatibility and maintenance cost of a proposed new dependency.",
       "source": "skills/dependency-audit",
