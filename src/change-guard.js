@@ -11,6 +11,26 @@ export async function runGit(args, cwd) {
   );
 }
 
+// Paths the repository's ignore rules exclude. `git status` never reports
+// them, so a receipt that lists one (a downloaded log, a build artifact) would
+// otherwise read as an overclaim even though the worker did write it. Only
+// the claimed paths are checked, so this stays cheap. Any git failure (not a
+// repository, unknown path) yields an empty list and the guard falls back to
+// its strict reading.
+export async function gitIgnoredPaths({ cwd = process.cwd(), paths = [] } = {}) {
+  const candidates = [...new Set(paths.map(repoPath).filter(Boolean))];
+  if (candidates.length === 0) return [];
+  try {
+    // `-z` is only accepted together with `--stdin`; quotepath=false keeps
+    // non-ASCII paths readable in the line-separated output.
+    const result = await runGit(['-c', 'core.quotepath=false', 'check-ignore', '--', ...candidates], cwd);
+    if (result.exitCode !== 0) return [];
+    return result.stdout.split(/\r?\n/u).map(repoPath).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 function repoPath(value) {
   if (typeof value !== 'string' || value.trim() === '') return null;
   const slashed = value.replaceAll('\\', '/');
@@ -223,7 +243,7 @@ function ignoredPrefixes(paths, root) {
     .filter(Boolean);
 }
 
-export function evaluateChangeGuard({ task, receipt, before, after, ignoredPaths = [] }) {
+export function evaluateChangeGuard({ task, receipt, before, after, ignoredPaths = [], gitignoredFiles = [] }) {
   const rawClaims = Array.isArray(receipt?.filesChanged) ? receipt.filesChanged : [];
   const invalidClaimedFiles = rawClaims.filter((file) => repoPath(file) === null).sort();
   const claimedFiles = [...new Set(rawClaims.map(repoPath).filter(Boolean))].sort();
@@ -242,8 +262,12 @@ export function evaluateChangeGuard({ task, receipt, before, after, ignoredPaths
     : [];
   const actualSet = new Set(actualFiles);
   const claimedSet = new Set(claimedFiles);
+  const gitignoredSet = new Set(gitignoredFiles.map(repoPath).filter(Boolean));
   const unclaimedFiles = actualFiles.filter((file) => !claimedSet.has(file));
-  const overclaimedFiles = claimedFiles.filter((file) => !actualSet.has(file));
+  // A claimed path that Git ignores cannot show up in the delta, so it is
+  // reported separately as a warning rather than counted as an overclaim.
+  const ignoredClaimedFiles = claimedFiles.filter((file) => !actualSet.has(file) && gitignoredSet.has(file));
+  const overclaimedFiles = claimedFiles.filter((file) => !actualSet.has(file) && !gitignoredSet.has(file));
   const write = task?.write === true;
   const allowedScope = Array.isArray(task?.allowedScope) ? task.allowedScope : [];
   const forbiddenScope = Array.isArray(task?.forbiddenScope) ? task.forbiddenScope : [];
@@ -291,6 +315,7 @@ export function evaluateChangeGuard({ task, receipt, before, after, ignoredPaths
     invalidClaimedFiles,
     unclaimedFiles,
     overclaimedFiles,
+    ignoredClaimedFiles,
     outOfScopeFiles,
     forbiddenFiles,
     readOnlyFiles

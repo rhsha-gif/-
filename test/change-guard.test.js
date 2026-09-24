@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { captureGitSnapshot, evaluateChangeGuard } from '../src/change-guard.js';
+import { captureGitSnapshot, evaluateChangeGuard, gitIgnoredPaths } from '../src/change-guard.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -311,4 +311,50 @@ test('absolute and parent-traversal receipt claims fail closed', async (t) => {
 
   assert.equal(result.passed, false);
   assert.deepEqual(result.invalidClaimedFiles, ['../outside.js', 'C:\\outside.js']);
+});
+
+test('a receipt claim for a gitignored path is a warning, not an overclaim', async (t) => {
+  const cwd = await repository(t);
+  await writeFile(path.join(cwd, '.gitignore'), '*.log\n');
+  await git(cwd, 'add', '.gitignore');
+  await git(
+    cwd,
+    '-c', 'user.name=Adaptive Orchestrator',
+    '-c', 'user.email=aorch@example.invalid',
+    'commit', '--quiet', '-m', 'ignore logs'
+  );
+  const before = await captureGitSnapshot({ cwd });
+  await writeFile(path.join(cwd, 'src', 'allowed.js'), 'export const value = 2;\n');
+  await writeFile(path.join(cwd, 'src', 'run.log'), 'downloaded\n');
+  const after = await captureGitSnapshot({ cwd });
+
+  const claims = ['src/allowed.js', 'src/run.log'];
+  const gitignoredFiles = await gitIgnoredPaths({ cwd, paths: claims });
+  assert.deepEqual(gitignoredFiles, ['src/run.log']);
+
+  const result = evaluateChangeGuard({
+    task: writeTask(),
+    receipt: { filesChanged: claims },
+    before,
+    after,
+    gitignoredFiles
+  });
+
+  assert.equal(result.passed, true);
+  assert.deepEqual(result.actualFiles, ['src/allowed.js']);
+  assert.deepEqual(result.overclaimedFiles, []);
+  assert.deepEqual(result.ignoredClaimedFiles, ['src/run.log']);
+
+  // Without the gitignore evidence the strict reading still applies.
+  const strict = evaluateChangeGuard({ task: writeTask(), receipt: { filesChanged: claims }, before, after });
+  assert.equal(strict.passed, false);
+  assert.deepEqual(strict.overclaimedFiles, ['src/run.log']);
+});
+
+test('gitIgnoredPaths reports nothing for tracked paths, empty claims, or a non-repository', async (t) => {
+  const cwd = await repository(t);
+  assert.deepEqual(await gitIgnoredPaths({ cwd, paths: ['src/allowed.js', '../outside.js'] }), []);
+  assert.deepEqual(await gitIgnoredPaths({ cwd, paths: [] }), []);
+  const plain = await temporaryDirectory(t, 'aorch-change-guard-plain-');
+  assert.deepEqual(await gitIgnoredPaths({ cwd: plain, paths: ['anything.log'] }), []);
 });

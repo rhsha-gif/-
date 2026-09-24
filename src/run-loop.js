@@ -6,7 +6,7 @@ import { runVerificationCommands } from './verify.js';
 import { appendObservation } from './observations.js';
 import { detectRateLimit, setLimit, DEFAULT_LIMIT_MINUTES } from './limits.js';
 import { writeJsonAtomic } from './fs-util.js';
-import { captureGitSnapshot, evaluateChangeGuard } from './change-guard.js';
+import { captureGitSnapshot, evaluateChangeGuard, gitIgnoredPaths } from './change-guard.js';
 import { normalizeReceiptInputRequest } from './receipts.js';
 import { modelFamily } from './model-family.js';
 import { forceRoute } from './router.js';
@@ -180,7 +180,8 @@ export async function executeWithVerification({
   appendObservationImpl = appendObservation,
   setLimitImpl = setLimit,
   captureGitSnapshotImpl = captureGitSnapshot,
-  evaluateChangeGuardImpl = evaluateChangeGuard
+  evaluateChangeGuardImpl = evaluateChangeGuard,
+  gitIgnoredPathsImpl = gitIgnoredPaths
 }) {
   const passthrough = { config, observations, cwd, readinessContext, ...(timeoutMs === undefined ? {} : { timeoutMs }) };
   if (dryRun) return executeTaskImpl({ task, ...passthrough, dryRun: true });
@@ -297,12 +298,14 @@ export async function executeWithVerification({
     }
     triedRoutes.add(`${execution.route.profileId}:${execution.route.effort}`);
     const afterSnapshot = await captureGitSnapshotImpl({ cwd });
+    const gitignoredFiles = await gitIgnoredPathsImpl({ cwd, paths: Array.isArray(execution.receipt?.filesChanged) ? execution.receipt.filesChanged : [] });
     const changeGuard = evaluateChangeGuardImpl({
       task: currentTask,
       receipt: execution.receipt,
       before: beforeSnapshot,
       after: afterSnapshot,
-      ignoredPaths: [stateRoot]
+      ignoredPaths: [stateRoot],
+      gitignoredFiles
     });
     const evidencePath = path.join(execution.runDir, 'verification.json');
 
