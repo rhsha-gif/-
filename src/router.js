@@ -44,6 +44,44 @@ function providerSupportsCapabilities(provider, requestedIds, inventory, type) {
   });
 }
 
+// Why each required capability is unusable, per provider, so an empty
+// candidate set names the actual blocker (a stale user skill after a source
+// edit, a binding the product never installed) instead of pointing at the
+// inventory in general.
+function capabilityDiagnostics(task, catalog) {
+  const requested = [
+    ...(task.capabilityIds ?? []).map((id) => ({ id, type: null })),
+    ...(task.agentId ? [{ id: task.agentId, type: 'agent' }] : [])
+  ];
+  if (requested.length === 0) return [];
+  const providers = (catalog.providers ?? []).filter((provider) => provider.enabled !== false);
+  const lines = [];
+  for (const { id, type } of requested) {
+    const matches = (catalog.capabilities ?? []).filter((entry) => (type ? entry.type === type : entry.type !== 'agent') && entry.id === id);
+    if (matches.length === 0) { lines.push(`${id}: unknown (not in the inventory)`); continue; }
+    if (matches.length > 1) { lines.push(`${id}: ambiguous (${matches.length} inventory entries)`); continue; }
+    const capability = matches[0];
+    if (capability.enabled === false) { lines.push(`${id}: disabled`); continue; }
+    const states = providers.map((provider) => {
+      const key = providerBindingKey(provider);
+      const binding = capability.bindings?.[key];
+      const supported = capability.executionProviders ?? capability.providers ?? ['*'];
+      if (!(supported.includes('*') || supported.includes(key) || supported.includes(provider.id))) return `${provider.id}=unsupported`;
+      if (binding?.enabled === false) return `${provider.id}=binding-disabled`;
+      if (binding?.mode === 'bridge') return `${provider.id}=bridge`;
+      if (['conflict', 'stale', 'not-installed'].includes(binding?.syncStatus)) return `${provider.id}=${binding.syncStatus}`;
+      return `${provider.id}=ok`;
+    });
+    if (states.some((state) => !state.endsWith('=ok'))) {
+      const hint = states.some((state) => /=(stale|conflict|not-installed)$/u.test(state))
+        ? '; run aorch update --user or aorch update --project <path> to resync'
+        : '';
+      lines.push(`${id}: ${states.join(', ')}${hint}`);
+    }
+  }
+  return lines;
+}
+
 function providerMetadata(catalog, providerId) {
   // A catalog may omit provider metadata entirely; the CLI path cannot reach
   // this fallback because validateConfig rejects models that reference
@@ -313,7 +351,8 @@ export function selectRoute({ task, catalog, observations = [], now = new Date()
   // Report generic ineligibility before the critical challenger gate so an
   // empty candidate set is not misattributed to model maturity.
   if (candidates.length === 0) {
-    throw new Error(`No eligible route for task ${task.id ?? '<unknown>'}. Check aorch inventory, provider limits and required agent/capabilities${task.agentId ? ` (${task.agentId})` : ''}; enable the required provider or install/update its definitions before execution.`);
+    const diagnostics = capabilityDiagnostics(task, catalog);
+    throw new Error(`No eligible route for task ${task.id ?? '<unknown>'}. Check aorch inventory, provider limits and required agent/capabilities${task.agentId ? ` (${task.agentId})` : ''}; enable the required provider or install/update its definitions before execution.${diagnostics.length ? ` Capability state: ${diagnostics.join(' | ')}` : ''}`);
   }
 
   if (task.risk === 'critical') {

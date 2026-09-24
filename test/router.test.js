@@ -407,3 +407,32 @@ test('a rule that matches nothing leaves the decision unchanged', () => {
   assert.equal(ruled.profileId, plain.profileId);
   assert.equal(ruled.decision.allocation, null);
 });
+
+test('an empty candidate set names each required capability\'s binding state per provider', () => {
+  const catalog = {
+    routing: baseRouting,
+    providers: [
+      { id: 'anthropic', adapter: 'claude', enabled: true },
+      { id: 'openai', adapter: 'codex', enabled: true }
+    ],
+    capabilities: [
+      {
+        id: 'colab-operator', type: 'skill', enabled: true, providers: ['anthropic', 'openai'],
+        bindings: { anthropic: { syncStatus: 'stale' }, openai: { syncStatus: 'not-installed' } }
+      }
+    ],
+    models: [
+      model({ id: 'claude-general', provider: 'anthropic' }),
+      model({ id: 'codex-general', provider: 'openai' })
+    ]
+  };
+
+  assert.throws(
+    () => selectRoute({ task: { ...task, capabilityIds: ['colab-operator'] }, catalog, observations: [] }),
+    /No eligible route[\s\S]*Capability state: colab-operator: anthropic=stale, openai=not-installed; run aorch update --user/
+  );
+  assert.throws(
+    () => selectRoute({ task: { ...task, capabilityIds: ['missing-skill'] }, catalog, observations: [] }),
+    /missing-skill: unknown \(not in the inventory\)/
+  );
+});
