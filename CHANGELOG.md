@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-09-24 — Google Colab CLI 연결과 OCR 도그푸딩
+
+- **`colab-operator` 사용자 스킬**: Google Colab CLI(업스트림 `skills/colab-operator`, Apache-2.0, `NOTICE` 귀속)를 aorch 워커가 쓰는 스킬로 등록. 업스트림 규칙 위에 로컬 계약을 얹었다 — Windows에서는 `colab`이 WSL 셔틀이고 `--auth=adc`가 고정돼 있음, 경로는 WSL 형식, 세션 이름은 `aorch-<taskId>`, 장기 작업은 VM에서 `nohup`으로 띄우고 **포그라운드 루프**로 폴링(헤드리스 워커는 백그라운드 알림을 기다리거나 `sleep`을 부르면 partial로 끝난다 — 09-24 실측), 커널이 바쁠 때는 `console`로 점검, receipt는 `partial`이어도 `colab stop`. MinerU OCR 레시피 포함: T4에서 `--tier basic`(torch GPU)은 11쪽 30초, `--tier standard`는 VLM이 llama-cpp CPU로 돌아 13분에도 미완.
+- **라우터의 capability 상태 진단**: 후보가 0이면 "No eligible route"에 요구 capability마다 제공자별 상태(`stale`·`not-installed`·`conflict`·`bridge`·`unsupported`·`unknown`)와 재동기화 힌트를 붙인다. 스킬 원본만 고치고 `aorch update --user`를 안 한 뒤 원인 없이 막혔던 것을 09-24에 실측.
+- **change guard의 gitignored 신고**: receipt가 신고한 경로가 Git 무시 규칙에 걸려 델타에 없으면 `overclaimedFiles` 대신 `ignoredClaimedFiles`(경고)로 분류한다. 계획이 `out/parse.log` 다운로드를 요구했는데 `.gitignore`의 `*.log`가 그것을 감춰 실질 완료 태스크가 실패 처리되던 것을 09-24 도그푸딩에서 발견. 신고 경로만 `git check-ignore`로 확인하므로 비용은 없고, git 실패 시 기존 엄격 판정으로 되돌아간다.
+
 ### 2026-09-23 — Opus 5.5 · GPT-6 · Gemini 3.8 Flash
 
 - **모델 카탈로그**: Opus 5.5(`opus`)를 standard 복잡도에 `medium` effort로 개방. Codex는 `gpt-6-luna`·`gpt-6-sol`로 교체(challenger), `gpt-5.6-terra` 은퇴. Gemini 3.8 Flash는 base 슬러그 `gemini-3.8-flash`로 두고 effort가 사고 수준 접미사를 고르며 `--effort`는 보내지 않음. Flash의 검증 범위를 구현·테스트·문서로 확장. Grok 자동 프로필은 `grok-4.7`(평가 전용 프로필 삭제). `aorch configure`가 바뀐 모델 문자열·은퇴·누락 effort를 설치본에 반영.
