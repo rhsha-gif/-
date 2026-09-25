@@ -358,3 +358,21 @@ test('gitIgnoredPaths reports nothing for tracked paths, empty claims, or a non-
   const plain = await temporaryDirectory(t, 'aorch-change-guard-plain-');
   assert.deepEqual(await gitIgnoredPaths({ cwd: plain, paths: ['anything.log'] }), []);
 });
+
+test('a trailing-slash allowedScope entry matches files beneath the directory', async (t) => {
+  const cwd = await repository(t);
+  await mkdir(path.join(cwd, 'out'), { recursive: true });
+  const before = await captureGitSnapshot({ cwd });
+  await writeFile(path.join(cwd, 'out', 'result.md'), 'ok\n');
+  const after = await captureGitSnapshot({ cwd });
+
+  const result = evaluateChangeGuard({
+    task: writeTask({ allowedScope: ['out/'] }),
+    receipt: { filesChanged: ['out/result.md'] },
+    before,
+    after
+  });
+
+  assert.equal(result.passed, true, JSON.stringify(result));
+  assert.deepEqual(result.outOfScopeFiles, []);
+});

@@ -213,8 +213,10 @@ function globRegex(pattern) {
 
 function matchesScope(file, patterns) {
   return patterns.some((pattern) => {
-    const normalized = repoPath(pattern);
-    if (normalized === null) return false;
+    // A trailing slash ("out/") is how people write a directory; normalize
+    // keeps it, and "out//x" would never match, so strip it here.
+    const normalized = repoPath(pattern)?.replace(/\/+$/u, '') ?? null;
+    if (normalized === null || normalized === '') return false;
     // A pattern with no glob metacharacter names a path, not an exact-match
     // regex. Treat it as "this file or anything beneath it" so a bare directory
     // in forbiddenScope cannot fail open (and allowedScope stays consistent).
