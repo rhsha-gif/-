@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-25 — colab-operator 잡 드라이버
+
+- **`scripts/colab_job.py`**: 매니페스트 하나(`job.json`)로 세션 할당(가속기 후보 순서대로 시도, 전부 거절이면 blocked) → 휠 번들·패키지·requirements 설치 → 입력 업로드(원격 부모 디렉터리 선생성) → VM에서 `nohup` 분리 실행 → 폴링 → 출력 다운로드 → 세션 정지 → `job-receipt.json`. `--max-wait`로 반환하고 같은 매니페스트로 재호출하면 저장된 단계에서 재개하므로 셸 도구에 시간 제한이 있는 헤드리스 워커도 쓸 수 있다. 실패·타임아웃·후보 소진 시에도 `keep_on_failure`가 아니면 세션을 정지한다. `verify`는 status ok·출력 존재·`colab sessions`에서 세션 해제를 검사한다. 표준 라이브러리만 쓰며 가짜 `colab` 실행 파일로 단위 테스트 15건(`scripts/tests`). 09-25 인터뷰 결정: 사용자는 워커+리드, 범용 샌드박스만(워크로드 레시피 없음), 잡마다 새 세션, 가속기 후보 목록, 로컬 휠 번들 캐시.
+- **Windows 함정 두 개를 코드로 흡수**: `colab.cmd` 셔틀은 `cmd.exe`가 `%*`를 다시 파싱하므로 `mineru>=4.0,<5` 같은 인자가 리디렉션이 됐다 → `.cmd/.bat`이면 인자를 전부 큰따옴표로 감싼 명령줄을 만든다. cp949 콘솔에서 receipt 출력이 깨지지 않게 stdout/stderr를 UTF-8로 재설정. CLI가 오류 URL에 실어 보내는 런타임 프록시 토큰·JWT는 receipt에 저장하기 전에 가린다.
+- **change guard: 끝 슬래시 디렉터리 스코프**: `allowedScope`/`forbiddenScope`의 `out/`처럼 끝에 슬래시가 있는 항목이 정규화 후 `out//x`로 비교돼 한 번도 매치되지 않았다(allowed는 out-of-scope 오탐, forbidden은 fail-open). 슬래시를 벗겨 비교한다. 09-25 4라운드에서 실질 완료 태스크가 이 때문에 실패 처리되며 발견.
+- **SKILL.md 재작성**: 드라이버 중심(위치·매니페스트·명령·exit code·receipt·워커 계약)으로 줄이고, 업스트림 규칙은 드라이버가 못 하는 콘솔 점검·복구만 남김. 실측: MinerU basic OCR 11쪽을 드라이버로 3분 31초(세션 31초, 설치 8초, 업로드 14초, 실행 123초, 다운로드 13초, 정지 8초).
+
 ### 2026-09-24 — Google Colab CLI 연결과 OCR 도그푸딩
 
 - **`colab-operator` 사용자 스킬**: Google Colab CLI(업스트림 `skills/colab-operator`, Apache-2.0, `NOTICE` 귀속)를 aorch 워커가 쓰는 스킬로 등록. 업스트림 규칙 위에 로컬 계약을 얹었다 — Windows에서는 `colab`이 WSL 셔틀이고 `--auth=adc`가 고정돼 있음, 경로는 WSL 형식, 세션 이름은 `aorch-<taskId>`, 장기 작업은 VM에서 `nohup`으로 띄우고 **포그라운드 루프**로 폴링(헤드리스 워커는 백그라운드 알림을 기다리거나 `sleep`을 부르면 partial로 끝난다 — 09-24 실측), 커널이 바쁠 때는 `console`로 점검, receipt는 `partial`이어도 `colab stop`. MinerU OCR 레시피 포함: T4에서 `--tier basic`(torch GPU)은 11쪽 30초, `--tier standard`는 VLM이 llama-cpp CPU로 돌아 13분에도 미완.
