@@ -1,5 +1,7 @@
 # Adaptive Orchestrator
 
+> **해체됨 (2026-10-21).** 이 저장소는 더 이상 유지되지 않는 읽기 전용 아카이브입니다. 후속은 로컬 저장소 agent-kit(루프 스킬·워크플로 스킬·리뷰어, rulesync 배포)입니다. Dismantled 2026-10-21; successor: agent-kit, a local repo. 마지막 상태는 태그 `aorch-final`입니다.
+
 > Codex·Claude Code·Antigravity·Grok을 위한 공통 작업 판단·라우팅 런타임입니다. 품질과 안전 조건을 유지하며 필요한 작업만 분해·위임합니다. 공통 원본, 동기화, 제공자 호환성과 입력 후 재개는 [정의와 동기화](docs/definition-sync.md), 근거와 축소 결정은 [결정 기록](docs/harness-decisions-20260908.md)을 참고하세요.
 
 ## 네 CLI와 주간 평가

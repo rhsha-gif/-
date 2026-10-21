@@ -1,0 +1,2 @@
+# Redact unit-test fixture: a truncated JWT-shaped sample, not a live token (reviewed 2026-10-21).
+6b5bd7c42103e960f6bdaf2b3fdf0e10eb505bc0:integrations/user/skills/colab-operator/scripts/tests/test_colab_job.py:generic-api-key:232
